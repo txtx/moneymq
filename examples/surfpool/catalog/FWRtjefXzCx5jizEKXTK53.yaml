@@ -1,0 +1,116 @@
+id: FWRtjefXzCx5jizEKXTK53
+external_id: prod_SZntBhZXIkGUed
+sandbox_external_id: prod_Sb0uJ2v8Aiko8w
+name: Surfpool Pro
+description: Ideal for active teams shipping fast, or devs racing toward Colosseum deadlines.
+active: true
+metadata:
+  description: Best for fast-moving teams shipping real programs and preparing for launch.
+  features:
+    - feature_overview
+    - feature_surfnets
+    - feature_subgraph_deployment
+    - feature_subgraph_limits
+  feature_overview:
+    features:
+      - description: Simulate transactions and inspect on-chain state in a web UI.
+        key: studio
+        name: Surfpool Studio
+        value: "Yes"
+      - description: Deploy Solana programs using reproducible CLI configurations.
+        key: iac
+        name: Infrastructure-as-Code
+        value: "Yes"
+      - description: Get help with Studio, IaC, simulations, and indexing.
+        key: support
+        name: Support & Helpdesk
+        value: Email Support
+    title: Basics
+  feature_subgraph_limits:
+    features:
+      - description: Number of subgraphs being indexed
+        key: instances
+        name: GraphQL Subgraphs
+        value: "3 subgraphs"
+      - description: Max storage for your indexed subgraph data.
+        key: storage
+        name: Max Storage Limit
+        value: "10 GB"
+      - description: Handle GraphQL queries with on-demand serverless Lambdas.
+        key: limits
+        name: GraphQL Queries
+        value: "100k queries included"
+    title: ""
+  feature_subgraph_deployment:
+    features:
+      - description: Database and GraphQL endpoints deployments
+        key: baas
+        name: Backend-as-a-Service
+        value: "Yes"
+      - description: Serverless (AWS Lambda)
+        key: serverless
+        name: Serverless Infrastructure
+        value: "Yes"
+      - description: Geographically distributed with latency-based routing.
+        key: edge_optimized
+        name: Edge Optimized
+        value: "Yes"
+    title: Cloud Subgraph (alpha)
+  feature_surfnets:
+    features:
+      - description: Number of networks you can run in the cloud.
+        key: instances
+        name: Number of Networks
+        value: "3 networks"
+      - description: Request limits for Studio and hosted networks.
+        key: usage
+        name: API Usage
+        value: "3k/day, 60k/month"
+      - description: Use your own domain for hosted Surfnet endpoints.
+        key: custom_domains
+        name: Custom Domains
+        value: "No"
+    title: Cloud Surfnet
+created_at: 1751038439
+updated_at: 1761847544
+product_type: Service
+images: []
+statement_descriptor: null
+unit_label: null
+prices:
+  - id: S4o1CM4w3QMW65doVjNZna
+    external_id: null
+    sandbox_external_id: price_1RrNNGEnJqOnsxQ2JWtweXGh
+    active: true
+    currency: usd
+    unit_amount: 4900
+    pricing_type: recurring
+    recurring_interval: month
+    recurring_interval_count: 1
+    nickname: null
+    metadata: {}
+    created_at: 1754071690
+  - id: Mrs9zjx4RCnTnbv2KuXUuo
+    external_id: null
+    sandbox_external_id: price_1RfpABEnJqOnsxQ2iRUPHPss
+    active: false
+    currency: usd
+    unit_amount: 4500
+    pricing_type: recurring
+    recurring_interval: month
+    recurring_interval_count: 1
+    nickname: null
+    metadata: {}
+    created_at: 1751318575
+  - id: "8E1VVVPH2TfrxwLBQ3iRdB"
+    external_id: null
+    sandbox_external_id: price_1ReeHsEnJqOnsxQ2b7WvLHJw
+    active: false
+    currency: usd
+    unit_amount: 3500
+    pricing_type: recurring
+    recurring_interval: month
+    recurring_interval_count: 1
+    nickname: null
+    metadata: {}
+    created_at: 1751038440
