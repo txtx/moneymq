@@ -512,13 +512,19 @@ impl SyncCommand {
             match action {
                 SyncAction::Pull => {
                     // Remote is newer or has changes - overwrite local
-                    let filename = format!("{}.yaml", remote_product.id);
+                    // But preserve sandbox_external_id from local if it exists
+                    let mut product_to_save = remote_product.clone();
+                    if let Some(local) = local_product {
+                        product_to_save.sandbox_external_id = local.sandbox_external_id.clone();
+                    }
+
+                    let filename = format!("{}.yaml", product_to_save.id);
                     let file_path = catalog_dir.join(&filename);
 
-                    let yaml_content = serde_yml::to_string(&remote_product).map_err(|e| {
+                    let yaml_content = serde_yml::to_string(&product_to_save).map_err(|e| {
                         format!(
                             "Failed to serialize product {} to YAML: {}",
-                            remote_product.id, e
+                            product_to_save.id, e
                         )
                     })?;
 
@@ -719,7 +725,11 @@ impl SyncCommand {
                     if let Some(updated_product) =
                         updated_catalog.products.iter().find(|p| p.id == local.id)
                     {
-                        let yaml_content = serde_yml::to_string(&updated_product)
+                        // Preserve sandbox_external_id from local
+                        let mut product_to_save = updated_product.clone();
+                        product_to_save.sandbox_external_id = local.sandbox_external_id.clone();
+
+                        let yaml_content = serde_yml::to_string(&product_to_save)
                             .map_err(|e| format!("Failed to serialize updated product: {}", e))?;
 
                         fs::write(&file_path, yaml_content).map_err(|e| {

@@ -1,31 +1,10 @@
 id: FWRtjefXzCx5jizEKXTK53
 external_id: prod_SZntBhZXIkGUed
-sandbox_external_id: prod_Sb0uJ2v8Aiko8w
+sandbox_external_id: null
 name: Surfpool Pro
 description: Ideal for active teams shipping fast, or devs racing toward Colosseum deadlines.
 active: true
 metadata:
-  description: Best for fast-moving teams shipping real programs and preparing for launch.
-  features:
-    - feature_overview
-    - feature_surfnets
-    - feature_subgraph_deployment
-    - feature_subgraph_limits
-  feature_overview:
-    features:
-      - description: Simulate transactions and inspect on-chain state in a web UI.
-        key: studio
-        name: Surfpool Studio
-        value: "Yes"
-      - description: Deploy Solana programs using reproducible CLI configurations.
-        key: iac
-        name: Infrastructure-as-Code
-        value: "Yes"
-      - description: Get help with Studio, IaC, simulations, and indexing.
-        key: support
-        name: Support & Helpdesk
-        value: Email Support
-    title: Basics
   feature_subgraph_limits:
     features:
       - description: Number of subgraphs being indexed
@@ -41,6 +20,11 @@ metadata:
         name: GraphQL Queries
         value: "100k queries included"
     title: ""
+  features:
+    - feature_overview
+    - feature_surfnets
+    - feature_subgraph_deployment
+    - feature_subgraph_limits
   feature_subgraph_deployment:
     features:
       - description: Database and GraphQL endpoints deployments
@@ -55,7 +39,8 @@ metadata:
         key: edge_optimized
         name: Edge Optimized
         value: "Yes"
-    title: Cloud Subgraph (alpha)
+    title: Cloud Subgraph (beta)
+  description: Best for fast-moving teams shipping real programs and preparing for launch.
   feature_surfnets:
     features:
       - description: Number of networks you can run in the cloud.
@@ -71,16 +56,31 @@ metadata:
         name: Custom Domains
         value: "No"
     title: Cloud Surfnet
+  feature_overview:
+    features:
+      - description: Simulate transactions and inspect on-chain state in a web UI.
+        key: studio
+        name: Surfpool Studio
+        value: "Yes"
+      - description: Deploy Solana programs using reproducible CLI configurations.
+        key: iac
+        name: Infrastructure-as-Code
+        value: "Yes"
+      - description: Get help with Studio, IaC, simulations, and indexing.
+        key: support
+        name: Support & Helpdesk
+        value: Email Support
+    title: Basics
 created_at: 1751038439
-updated_at: 1761847544
+updated_at: 1761849659
 product_type: Service
 images: []
 statement_descriptor: null
 unit_label: null
 prices:
   - id: S4o1CM4w3QMW65doVjNZna
-    external_id: null
-    sandbox_external_id: price_1RrNNGEnJqOnsxQ2JWtweXGh
+    external_id: price_1RrNNGEnJqOnsxQ2JWtweXGh
+    sandbox_external_id: null
     active: true
     currency: usd
     unit_amount: 4900
@@ -91,8 +91,8 @@ prices:
     metadata: {}
     created_at: 1754071690
   - id: Mrs9zjx4RCnTnbv2KuXUuo
-    external_id: null
-    sandbox_external_id: price_1RfpABEnJqOnsxQ2iRUPHPss
+    external_id: price_1RfpABEnJqOnsxQ2iRUPHPss
+    sandbox_external_id: null
     active: false
     currency: usd
     unit_amount: 4500
@@ -103,8 +103,8 @@ prices:
     metadata: {}
     created_at: 1751318575
   - id: "8E1VVVPH2TfrxwLBQ3iRdB"
-    external_id: null
-    sandbox_external_id: price_1ReeHsEnJqOnsxQ2b7WvLHJw
+    external_id: price_1ReeHsEnJqOnsxQ2b7WvLHJw
+    sandbox_external_id: null
     active: false
     currency: usd
     unit_amount: 3500
