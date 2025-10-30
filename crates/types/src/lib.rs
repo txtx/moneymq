@@ -72,8 +72,9 @@ where
         .map(|(key, value)| {
             let string_value = match value {
                 JsonValue::String(s) => s,
-                _ => serde_json::to_string(&value)
-                    .map_err(|e| D::Error::custom(format!("Failed to serialize metadata value: {}", e)))?,
+                _ => serde_json::to_string(&value).map_err(|e| {
+                    D::Error::custom(format!("Failed to serialize metadata value: {}", e))
+                })?,
             };
             Ok((key, string_value))
         })

@@ -173,8 +173,9 @@ fn display_diff(local: &Product, remote: &Product) {
     }
 
     if local.metadata != remote.metadata {
-        use moneymq_types::normalize_metadata_for_comparison;
         use std::collections::HashSet;
+
+        use moneymq_types::normalize_metadata_for_comparison;
 
         let local_normalized = normalize_metadata_for_comparison(&local.metadata);
         let remote_normalized = normalize_metadata_for_comparison(&remote.metadata);

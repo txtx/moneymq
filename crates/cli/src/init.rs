@@ -1,7 +1,8 @@
-use crate::Context;
+use std::{fs, path::Path};
+
 use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
-use std::fs;
-use std::path::Path;
+
+use crate::Context;
 
 #[derive(Debug, Clone, PartialEq, clap::Args)]
 pub struct InitCommand {}

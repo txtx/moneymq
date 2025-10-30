@@ -8,6 +8,7 @@ use clap::{Parser, Subcommand};
 mod catalog;
 mod init;
 mod manifest;
+mod run;
 
 use manifest::Manifest;
 
@@ -73,7 +74,8 @@ enum Command {
         #[clap(subcommand)]
         command: CatalogCommand,
     },
-    Run,
+    /// Start the local provider server
+    Run(run::RunCommand),
 }
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
@@ -152,12 +154,7 @@ async fn handle_command(opts: Opts, ctx: &Context) -> Result<(), String> {
     match opts.command {
         Command::Init(cmd) => cmd.execute(ctx).await,
         Command::Catalog { command } => handle_catalog_commands(command, ctx).await,
-        Command::Run => {
-            // start_local_validator
-            // start_local_facilitator
-            // start_provider
-            Ok(())
-        }
+        Command::Run(cmd) => cmd.execute(ctx).await,
     }
 }
 

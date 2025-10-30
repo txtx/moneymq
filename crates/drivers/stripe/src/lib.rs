@@ -2,7 +2,10 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use moneymq_types::{Catalog, Price as MoneymqPrice, Product as MoneymqProduct};
 use sha2::{Digest, Sha256};
-use stripe::{Client, ListPrices, ListProducts, Price as StripePrice, PriceId, Product as StripeProduct, ProductId};
+use stripe::{
+    Client, ListPrices, ListProducts, Price as StripePrice, PriceId, Product as StripeProduct,
+    ProductId,
+};
 
 /// Generate a base58-encoded ID from a Stripe product ID
 /// Uses SHA256 hash to ensure consistent length and valid base58 characters
@@ -38,8 +41,16 @@ fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqPrice
 
     MoneymqPrice {
         id: base58_id,
-        external_id: if is_production { Some(stripe_id.clone()) } else { None },
-        sandbox_external_id: if !is_production { Some(stripe_id) } else { None },
+        external_id: if is_production {
+            Some(stripe_id.clone())
+        } else {
+            None
+        },
+        sandbox_external_id: if !is_production {
+            Some(stripe_id)
+        } else {
+            None
+        },
         active: stripe_price.active.unwrap_or(true),
         currency: stripe_price.currency.unwrap_or_default().to_string(),
         unit_amount: stripe_price.unit_amount,
@@ -53,7 +64,11 @@ fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqPrice
 }
 
 /// Convert Stripe Product to MoneyMQ Product
-fn convert_product(stripe_product: StripeProduct, _is_production: bool, prices: Vec<MoneymqPrice>) -> MoneymqProduct {
+fn convert_product(
+    stripe_product: StripeProduct,
+    _is_production: bool,
+    prices: Vec<MoneymqPrice>,
+) -> MoneymqProduct {
     let created_at = stripe_product
         .created
         .and_then(|ts| DateTime::from_timestamp(ts, 0))
@@ -106,7 +121,11 @@ fn convert_product(stripe_product: StripeProduct, _is_production: bool, prices: 
 ///     Ok(())
 /// }
 /// ```
-pub async fn download_catalog(api_key: &str, provider_name: &str, is_production: bool) -> Result<Catalog> {
+pub async fn download_catalog(
+    api_key: &str,
+    provider_name: &str,
+    is_production: bool,
+) -> Result<Catalog> {
     let client = Client::new(api_key);
     let mut all_stripe_products = Vec::new();
     let mut starting_after: Option<ProductId> = None;
@@ -163,7 +182,7 @@ pub async fn download_catalog(api_key: &str, provider_name: &str, is_production:
                 price_response
                     .data
                     .into_iter()
-                    .map(|p| convert_price(p, is_production))
+                    .map(|p| convert_price(p, is_production)),
             );
 
             if !has_more {
@@ -171,7 +190,11 @@ pub async fn download_catalog(api_key: &str, provider_name: &str, is_production:
             }
         }
 
-        products.push(convert_product(stripe_product, is_production, product_prices));
+        products.push(convert_product(
+            stripe_product,
+            is_production,
+            product_prices,
+        ));
     }
 
     Ok(Catalog::new(products, provider_name.to_string()))
@@ -194,7 +217,8 @@ pub async fn update_product(
     use stripe::UpdateProduct;
 
     let client = Client::new(api_key);
-    let product_id: ProductId = external_id.parse()
+    let product_id: ProductId = external_id
+        .parse()
         .map_err(|e| anyhow::anyhow!("Invalid product ID: {}", e))?;
 
     let mut params = UpdateProduct::new();
