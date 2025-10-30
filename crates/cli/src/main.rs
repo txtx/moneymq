@@ -73,6 +73,7 @@ enum Command {
         #[clap(subcommand)]
         command: CatalogCommand,
     },
+    Run,
 }
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
@@ -151,6 +152,12 @@ async fn handle_command(opts: Opts, ctx: &Context) -> Result<(), String> {
     match opts.command {
         Command::Init(cmd) => cmd.execute(ctx).await,
         Command::Catalog { command } => handle_catalog_commands(command, ctx).await,
+        Command::Run => {
+            // start_local_validator
+            // start_local_facilitator
+            // start_provider
+            Ok(())
+        }
     }
 }
 

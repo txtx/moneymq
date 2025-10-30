@@ -894,6 +894,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "moneymq-core"
+version = "0.1.0"
+
+[[package]]
 name = "moneymq-driver-kit"
 version = "0.1.0"
 

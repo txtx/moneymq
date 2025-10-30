@@ -2,6 +2,7 @@
 [workspace]
 members = [
     "crates/cli",
+    "crates/core",
     "crates/drivers/kit",
     "crates/drivers/stripe",
     "crates/mcp",
@@ -23,3 +24,4 @@ categories = ["payments"]
 [workspace.dependencies]
 clap = { version = "4.5.51", default-features = false }
 clap_complete = { version = "4.5.60", default-features = false }
+axum-core = { version = "0.5.5" }
