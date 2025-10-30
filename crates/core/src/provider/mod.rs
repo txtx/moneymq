@@ -7,7 +7,7 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
-use moneymq_types::Product;
+use moneymq_types::{Meter, Product};
 use serde::{Deserialize, Serialize};
 
 /// Stripe-compatible list response
@@ -81,17 +81,57 @@ struct ListParams {
     product: Option<String>, // For prices filtered by product
 }
 
+/// Stripe-compatible billing meter response
+#[derive(Debug, Serialize)]
+struct StripeBillingMeter {
+    id: String,
+    object: String,
+    created: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    display_name: Option<String>,
+    event_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    customer_mapping: Option<StripeMeterCustomerMapping>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    default_aggregation: Option<StripeMeterAggregation>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value_settings: Option<StripeMeterValueSettings>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    updated: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct StripeMeterCustomerMapping {
+    #[serde(rename = "type")]
+    mapping_type: String,
+    event_payload_key: String,
+}
+
+#[derive(Debug, Serialize)]
+struct StripeMeterAggregation {
+    formula: String,
+}
+
+#[derive(Debug, Serialize)]
+struct StripeMeterValueSettings {
+    event_payload_key: String,
+}
+
 /// Application state
 #[derive(Clone)]
 pub struct ProviderState {
     pub products: Arc<Vec<Product>>,
+    pub meters: Arc<Vec<Meter>>,
     pub use_sandbox: bool,
 }
 
 impl ProviderState {
-    pub fn new(products: Vec<Product>, use_sandbox: bool) -> Self {
+    pub fn new(products: Vec<Product>, meters: Vec<Meter>, use_sandbox: bool) -> Self {
         Self {
             products: Arc::new(products),
+            meters: Arc::new(meters),
             use_sandbox,
         }
     }
@@ -289,6 +329,88 @@ async fn list_prices(
     })
 }
 
+/// Convert MoneyMQ Meter to Stripe Billing Meter
+fn to_stripe_meter(meter: &Meter, use_sandbox: bool) -> StripeBillingMeter {
+    let external_id = if use_sandbox {
+        meter.sandbox_external_id.as_ref()
+    } else {
+        meter.external_id.as_ref()
+    };
+
+    StripeBillingMeter {
+        id: external_id.cloned().unwrap_or_else(|| meter.id.clone()),
+        object: "billing.meter".to_string(),
+        created: meter.created_at.timestamp(),
+        display_name: meter.display_name.clone(),
+        event_name: meter.event_name.clone(),
+        status: meter.status.clone(),
+        customer_mapping: meter
+            .customer_mapping
+            .as_ref()
+            .map(|cm| StripeMeterCustomerMapping {
+                mapping_type: cm.mapping_type.clone(),
+                event_payload_key: cm.event_payload_key.clone(),
+            }),
+        default_aggregation: meter
+            .default_aggregation
+            .as_ref()
+            .map(|da| StripeMeterAggregation {
+                formula: da.formula.clone(),
+            }),
+        value_settings: meter
+            .value_settings
+            .as_ref()
+            .map(|vs| StripeMeterValueSettings {
+                event_payload_key: vs.event_payload_key.clone(),
+            }),
+        updated: meter.updated_at.map(|dt| dt.timestamp()),
+    }
+}
+
+/// List billing meters endpoint (GET /v1/billing/meters)
+async fn list_meters(
+    State(state): State<ProviderState>,
+    Query(params): Query<ListParams>,
+) -> impl IntoResponse {
+    let limit = params.limit.unwrap_or(10).min(100) as usize;
+
+    // Find starting position
+    let start_idx = if let Some(starting_after) = params.starting_after {
+        state
+            .meters
+            .iter()
+            .position(|m| {
+                let external_id = if state.use_sandbox {
+                    m.sandbox_external_id.as_ref()
+                } else {
+                    m.external_id.as_ref()
+                };
+                external_id.map(|id| id == &starting_after).unwrap_or(false)
+            })
+            .map(|idx| idx + 1)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let end_idx = (start_idx + limit).min(state.meters.len());
+    let meters_slice = &state.meters[start_idx..end_idx];
+
+    let stripe_meters: Vec<StripeBillingMeter> = meters_slice
+        .iter()
+        .map(|m| to_stripe_meter(m, state.use_sandbox))
+        .collect();
+
+    let has_more = end_idx < state.meters.len();
+
+    Json(ListResponse {
+        object: "list".to_string(),
+        data: stripe_meters,
+        has_more,
+        url: "/v1/billing/meters".to_string(),
+    })
+}
+
 /// Health check endpoint
 async fn health_check() -> impl IntoResponse {
     (StatusCode::OK, "OK")
@@ -297,15 +419,17 @@ async fn health_check() -> impl IntoResponse {
 /// Start the provider server
 pub async fn start_provider(
     products: Vec<Product>,
+    meters: Vec<Meter>,
     port: u16,
     use_sandbox: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let state = ProviderState::new(products, use_sandbox);
+    let state = ProviderState::new(products, meters, use_sandbox);
 
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/v1/products", get(list_products))
         .route("/v1/prices", get(list_prices))
+        .route("/v1/billing/meters", get(list_meters))
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);

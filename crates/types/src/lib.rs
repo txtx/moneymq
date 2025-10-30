@@ -218,3 +218,96 @@ impl Catalog {
         }
     }
 }
+
+/// Meter event - provider-agnostic meter representation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Meter {
+    /// Unique identifier for the meter (base58-encoded)
+    pub id: String,
+
+    /// External provider ID (e.g., Stripe meter ID)
+    pub external_id: Option<String>,
+
+    /// Sandbox provider ID (e.g., Stripe sandbox meter ID)
+    pub sandbox_external_id: Option<String>,
+
+    /// Display name for the meter
+    pub display_name: Option<String>,
+
+    /// Event name that this meter tracks
+    pub event_name: String,
+
+    /// Status of the meter (e.g., "active", "inactive")
+    pub status: Option<String>,
+
+    /// Customer mapping for the meter
+    pub customer_mapping: Option<MeterCustomerMapping>,
+
+    /// Default aggregation settings
+    pub default_aggregation: Option<MeterAggregation>,
+
+    /// Value settings for the meter
+    pub value_settings: Option<MeterValueSettings>,
+
+    /// When the meter was created
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub created_at: DateTime<Utc>,
+
+    /// When the meter was last updated
+    #[serde(with = "chrono::serde::ts_seconds_option")]
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// Customer mapping configuration for a meter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeterCustomerMapping {
+    /// Type of customer mapping (e.g., "by_id")
+    pub mapping_type: String,
+
+    /// Event payload key containing the customer identifier
+    pub event_payload_key: String,
+}
+
+/// Aggregation settings for a meter
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeterAggregation {
+    /// Formula for aggregation (e.g., "sum", "count")
+    pub formula: String,
+}
+
+/// Value settings for meter events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeterValueSettings {
+    /// Event payload key containing the value to aggregate
+    pub event_payload_key: String,
+}
+
+/// Collection of meters
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeterCollection {
+    /// List of meters
+    pub meters: Vec<Meter>,
+
+    /// Total number of meters
+    pub total_count: usize,
+
+    /// Provider source (e.g., "stripe", "stripe_sandbox")
+    pub provider: String,
+
+    /// When the collection was fetched
+    #[serde(with = "chrono::serde::ts_seconds")]
+    pub fetched_at: DateTime<Utc>,
+}
+
+impl MeterCollection {
+    /// Create a new meter collection
+    pub fn new(meters: Vec<Meter>, provider: String) -> Self {
+        let total_count = meters.len();
+        Self {
+            meters,
+            total_count,
+            provider,
+            fetched_at: Utc::now(),
+        }
+    }
+}

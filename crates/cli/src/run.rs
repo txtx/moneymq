@@ -1,6 +1,6 @@
 use std::fs;
 
-use moneymq_types::Product;
+use moneymq_types::{Meter, Product};
 
 use crate::Context;
 
@@ -19,8 +19,10 @@ impl RunCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         println!("🚀 Starting MoneyMQ Provider Server\n");
 
-        // Load products from catalog directory
-        let catalog_dir = ctx.manifest_path.join("catalog");
+        // Load products from billing/catalog directory
+        let billing_dir = ctx.manifest_path.join("billing");
+        let catalog_dir = billing_dir.join("catalog");
+
         if !catalog_dir.exists() {
             return Err(format!(
                 "Catalog directory not found: {}\nRun 'moneymq init' or 'moneymq catalog sync' first",
@@ -58,7 +60,42 @@ impl RunCommand {
             return Err("No products found in catalog directory".to_string());
         }
 
-        println!("✓ Loaded {} products\n", products.len());
+        println!("✓ Loaded {} products", products.len());
+
+        // Load meters from billing/metering directory
+        let metering_dir = billing_dir.join("metering");
+        let mut meters = Vec::new();
+
+        if metering_dir.exists() {
+            println!("📂 Loading meters from {}", metering_dir.display());
+
+            let meter_entries = fs::read_dir(&metering_dir)
+                .map_err(|e| format!("Failed to read metering directory: {}", e))?;
+
+            for entry in meter_entries {
+                let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+                let path = entry.path();
+
+                if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                    let content = fs::read_to_string(&path)
+                        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+
+                    match serde_yml::from_str::<Meter>(&content) {
+                        Ok(meter) => {
+                            meters.push(meter);
+                        }
+                        Err(e) => {
+                            eprintln!("⚠️  Warning: Failed to parse {}: {}", path.display(), e);
+                            eprintln!("    Skipping this file.");
+                        }
+                    }
+                }
+            }
+
+            println!("✓ Loaded {} meters\n", meters.len());
+        } else {
+            println!("⚠️  No metering directory found, starting without meters\n");
+        }
 
         let mode = if self.sandbox {
             "sandbox"
@@ -71,6 +108,7 @@ impl RunCommand {
         println!("📡 API Endpoints:");
         println!("  GET http://localhost:{}/v1/products", self.port);
         println!("  GET http://localhost:{}/v1/prices", self.port);
+        println!("  GET http://localhost:{}/v1/billing/meters", self.port);
         println!("  GET http://localhost:{}/health\n", self.port);
 
         println!("💡 Tip: Use this as your Stripe API endpoint for local development");
@@ -82,7 +120,7 @@ impl RunCommand {
         tracing_subscriber::fmt::init();
 
         // Start the server
-        moneymq_core::provider::start_provider(products, self.port, self.sandbox)
+        moneymq_core::provider::start_provider(products, meters, self.port, self.sandbox)
             .await
             .map_err(|e| format!("Failed to start server: {}", e))?;
 

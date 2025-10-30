@@ -1,0 +1,15 @@
+id: QSwAgyt25wWS5H9DC2VnzY
+external_id: mtr_61TXRkwaZI4PAzyj641EnJqOnsxQ2Jcu
+sandbox_external_id: mtr_test_61TXRkdqR17XQUilx41ISlaF29E0RWHY
+display_name: Surfnet RPC requests
+event_name: surfnet_rpc_requests
+status: active
+customer_mapping:
+  mapping_type: by_id
+  event_payload_key: stripe_customer_id
+default_aggregation:
+  formula: count
+value_settings:
+  event_payload_key: value
+created_at: 1761861266
+updated_at: 1761861266

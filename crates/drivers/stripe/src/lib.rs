@@ -1,6 +1,9 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use moneymq_types::{Catalog, Price as MoneymqPrice, Product as MoneymqProduct};
+use moneymq_types::{
+    Catalog, Meter as MoneymqMeter, MeterAggregation, MeterCollection, MeterCustomerMapping,
+    MeterValueSettings, Price as MoneymqPrice, Product as MoneymqProduct,
+};
 use sha2::{Digest, Sha256};
 use stripe::{
     Client, ListPrices, ListProducts, Price as StripePrice, PriceId, Product as StripeProduct,
@@ -242,6 +245,178 @@ pub async fn update_product(
     StripeProduct::update(&client, &product_id, params).await?;
 
     Ok(())
+}
+
+/// Create a new product in Stripe
+///
+/// # Arguments
+/// * `api_key` - Your Stripe secret API key
+/// * `local_product` - The local product to create
+///
+/// # Returns
+/// The Stripe product ID of the created product
+pub async fn create_product(api_key: &str, local_product: &MoneymqProduct) -> Result<String> {
+    use stripe::CreateProduct;
+
+    let client = Client::new(api_key);
+
+    // Name is required for CreateProduct
+    let name = local_product.name.as_deref().unwrap_or("Unnamed Product");
+    let mut params = CreateProduct::new(name);
+
+    // Set optional fields
+    if let Some(description) = &local_product.description {
+        params.description = Some(description.as_str());
+    }
+
+    params.active = Some(local_product.active);
+
+    // Set metadata
+    if !local_product.metadata.is_empty() {
+        params.metadata = Some(local_product.metadata.clone());
+    }
+
+    let created_product = StripeProduct::create(&client, params).await?;
+
+    Ok(created_product.id.to_string())
+}
+
+/// Download all billing meters from Stripe
+///
+/// # Arguments
+/// * `api_key` - Your Stripe secret API key
+/// * `provider_name` - Name of the provider (e.g., "stripe")
+/// * `is_production` - Whether this is production or sandbox
+///
+/// # Returns
+/// `MeterCollection` containing all meters
+///
+/// # Example
+/// ```no_run
+/// #[tokio::main]
+/// async fn main() -> anyhow::Result<()> {
+///     let api_key = std::env::var("STRIPE_SECRET_KEY")?;
+///     let meters = download_meters(&api_key, "stripe", true).await?;
+///     println!("Downloaded {} meters", meters.total_count);
+///     Ok(())
+/// }
+/// ```
+pub async fn download_meters(
+    api_key: &str,
+    provider_name: &str,
+    _is_production: bool,
+) -> Result<MeterCollection> {
+    let mut meters = Vec::new();
+
+    // Use reqwest to make a raw API call to Stripe billing meters endpoint
+    // The stripe crate doesn't have billing meter support yet
+    let http_client = reqwest::Client::new();
+
+    let response = http_client
+        .get("https://api.stripe.com/v1/billing/meters")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .query(&[("limit", "100")])
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!(
+            "Failed to fetch meters ({}): {}",
+            status,
+            error_body
+        ));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+
+    if let Some(data) = json.get("data").and_then(|d| d.as_array()) {
+        for meter_json in data {
+            if let Ok(meter) = convert_stripe_meter(meter_json, _is_production) {
+                meters.push(meter);
+            }
+        }
+    }
+
+    Ok(MeterCollection::new(meters, provider_name.to_string()))
+}
+
+/// Convert Stripe meter JSON to MoneyMQ Meter
+fn convert_stripe_meter(
+    meter_json: &serde_json::Value,
+    _is_production: bool,
+) -> Result<MoneymqMeter> {
+    let stripe_id = meter_json
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing meter ID"))?
+        .to_string();
+
+    let base58_id = generate_base58_id(&stripe_id);
+
+    let created = meter_json
+        .get("created")
+        .and_then(|v| v.as_i64())
+        .and_then(|ts| DateTime::from_timestamp(ts, 0))
+        .unwrap_or_else(|| Utc::now());
+
+    let updated = meter_json
+        .get("updated")
+        .and_then(|v| v.as_i64())
+        .and_then(|ts| DateTime::from_timestamp(ts, 0));
+
+    let display_name = meter_json
+        .get("display_name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let event_name = meter_json
+        .get("event_name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Missing event_name"))?
+        .to_string();
+
+    let status = meter_json
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Parse customer_mapping
+    let customer_mapping = meter_json.get("customer_mapping").and_then(|cm| {
+        let mapping_type = cm.get("type")?.as_str()?.to_string();
+        let event_payload_key = cm.get("event_payload_key")?.as_str()?.to_string();
+        Some(MeterCustomerMapping {
+            mapping_type,
+            event_payload_key,
+        })
+    });
+
+    // Parse default_aggregation
+    let default_aggregation = meter_json.get("default_aggregation").and_then(|da| {
+        let formula = da.get("formula")?.as_str()?.to_string();
+        Some(MeterAggregation { formula })
+    });
+
+    // Parse value_settings
+    let value_settings = meter_json.get("value_settings").and_then(|vs| {
+        let event_payload_key = vs.get("event_payload_key")?.as_str()?.to_string();
+        Some(MeterValueSettings { event_payload_key })
+    });
+
+    Ok(MoneymqMeter {
+        id: base58_id,
+        external_id: Some(stripe_id),
+        sandbox_external_id: None,
+        display_name,
+        event_name,
+        status,
+        customer_mapping,
+        default_aggregation,
+        value_settings,
+        created_at: created,
+        updated_at: updated,
+    })
 }
 
 #[cfg(test)]

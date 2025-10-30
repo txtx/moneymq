@@ -169,12 +169,17 @@ impl InitCommand {
                     println!("✓ Created Money.toml\n");
                 }
 
-                // Step 8: Create catalog directory
-                let catalog_path = ctx.manifest_path.join("catalog");
-                if !catalog_path.exists() {
-                    fs::create_dir(&catalog_path)
+                // Step 8: Create billing directory structure
+                let billing_path = ctx.manifest_path.join("billing");
+                let catalog_path = billing_path.join("catalog");
+                let metering_path = billing_path.join("metering");
+
+                if !billing_path.exists() {
+                    fs::create_dir_all(&catalog_path)
                         .map_err(|e| format!("Failed to create catalog directory: {}", e))?;
-                    println!("✓ Created catalog/ directory\n");
+                    fs::create_dir_all(&metering_path)
+                        .map_err(|e| format!("Failed to create metering directory: {}", e))?;
+                    println!("✓ Created billing/ directory structure\n");
                 }
 
                 // Step 9: Perform initial sync
@@ -271,10 +276,14 @@ impl InitCommand {
                 println!("\n📁 Created Files:");
                 println!("  • {} - Environment configuration", env_path.display());
                 println!("  • {} - Manifest file", manifest_toml_path.display());
-                println!("  • catalog/ - {} product YAML files", catalog.total_count);
+                println!(
+                    "  • billing/catalog/ - {} product YAML files",
+                    catalog.total_count
+                );
+                println!("  • billing/metering/ - meter definitions");
                 println!("\n📚 Next Steps:");
-                println!("  • Edit your product YAML files in catalog/");
-                println!("  • Run 'moneymq catalog sync' to push changes to Stripe");
+                println!("  • Edit your product YAML files in billing/catalog/");
+                println!("  • Run 'moneymq catalog sync' to sync with Stripe");
             }
             _ => return Err(format!("Unsupported provider: {}", provider)),
         }

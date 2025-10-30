@@ -1,0 +1,26 @@
+id: '7uBgzNVzbkVuYgyHy9jBFx'
+external_id: null
+sandbox_external_id: prod_TKjDGSFBTk6Z6Z
+name: Surfpool Studio - Lifetime license
+description: null
+active: true
+metadata: {}
+created_at: 1761861117
+updated_at: 1761861118
+product_type: Service
+images: []
+statement_descriptor: null
+unit_label: null
+prices:
+- id: DxbAjT6NZpHjHweHNZAehL
+  external_id: null
+  sandbox_external_id: price_1SO3lCISlaF29E0R1NkSl6pF
+  active: true
+  currency: usd
+  unit_amount: 19900
+  pricing_type: one_time
+  recurring_interval: null
+  recurring_interval_count: null
+  nickname: null
+  metadata: {}
+  created_at: 1761861118

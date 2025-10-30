@@ -334,8 +334,10 @@ pub struct SyncCommand {
 
 impl SyncCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
-        // Get the catalog directory path: <manifest-dir>/catalog/
-        let catalog_dir = ctx.manifest_path.join("catalog");
+        // Get the billing directory paths: <manifest-dir>/billing/catalog/ and <manifest-dir>/billing/metering/
+        let billing_dir = ctx.manifest_path.join("billing");
+        let catalog_dir = billing_dir.join("catalog");
+        let metering_dir = billing_dir.join("metering");
 
         // Load existing products from YAML files
         let mut local_products: HashMap<String, Product> = HashMap::new();
@@ -460,6 +462,9 @@ impl SyncCommand {
                             sandbox_catalog.total_count
                         );
 
+                        // Track which sandbox products were matched
+                        let mut matched_sandbox_ids = std::collections::HashSet::new();
+
                         // Match sandbox products to production products by name
                         let mut matched_count = 0;
                         for prod_product in &mut catalog.products {
@@ -472,6 +477,7 @@ impl SyncCommand {
                                 if let Some(sandbox_id) = &sandbox_product.external_id {
                                     prod_product.sandbox_external_id = Some(sandbox_id.clone());
                                     matched_count += 1;
+                                    matched_sandbox_ids.insert(sandbox_id.clone());
                                 }
                             }
                         }
@@ -481,6 +487,47 @@ impl SyncCommand {
                                 "✓ Matched {} products with sandbox equivalents",
                                 matched_count
                             );
+                        }
+
+                        // Find sandbox-only products (not in production)
+                        let sandbox_only: Vec<_> = sandbox_catalog
+                            .products
+                            .into_iter()
+                            .filter(|sp| {
+                                sp.external_id
+                                    .as_ref()
+                                    .map(|id| !matched_sandbox_ids.contains(id))
+                                    .unwrap_or(false)
+                            })
+                            .collect();
+
+                        if !sandbox_only.is_empty() {
+                            println!(
+                                "✓ Found {} sandbox-only products (not in production)",
+                                sandbox_only.len()
+                            );
+
+                            // Save sandbox-only products to disk with sandbox_external_id set
+                            for mut sandbox_product in sandbox_only {
+                                // Move external_id to sandbox_external_id since this is a sandbox product
+                                sandbox_product.sandbox_external_id =
+                                    sandbox_product.external_id.clone();
+                                sandbox_product.external_id = None; // No production ID yet
+
+                                let filename = format!("{}.yaml", sandbox_product.id);
+                                let file_path = catalog_dir.join(&filename);
+
+                                let yaml_content =
+                                    serde_yml::to_string(&sandbox_product).map_err(|e| {
+                                        format!("Failed to serialize sandbox product: {}", e)
+                                    })?;
+
+                                fs::write(&file_path, yaml_content).map_err(|e| {
+                                    format!("Failed to write sandbox product file: {}", e)
+                                })?;
+
+                                println!("  📥 Saved sandbox-only product: {}", filename);
+                            }
                         }
                     }
                     Err(e) => {
@@ -588,6 +635,151 @@ impl SyncCommand {
             self.handle_push_workflow(products_to_push, &provider_config, ctx, &catalog_dir)
                 .await?;
         }
+
+        // Check for sandbox-only products that need to be created in production
+        let sandbox_only_products: Vec<&Product> = local_products
+            .values()
+            .filter(|p| p.sandbox_external_id.is_some() && p.external_id.is_none())
+            .collect();
+
+        if !sandbox_only_products.is_empty() {
+            println!(
+                "\n🆕 Found {} sandbox-only products that can be created in production",
+                sandbox_only_products.len()
+            );
+
+            self.handle_create_workflow(
+                sandbox_only_products,
+                &provider_config,
+                &api_key,
+                &catalog_dir,
+            )
+            .await?;
+        }
+
+        // Sync meters
+        println!("\n📊 Syncing meters...");
+        self.sync_meters(&api_key, &provider_name, &metering_dir)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Sync meters from Stripe to local YAML files
+    async fn sync_meters(
+        &self,
+        api_key: &str,
+        provider_name: &str,
+        metering_dir: &std::path::Path,
+    ) -> Result<(), String> {
+        use moneymq_driver_stripe::download_meters;
+
+        // Download production meters from Stripe
+        let mut meter_collection = download_meters(api_key, provider_name, true)
+            .await
+            .map_err(|e| format!("Failed to download meters: {}", e))?;
+
+        println!(
+            "✓ Downloaded {} meters from production",
+            meter_collection.total_count
+        );
+
+        // Check for sandbox meters if sandbox is configured
+        let sandbox_api_key = env::var("STRIPE_SANDBOX_SECRET_KEY").ok();
+        if let Some(sandbox_key) = sandbox_api_key {
+            println!("Fetching sandbox meters to match...");
+
+            match download_meters(&sandbox_key, &format!("{}_sandbox", provider_name), false).await
+            {
+                Ok(sandbox_meter_collection) => {
+                    println!(
+                        "✓ Downloaded {} meters from sandbox",
+                        sandbox_meter_collection.total_count
+                    );
+
+                    // Track which sandbox meters were matched
+                    let mut matched_sandbox_ids = std::collections::HashSet::new();
+
+                    // Match sandbox meters to production meters by event_name
+                    let mut matched_count = 0;
+                    for prod_meter in &mut meter_collection.meters {
+                        if let Some(sandbox_meter) = sandbox_meter_collection
+                            .meters
+                            .iter()
+                            .find(|sm| sm.event_name == prod_meter.event_name)
+                        {
+                            if let Some(sandbox_id) = &sandbox_meter.external_id {
+                                prod_meter.sandbox_external_id = Some(sandbox_id.clone());
+                                matched_count += 1;
+                                matched_sandbox_ids.insert(sandbox_id.clone());
+                            }
+                        }
+                    }
+
+                    if matched_count > 0 {
+                        println!(
+                            "✓ Matched {} meters with sandbox equivalents",
+                            matched_count
+                        );
+                    }
+
+                    // Find sandbox-only meters (not in production)
+                    let sandbox_only: Vec<_> = sandbox_meter_collection
+                        .meters
+                        .into_iter()
+                        .filter(|sm| {
+                            sm.external_id
+                                .as_ref()
+                                .map(|id| !matched_sandbox_ids.contains(id))
+                                .unwrap_or(false)
+                        })
+                        .collect();
+
+                    if !sandbox_only.is_empty() {
+                        println!(
+                            "✓ Found {} sandbox-only meters (not in production)",
+                            sandbox_only.len()
+                        );
+
+                        // Add sandbox-only meters to the collection
+                        for mut sandbox_meter in sandbox_only {
+                            sandbox_meter.sandbox_external_id = sandbox_meter.external_id.clone();
+                            sandbox_meter.external_id = None;
+                            meter_collection.meters.push(sandbox_meter);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Warning: Failed to fetch sandbox meters: {}", e);
+                    eprintln!("    Continuing with production data only...");
+                }
+            }
+        }
+
+        // Create metering directory if it doesn't exist
+        if !metering_dir.exists() {
+            fs::create_dir_all(metering_dir)
+                .map_err(|e| format!("Failed to create metering directory: {}", e))?;
+            println!("✓ Created metering directory: {}", metering_dir.display());
+        }
+
+        // Save each meter as a YAML file
+        for meter in &meter_collection.meters {
+            let yaml_content = serde_yml::to_string(&meter)
+                .map_err(|e| format!("Failed to serialize meter {}: {}", meter.id, e))?;
+
+            let filename = format!("{}.yaml", meter.id);
+            let file_path = metering_dir.join(&filename);
+
+            fs::write(&file_path, yaml_content)
+                .map_err(|e| format!("Failed to write file {}: {}", file_path.display(), e))?;
+        }
+
+        println!(
+            "✓ Saved {} meter files to {}\n",
+            meter_collection.meters.len(),
+            metering_dir.display()
+        );
 
         Ok(())
     }
@@ -748,6 +940,85 @@ impl SyncCommand {
                     println!("  ⏭️  Skipped production update\n");
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Handle the creation workflow for sandbox-only products
+    async fn handle_create_workflow(
+        &self,
+        products: Vec<&Product>,
+        _provider_config: &crate::manifest::ProviderConfig,
+        production_api_key: &str,
+        catalog_dir: &std::path::Path,
+    ) -> Result<(), String> {
+        use dialoguer::Confirm;
+        use moneymq_driver_stripe::create_product;
+
+        println!("\n🔍 Reviewing sandbox-only products...\n");
+
+        for product in products {
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!("📦 {}", product.name.as_deref().unwrap_or("(unnamed)"));
+            println!();
+
+            if let Some(description) = &product.description {
+                println!("Description: {}", description);
+            }
+
+            println!("Active: {}", product.active);
+
+            if let Some(sandbox_id) = &product.sandbox_external_id {
+                println!("Sandbox ID: {}", sandbox_id);
+                println!(
+                    "Sandbox URL: https://dashboard.stripe.com/test/products/{}",
+                    sandbox_id
+                );
+            }
+
+            println!();
+
+            // Ask if user wants to create this product in production
+            let create = Confirm::new()
+                .with_prompt("Create this product in production?")
+                .default(false)
+                .interact()
+                .map_err(|e| format!("Failed to get confirmation: {}", e))?;
+
+            if !create {
+                println!("  ⏭️  Skipped\n");
+                continue;
+            }
+
+            // Create the product in production
+            println!("  ⏳ Creating product in production...");
+
+            let production_id = create_product(production_api_key, product)
+                .await
+                .map_err(|e| format!("Failed to create product: {}", e))?;
+
+            println!("  ✅ Product created successfully!");
+            println!("  🔗 Production ID: {}", production_id);
+            println!(
+                "  🔗 View at: https://dashboard.stripe.com/products/{}",
+                production_id
+            );
+
+            // Update local file with production external_id
+            let mut updated_product = product.clone();
+            updated_product.external_id = Some(production_id);
+
+            let filename = format!("{}.yaml", updated_product.id);
+            let file_path = catalog_dir.join(&filename);
+
+            let yaml_content = serde_yml::to_string(&updated_product)
+                .map_err(|e| format!("Failed to serialize updated product: {}", e))?;
+
+            fs::write(&file_path, yaml_content)
+                .map_err(|e| format!("Failed to write updated file: {}", e))?;
+
+            println!("  💾 Local file updated with production ID\n");
         }
 
         Ok(())
