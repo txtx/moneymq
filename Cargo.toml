@@ -1,0 +1,19 @@
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+description = "MoneyMQ is ..."
+license = "Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/txtx/moneymq"
+keywords = ["payments"]
+categories = ["payments"]
+
+[workspace]
+members = ["crates/cli"]
+exclude = ["examples/*"]
+default-members = ["crates/cli"]
+resolver = "2"
+
+[workspace.dependencies]
+clap = { version = "4.5.51", default-features = false }
+clap_complete = { version = "4.5.60", default-features = false }

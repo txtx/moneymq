@@ -1,0 +1,18 @@
+[package]
+name = "moneymq-cli"
+description = { workspace = true }
+readme = { workspace = true }
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[[bin]]
+name = "moneymq"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true, optional = true }
+clap_complete = { workspace = true, optional = true }
