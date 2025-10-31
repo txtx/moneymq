@@ -11,9 +11,14 @@ categories.workspace = true
 
 [dependencies]
 axum = "0.7"
-tokio = { version = "1", features = ["full"] }
+moneymq-types = { path = "../types" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-moneymq-types = { path = "../types" }
+solana-keypair = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+tokio = { version = "1", features = ["full"] }
+x402-rs = { workspace = true }
+tower-http = "0.6.6"
+url = "2.5.7"
+solana-client = "3.0.8"

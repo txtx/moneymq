@@ -22,6 +22,11 @@ keywords = ["payments"]
 categories = ["payments"]
 
 [workspace.dependencies]
+axum-core = { version = "0.5.5" }
 clap = { version = "4.5.51", default-features = false }
 clap_complete = { version = "4.5.60", default-features = false }
-axum-core = { version = "0.5.5" }
+solana-keypair = "3.0.1"
+x402-rs ={ git = "https://github.com/txtx/x402-rs.git", branch = "moneymq" }
+
+[patch.crates-io]
+# "x402-rs" = { path = "../x402-rs" }

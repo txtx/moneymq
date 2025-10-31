@@ -399,12 +399,12 @@ impl SyncCommand {
         })?;
 
         // Verify it's a Stripe provider
-        if provider_config.provider_type != "stripe" {
-            return Err(format!(
-                "Provider '{}' is type '{}', but this command requires a Stripe provider",
-                provider_name, provider_config.provider_type
-            ));
-        }
+        let stripe_config = provider_config.stripe_config().ok_or_else(|| {
+            format!(
+                "Provider '{}' is type {}, but this command requires a Stripe provider",
+                provider_name, provider_config
+            )
+        })?;
 
         // Get API key with priority:
         // 1. Command-line flag (--api-key)
@@ -418,7 +418,7 @@ impl SyncCommand {
                     Ok(key) => key,
                     Err(_) => {
                         // Try manifest file
-                        provider_config.stripe_config.api_key
+                        stripe_config.api_key
                             .as_ref()
                             .ok_or_else(|| {
                                 format!(
@@ -438,7 +438,7 @@ impl SyncCommand {
         );
 
         // Always sync from production (is_production = true)
-        let is_production = !provider_config.stripe_config.test_mode;
+        let is_production = !stripe_config.test_mode;
 
         // Download the production catalog
         let mut catalog = download_catalog(&api_key, &provider_name, is_production)
@@ -448,7 +448,7 @@ impl SyncCommand {
         println!("✓ Downloaded {} products from remote", catalog.total_count);
 
         // Check if we have a sandbox pointer configured in the manifest
-        if let Some(sandbox_provider_name) = &provider_config.stripe_config.sandbox {
+        if let Some(sandbox_provider_name) = &stripe_config.sandbox {
             // Try to get sandbox API key from environment
             let sandbox_api_key = env::var("STRIPE_SANDBOX_SECRET_KEY").ok();
 
@@ -799,8 +799,14 @@ impl SyncCommand {
             display_diff(local, remote);
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
+            let stripe_config = provider_config.stripe_config().ok_or_else(|| {
+                format!(
+                    "Provider '{}' is type {}, but this command requires a Stripe provider",
+                    ctx.provider, provider_config
+                )
+            })?;
             // Check if we have a sandbox provider configured in the manifest
-            let has_sandbox_config = provider_config.stripe_config.sandbox.is_some();
+            let has_sandbox_config = stripe_config.sandbox.is_some();
             let has_sandbox_key = env::var("STRIPE_SANDBOX_SECRET_KEY").is_ok();
 
             if has_sandbox_config && has_sandbox_key {
@@ -887,8 +893,7 @@ impl SyncCommand {
                         Some(key) => key.clone(),
                         None => match env::var("STRIPE_SECRET_KEY") {
                             Ok(key) => key,
-                            Err(_) => provider_config
-                                .stripe_config
+                            Err(_) => stripe_config
                                 .api_key
                                 .as_ref()
                                 .ok_or_else(|| format!("Production API key not found"))?
