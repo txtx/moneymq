@@ -1,13 +1,16 @@
 use std::fs;
 
-use moneymq_types::{Meter, Product};
+use moneymq_core::{facilitator::FacilitatorConfig, validator};
+use moneymq_types::Meter;
+use moneymq_types::Product;
+use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 
 use crate::Context;
 
 #[derive(Debug, Clone, PartialEq, clap::Args)]
 pub struct RunCommand {
     /// Port to run the server on
-    #[arg(short, long, default_value = "8488")]
+    #[arg(long, default_value = "8488")]
     pub port: u16,
 
     /// Use sandbox mode (serve sandbox external IDs)
@@ -118,6 +121,110 @@ impl RunCommand {
 
         // Initialize tracing
         tracing_subscriber::fmt::init();
+
+        let mut handles = None;
+        // Only start local facilitator server in sandbox mode
+        if self.sandbox {
+            let mut sandbox_x402_config = ctx
+                .manifest
+                .providers
+                .iter()
+                .filter_map(|(name, provider)| {
+                    provider.x402_config().and_then(|config| {
+                        if config.test_mode && config.local_facilitator.is_some() {
+                            Some((name.clone(), config.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            if sandbox_x402_config.len() > 1 {
+                println!(
+                    "⚠️  Warning: Multiple X402 sandbox providers found in manifest. Only the first local facilitator ({}) will be started.",
+                    sandbox_x402_config[0].0
+                );
+            }
+            if !sandbox_x402_config.is_empty() {
+                let (x402_name, x402_config) = sandbox_x402_config.remove(0);
+                let local_facilitator_config: FacilitatorConfig = x402_config
+                    .local_facilitator
+                    .unwrap()
+                    .try_into()
+                    .map_err(|e| {
+                        format!(
+                            "Failed to parse local facilitator config for provider '{}': {}",
+                            x402_name, e
+                        )
+                    })?;
+
+                let mut validator_handles = vec![];
+                if local_facilitator_config.provider_cache.is_none() {
+                    println!(
+                        "⚠️  Warning: No providers configured for local facilitator of provider '{}'. Facilitator will have not be started.",
+                        x402_name
+                    );
+                } else {
+                    for (_, network_provider) in local_facilitator_config
+                        .provider_cache
+                        .as_ref()
+                        .unwrap()
+                        .into_iter()
+                    {
+                        match network_provider {
+                            NetworkProvider::Evm(_) => {}
+                            NetworkProvider::Solana(solana_provider) => {
+                                match solana_provider.solana_network() {
+                                    SolanaNetwork::LocalSurfnet => {
+                                        let validator_config =
+                                            moneymq_core::validator::SolanaValidatorConfig::new(
+                                                solana_provider.rpc_url(),
+                                                solana_provider.facilitator_pubkey().to_string(),
+                                            );
+                                        if let Some(handle) = validator::start_local_solana_validator(&validator_config)
+                                            .map_err(|e| {
+                                                format!(
+                                                    "Failed to start local Solana validator for x402 provider '{}': {}",
+                                                    x402_name, e
+                                                )
+                                        })? {
+                                            validator_handles.push(handle);
+                                            println!(
+                                                "🔧 Started local Solana validator for x402 provider '{}' on {}",
+                                                x402_name,
+                                                solana_provider.rpc_url()
+                                            );
+                                            println!(
+                                                "Initializing facilitator account {} with funds...",
+                                                solana_provider.facilitator_pubkey()
+                                            );
+                                        }
+                                        else {
+                                            println!(
+                                                "Local Solana validator already running at {}",
+                                                validator_config.rpc_api_url
+                                            );
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    println!(
+                        "🔧 Starting local X402 Facilitator for provider '{}' on http://{}:{}",
+                        x402_name, local_facilitator_config.host, local_facilitator_config.port
+                    );
+                    let handle = moneymq_core::facilitator::start_local_facilitator(
+                        &local_facilitator_config,
+                    )
+                    .await
+                    .map_err(|e| format!("Failed to start local facilitator: {}", e))?;
+                    handles = Some((handle, validator_handles));
+                }
+            }
+        }
 
         // Start the server
         moneymq_core::provider::start_provider(products, meters, self.port, self.sandbox)

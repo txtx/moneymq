@@ -41,7 +41,7 @@ impl FetchCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         // Get the selected provider configuration
         let mut provider_name = ctx.provider.clone();
-        let mut provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
+        let provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
             format!(
                 "Provider '{}' not found in Money.toml. Available providers: {}",
                 provider_name,
@@ -58,19 +58,32 @@ impl FetchCommand {
             )
         })?;
 
+        // Verify it's a Stripe provider
+        let mut stripe_config = provider_config.stripe_config().ok_or_else(|| {
+            format!(
+                "Provider '{}' is type {}, but this command requires a Stripe provider",
+                provider_name, provider_config
+            )
+        })?;
+
         // Check if sandbox mode is requested
         if ctx.use_sandbox {
-            if let Some(sandbox_provider_name) = &provider_config.stripe_config.sandbox {
+            if let Some(sandbox_provider_name) = &stripe_config.sandbox {
                 eprintln!(
                     "ℹ️  Sandbox mode: switching from '{}' to '{}'",
                     provider_name, sandbox_provider_name
                 );
                 provider_name = sandbox_provider_name.clone();
-                provider_config = ctx.manifest.get_provider(&provider_name)
+                stripe_config = ctx.manifest.get_provider(&provider_name)
                     .ok_or_else(|| {
                         format!(
                             "Sandbox provider '{}' not found in Money.toml. Please check the sandbox configuration.",
                             provider_name
+                        )
+                    })?.stripe_config().ok_or_else(|| {
+                        format!(
+                            "Sandbox provider '{}' is type {}, but this command requires a Stripe provider",
+                            provider_name, provider_config
                         )
                     })?;
             } else {
@@ -79,14 +92,6 @@ impl FetchCommand {
                     ctx.provider
                 ));
             }
-        }
-
-        // Verify it's a Stripe provider
-        if provider_config.provider_type != "stripe" {
-            return Err(format!(
-                "Provider '{}' is type '{}', but this command requires a Stripe provider",
-                provider_name, provider_config.provider_type
-            ));
         }
 
         // Get API key with priority:
@@ -101,7 +106,7 @@ impl FetchCommand {
                     Ok(key) => key,
                     Err(_) => {
                         // Try manifest file
-                        provider_config.stripe_config.api_key
+                        stripe_config.api_key
                             .as_ref()
                             .ok_or_else(|| {
                                 format!(
@@ -121,7 +126,7 @@ impl FetchCommand {
         );
 
         // Determine if this is production (not in sandbox mode and provider is not in test_mode)
-        let is_production = !ctx.use_sandbox && !provider_config.stripe_config.test_mode;
+        let is_production = !ctx.use_sandbox && !stripe_config.test_mode;
 
         // Download the catalog
         let catalog = download_catalog(&api_key, &provider_name, is_production)
