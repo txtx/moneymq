@@ -23,10 +23,7 @@ pub struct RunCommand {
 impl RunCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         println!();
-        println!("{}{}",
-            style("Money").white(),
-            style("MQ").green()
-        );
+        println!("{}{}", style("Money").white(), style("MQ").green());
         println!("{}", style("Starting provider server").dim());
         println!();
 
@@ -68,7 +65,12 @@ impl RunCommand {
                         products.push(product);
                     }
                     Err(e) => {
-                        eprintln!("\n{} Failed to parse {}: {}", style("✗").red(), path.display(), e);
+                        eprintln!(
+                            "\n{} Failed to parse {}: {}",
+                            style("✗").red(),
+                            path.display(),
+                            e
+                        );
                         eprintln!("  {}", style("Skipping this file").dim());
                     }
                 }
@@ -79,7 +81,10 @@ impl RunCommand {
             return Err("No products found in catalog directory".to_string());
         }
 
-        println!("{}", style(format!("✓ {} products", products.len())).green());
+        println!(
+            "{}",
+            style(format!("✓ {} products", products.len())).green()
+        );
 
         // Load meters from metering directory (replace "catalog" with "metering" in path)
         let metering_path = catalog_path.replace("/catalog/", "/metering/");
@@ -105,7 +110,12 @@ impl RunCommand {
                             meters.push(meter);
                         }
                         Err(e) => {
-                            eprintln!("\n{} Failed to parse {}: {}", style("✗").red(), path.display(), e);
+                            eprintln!(
+                                "\n{} Failed to parse {}: {}",
+                                style("✗").red(),
+                                path.display(),
+                                e
+                            );
                             eprintln!("  {}", style("Skipping this file").dim());
                         }
                     }
@@ -117,7 +127,11 @@ impl RunCommand {
 
         println!();
 
-        let mode = if self.sandbox { "sandbox" } else { "production" };
+        let mode = if self.sandbox {
+            "sandbox"
+        } else {
+            "production"
+        };
         println!("{} {}", style("Mode").dim(), mode);
         println!("{} {}", style("Port").dim(), self.port);
         println!();
@@ -129,7 +143,14 @@ impl RunCommand {
         println!("  GET http://localhost:{}/health", self.port);
         println!();
 
-        println!("{}", style(format!("Set STRIPE_API_BASE=http://localhost:{}", self.port)).dim());
+        println!(
+            "{}",
+            style(format!(
+                "Set STRIPE_API_BASE=http://localhost:{}",
+                self.port
+            ))
+            .dim()
+        );
         println!();
         println!("{}", style("Press Ctrl+C to stop").dim());
         println!();
