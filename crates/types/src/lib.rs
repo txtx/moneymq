@@ -1,13 +1,12 @@
-use std::collections::HashMap;
-
 use chrono::{DateTime, Utc};
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
 pub mod x402;
 
 /// Recursively parse JSON strings in a map
-fn parse_json_values(map: &HashMap<String, String>) -> HashMap<String, JsonValue> {
+fn parse_json_values(map: &IndexMap<String, String>) -> IndexMap<String, JsonValue> {
     map.iter()
         .map(|(k, v)| {
             let value = if let Ok(parsed) = serde_json::from_str::<JsonValue>(v) {
@@ -26,7 +25,7 @@ fn parse_json_values(map: &HashMap<String, String>) -> HashMap<String, JsonValue
 }
 
 /// Recursively stringify JSON values back to strings with consistent formatting
-fn stringify_json_values(map: &HashMap<String, JsonValue>) -> HashMap<String, String> {
+fn stringify_json_values(map: &IndexMap<String, JsonValue>) -> IndexMap<String, String> {
     map.iter()
         .map(|(k, v)| {
             let string_value = match v {
@@ -40,13 +39,15 @@ fn stringify_json_values(map: &HashMap<String, JsonValue>) -> HashMap<String, St
 }
 
 /// Normalize a metadata map for comparison by parsing and re-serializing JSON values
-pub fn normalize_metadata_for_comparison(map: &HashMap<String, String>) -> HashMap<String, String> {
+pub fn normalize_metadata_for_comparison(
+    map: &IndexMap<String, String>,
+) -> IndexMap<String, String> {
     stringify_json_values(&parse_json_values(map))
 }
 
 /// Custom serialization for metadata
 fn serialize_metadata<S>(
-    metadata: &HashMap<String, String>,
+    metadata: &IndexMap<String, String>,
     serializer: S,
 ) -> Result<S::Ok, S::Error>
 where
@@ -57,14 +58,14 @@ where
 }
 
 /// Custom deserialization for metadata - handles both JSON strings and unpacked YAML structures
-fn deserialize_metadata<'de, D>(deserializer: D) -> Result<HashMap<String, String>, D::Error>
+fn deserialize_metadata<'de, D>(deserializer: D) -> Result<IndexMap<String, String>, D::Error>
 where
     D: Deserializer<'de>,
 {
     use serde::de::Error;
 
     // Deserialize as a generic map of string keys to any JSON value
-    let parsed: HashMap<String, JsonValue> = HashMap::deserialize(deserializer)?;
+    let parsed: IndexMap<String, JsonValue> = IndexMap::deserialize(deserializer)?;
 
     // Convert all values to strings:
     // - If it's already a string, keep it as-is
@@ -80,22 +81,32 @@ where
             };
             Ok((key, string_value))
         })
-        .collect::<Result<HashMap<String, String>, D::Error>>()?;
+        .collect::<Result<IndexMap<String, String>, D::Error>>()?;
 
     Ok(result)
+}
+
+/// Sandbox information for a price
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PriceSandbox {
+    /// Provider ID for this sandbox environment
+    pub id: String,
 }
 
 /// Price information for a product
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Price {
-    /// Unique identifier for the price (base58-encoded)
+    /// Unique identifier for the price (base58-encoded hash of deployed_id)
     pub id: String,
 
-    /// External provider ID (e.g., Stripe price ID)
-    pub external_id: Option<String>,
+    /// Deployed ID (e.g., Stripe price ID for production deployment)
+    pub deployed_id: Option<String>,
 
-    /// Sandbox provider ID (e.g., Stripe sandbox price ID)
-    pub sandbox_external_id: Option<String>,
+    /// Sandbox deployment IDs (e.g., Stripe sandbox price IDs)
+    /// Key is the sandbox name (e.g., "default", "staging")
+    /// Value is the deployed ID for that sandbox
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub sandboxes: IndexMap<String, String>,
 
     /// Whether the price is currently active
     pub active: bool,
@@ -123,24 +134,44 @@ pub struct Price {
         serialize_with = "serialize_metadata",
         deserialize_with = "deserialize_metadata"
     )]
-    pub metadata: HashMap<String, String>,
+    pub metadata: IndexMap<String, String>,
 
     /// When the price was created
     #[serde(with = "chrono::serde::ts_seconds")]
     pub created_at: DateTime<Utc>,
 }
 
+impl Price {
+    /// Get the provider ID for a given sandbox name ("default" for primary sandbox)
+    pub fn get_sandbox_id(&self, sandbox_name: &str) -> Option<&String> {
+        self.sandboxes.get(sandbox_name)
+    }
+
+    /// Set the provider ID for a given sandbox
+    pub fn set_sandbox_id(&mut self, sandbox_name: String, id: String) {
+        self.sandboxes.insert(sandbox_name, id);
+    }
+
+    /// Check if price has a sandbox with the given name
+    pub fn has_sandbox(&self, sandbox_name: &str) -> bool {
+        self.sandboxes.contains_key(sandbox_name)
+    }
+}
+
 /// MoneyMQ Product - provider-agnostic product representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Product {
-    /// Unique identifier for the product (base58-encoded)
+    /// Unique identifier for the product (base58-encoded hash of deployed_id)
     pub id: String,
 
-    /// External provider ID (e.g., Stripe product ID)
-    pub external_id: Option<String>,
+    /// Deployed ID (e.g., Stripe product ID for production deployment)
+    pub deployed_id: Option<String>,
 
-    /// Sandbox provider ID (e.g., Stripe sandbox product ID)
-    pub sandbox_external_id: Option<String>,
+    /// Sandbox deployment IDs (e.g., Stripe sandbox product IDs)
+    /// Key is the sandbox name (e.g., "default", "staging")
+    /// Value is the deployed ID for that sandbox
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub sandboxes: IndexMap<String, String>,
 
     /// Product name
     pub name: Option<String>,
@@ -157,7 +188,7 @@ pub struct Product {
         serialize_with = "serialize_metadata",
         deserialize_with = "deserialize_metadata"
     )]
-    pub metadata: HashMap<String, String>,
+    pub metadata: IndexMap<String, String>,
 
     /// When the product was created
     #[serde(with = "chrono::serde::ts_seconds")]
@@ -184,11 +215,28 @@ pub struct Product {
     pub prices: Vec<Price>,
 }
 
+impl Product {
+    /// Get the provider ID for a given sandbox name ("default" for primary sandbox)
+    pub fn get_sandbox_id(&self, sandbox_name: &str) -> Option<&String> {
+        self.sandboxes.get(sandbox_name)
+    }
+
+    /// Set the provider ID for a given sandbox
+    pub fn set_sandbox_id(&mut self, sandbox_name: String, id: String) {
+        self.sandboxes.insert(sandbox_name, id);
+    }
+
+    /// Check if product has a sandbox with the given name
+    pub fn has_sandbox(&self, sandbox_name: &str) -> bool {
+        self.sandboxes.contains_key(sandbox_name)
+    }
+}
+
 /// Metadata for products
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProductMetadata {
     /// Custom key-value pairs
-    pub data: HashMap<String, String>,
+    pub data: IndexMap<String, String>,
 }
 
 /// Catalog of products
@@ -224,14 +272,17 @@ impl Catalog {
 /// Meter event - provider-agnostic meter representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meter {
-    /// Unique identifier for the meter (base58-encoded)
+    /// Unique identifier for the meter (base58-encoded hash of deployed_id)
     pub id: String,
 
-    /// External provider ID (e.g., Stripe meter ID)
-    pub external_id: Option<String>,
+    /// Deployed ID (e.g., Stripe meter ID for production deployment)
+    pub deployed_id: Option<String>,
 
-    /// Sandbox provider ID (e.g., Stripe sandbox meter ID)
-    pub sandbox_external_id: Option<String>,
+    /// Sandbox deployment IDs (e.g., Stripe sandbox meter IDs)
+    /// Key is the sandbox name (e.g., "default", "staging")
+    /// Value is the deployed ID for that sandbox
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub sandboxes: IndexMap<String, String>,
 
     /// Display name for the meter
     pub display_name: Option<String>,
@@ -258,6 +309,23 @@ pub struct Meter {
     /// When the meter was last updated
     #[serde(with = "chrono::serde::ts_seconds_option")]
     pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl Meter {
+    /// Get the deployed ID for a given sandbox name ("default" for primary sandbox)
+    pub fn get_sandbox_id(&self, sandbox_name: &str) -> Option<&String> {
+        self.sandboxes.get(sandbox_name)
+    }
+
+    /// Set the deployed ID for a given sandbox
+    pub fn set_sandbox_id(&mut self, sandbox_name: String, id: String) {
+        self.sandboxes.insert(sandbox_name, id);
+    }
+
+    /// Check if meter has a sandbox with the given name
+    pub fn has_sandbox(&self, sandbox_name: &str) -> bool {
+        self.sandboxes.contains_key(sandbox_name)
+    }
 }
 
 /// Customer mapping configuration for a meter

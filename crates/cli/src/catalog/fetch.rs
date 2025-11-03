@@ -7,7 +7,7 @@ use crate::Context;
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct FetchCommand {
-    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or Money.toml
+    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or billing.yaml
     #[arg(long = "api-key", short = 'k')]
     pub api_key: Option<String>,
 
@@ -40,10 +40,10 @@ impl std::str::FromStr for OutputFormat {
 impl FetchCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         // Get the selected provider configuration
-        let mut provider_name = ctx.provider.clone();
+        let provider_name = ctx.provider.clone();
         let provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
             format!(
-                "Provider '{}' not found in Money.toml. Available providers: {}",
+                "Provider '{}' not found in billing.yaml. Available providers: {}",
                 provider_name,
                 if ctx.manifest.providers.is_empty() {
                     "none".to_string()
@@ -59,65 +59,77 @@ impl FetchCommand {
         })?;
 
         // Verify it's a Stripe provider
-        let mut stripe_config = provider_config.stripe_config().ok_or_else(|| {
+        let stripe_config = provider_config.stripe_config().ok_or_else(|| {
             format!(
                 "Provider '{}' is type {}, but this command requires a Stripe provider",
                 provider_name, provider_config
             )
         })?;
 
-        // Check if sandbox mode is requested
-        if ctx.use_sandbox {
-            if let Some(sandbox_provider_name) = &stripe_config.sandbox {
+        // Get API key based on sandbox mode
+        let (api_key, _env_var_name) = if ctx.use_sandbox {
+            // Look for the "default" sandbox
+            if let Some(sandbox_config) = stripe_config.sandboxes.get("default") {
                 eprintln!(
-                    "ℹ️  Sandbox mode: switching from '{}' to '{}'",
-                    provider_name, sandbox_provider_name
+                    "ℹ️  Sandbox mode: using 'default' sandbox configuration for provider '{}'",
+                    provider_name
                 );
-                provider_name = sandbox_provider_name.clone();
-                stripe_config = ctx.manifest.get_provider(&provider_name)
-                    .ok_or_else(|| {
-                        format!(
-                            "Sandbox provider '{}' not found in Money.toml. Please check the sandbox configuration.",
-                            provider_name
-                        )
-                    })?.stripe_config().ok_or_else(|| {
-                        format!(
-                            "Sandbox provider '{}' is type {}, but this command requires a Stripe provider",
-                            provider_name, provider_config
-                        )
-                    })?;
+
+                // Get API key with priority:
+                // 1. Command-line flag (--api-key)
+                // 2. Environment variable (STRIPE_SANDBOX_SECRET_KEY)
+                // 3. Manifest file (providers.<name>.sandboxes.default.api_key)
+                let key = match &self.api_key {
+                    Some(key) => key.clone(),
+                    None => {
+                        match env::var("STRIPE_SANDBOX_SECRET_KEY") {
+                            Ok(key) => key,
+                            Err(_) => {
+                                sandbox_config.api_key()
+                                    .ok_or_else(|| {
+                                        format!(
+                                            "Stripe sandbox API key not found for provider '{}'. Please provide --api-key, set STRIPE_SANDBOX_SECRET_KEY environment variable, or configure api_key in billing.yaml",
+                                            provider_name
+                                        )
+                                    })?
+                                    .clone()
+                            }
+                        }
+                    }
+                };
+                (key, "STRIPE_SANDBOX_SECRET_KEY")
             } else {
                 return Err(format!(
-                    "Sandbox mode requested but provider '{}' does not have a sandbox configuration. Add 'sandbox = \"provider_name\"' to the provider config.",
+                    "Sandbox mode requested but provider '{}' does not have a 'default' sandbox configuration. Add a 'sandboxes.default' section to the provider config in billing.yaml",
                     ctx.provider
                 ));
             }
-        }
-
-        // Get API key with priority:
-        // 1. Command-line flag (--api-key)
-        // 2. Environment variable (STRIPE_SECRET_KEY)
-        // 3. Manifest file (providers.<name>.api_key)
-        let api_key = match &self.api_key {
-            Some(key) => key.clone(),
-            None => {
-                // Try environment variable first
-                match env::var("STRIPE_SECRET_KEY") {
-                    Ok(key) => key,
-                    Err(_) => {
-                        // Try manifest file
-                        stripe_config.api_key
-                            .as_ref()
-                            .ok_or_else(|| {
-                                format!(
-                                    "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in Money.toml",
-                                    provider_name
-                                )
-                            })?
-                            .clone()
+        } else {
+            // Production mode - use main config
+            // Get API key with priority:
+            // 1. Command-line flag (--api-key)
+            // 2. Environment variable (STRIPE_SECRET_KEY)
+            // 3. Manifest file (providers.<name>.api_key)
+            let key = match &self.api_key {
+                Some(key) => key.clone(),
+                None => {
+                    match env::var("STRIPE_SECRET_KEY") {
+                        Ok(key) => key,
+                        Err(_) => {
+                            stripe_config.api_key
+                                .as_ref()
+                                .ok_or_else(|| {
+                                    format!(
+                                        "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in billing.yaml",
+                                        provider_name
+                                    )
+                                })?
+                                .clone()
+                        }
                     }
                 }
-            }
+            };
+            (key, "STRIPE_SECRET_KEY")
         };
 
         println!(

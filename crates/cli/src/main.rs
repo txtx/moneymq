@@ -9,6 +9,7 @@ mod catalog;
 mod init;
 mod manifest;
 mod run;
+mod yaml_util;
 
 use manifest::Manifest;
 
@@ -39,12 +40,12 @@ impl Context {
 #[derive(Parser, Debug)]
 #[clap(author, version, about = "MoneyMQ - Payment gateway management CLI", long_about = None)]
 struct Opts {
-    /// Path to the Money.toml manifest file (default: ./Money.toml)
+    /// Path to the billing.yaml manifest file (default: ./billing.yaml)
     #[arg(
         long = "manifest-path",
         short = 'm',
         global = true,
-        default_value = "./Money.toml"
+        default_value = "./billing.yaml"
     )]
     manifest_path: PathBuf,
 
@@ -103,19 +104,28 @@ async fn main() {
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
 
-    // Load environment variables from .env file in manifest directory
-    load_env_file(&manifest_dir);
+    // Skip environment and manifest loading for init command
+    let is_init_command = matches!(opts.command, Command::Init(_));
 
-    // Load manifest from Money.toml file
-    let manifest = match Manifest::load(&opts.manifest_path) {
-        Ok(manifest) => {
-            eprintln!("✓ Loaded manifest from {}", opts.manifest_path.display());
-            manifest
-        }
-        Err(e) => {
-            eprintln!("Warning: {}", e);
-            eprintln!("Using default configuration...");
-            Manifest::default()
+    if !is_init_command {
+        // Load environment variables from .env file in manifest directory
+        load_env_file(&manifest_dir);
+    }
+
+    // Load manifest from billing.yaml file (skip for init command)
+    let manifest = if is_init_command {
+        Manifest::default()
+    } else {
+        match Manifest::load(&opts.manifest_path) {
+            Ok(manifest) => {
+                eprintln!("✓ Loaded manifest from {}", opts.manifest_path.display());
+                manifest
+            }
+            Err(e) => {
+                eprintln!("Warning: {}", e);
+                eprintln!("Using default configuration...");
+                Manifest::default()
+            }
         }
     };
 

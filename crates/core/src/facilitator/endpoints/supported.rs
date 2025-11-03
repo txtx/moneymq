@@ -1,4 +1,4 @@
-use axum::{extract::State, response::IntoResponse, Json};
+use axum::{Json, extract::State, response::IntoResponse};
 use moneymq_types::x402::{SupportedPaymentKind, SupportedResponse};
 
 use crate::facilitator::FacilitatorState;
