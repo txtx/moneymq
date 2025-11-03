@@ -4527,6 +4527,7 @@ dependencies = [
  "dialoguer",
  "dotenvy",
  "indexmap 2.12.0",
+ "indicatif",
  "moneymq-core",
  "moneymq-driver-stripe",
  "moneymq-types",

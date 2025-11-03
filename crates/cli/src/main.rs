@@ -50,13 +50,13 @@ struct Opts {
     manifest_path: PathBuf,
 
     /// Provider configuration to use (e.g., "stripe", "stripe_sandbox")
+    /// If not specified, uses the first provider found in billing.yaml
     #[arg(
         long = "provider",
         short = 'p',
-        global = true,
-        default_value = "stripe"
+        global = true
     )]
-    provider: String,
+    provider: Option<String>,
 
     /// Use the sandbox provider configuration referenced in the main provider
     #[arg(long = "sandbox", short = 's', global = true, default_value = "false")]
@@ -129,8 +129,21 @@ async fn main() {
         }
     };
 
+    // Determine provider name: use specified provider or auto-detect first provider from manifest
+    let provider_name = if let Some(ref p) = opts.provider {
+        p.clone()
+    } else {
+        // Auto-detect first provider from manifest
+        manifest
+            .providers
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| "stripe".to_string())
+    };
+
     // Create context with manifest directory, loaded manifest, selected provider, and sandbox flag
-    let ctx = Context::new(manifest_dir, manifest, opts.provider.clone(), opts.sandbox);
+    let ctx = Context::new(manifest_dir, manifest, provider_name, opts.sandbox);
 
     if let Err(e) = handle_command(opts, &ctx).await {
         eprintln!("Error: {}", e);
