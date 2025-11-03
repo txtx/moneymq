@@ -21,6 +21,7 @@ console = "0.16"
 dialoguer = "0.12"
 dotenvy = "0.15"
 indexmap = { version = "2.12.0", features = ["serde"] }
+indicatif = "0.18.2"
 moneymq-core = { path = "../core" }
 moneymq-driver-stripe = { path = "../drivers/stripe" }
 moneymq-types = { path = "../types" }

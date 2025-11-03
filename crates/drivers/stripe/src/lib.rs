@@ -398,6 +398,88 @@ pub async fn create_product(api_key: &str, local_product: &MoneymqProduct) -> Re
     Ok(created_product.id.to_string())
 }
 
+/// Create a price in Stripe
+///
+/// # Arguments
+/// * `api_key` - Your Stripe secret API key
+/// * `product_id` - The Stripe product ID to attach this price to
+/// * `local_price` - The local price to create
+///
+/// # Returns
+/// The Stripe price ID of the created price
+pub async fn create_price(
+    api_key: &str,
+    product_id: &str,
+    local_price: &MoneymqPrice,
+) -> Result<String> {
+    use stripe::{CreatePrice, CreatePriceRecurring, CreatePriceRecurringInterval, Currency};
+
+    let client = Client::new(api_key);
+
+    let mut params = CreatePrice::new(Currency::USD);
+
+    // Set the product this price belongs to
+    params.product = Some(stripe::IdOrCreate::Id(product_id));
+
+    // Set currency
+    if let Ok(currency) = local_price.currency.to_uppercase().parse::<Currency>() {
+        params.currency = currency;
+    }
+
+    // Set unit amount
+    if let Some(amount) = local_price.unit_amount {
+        params.unit_amount = Some(amount);
+    }
+
+    // Set recurring interval if this is a recurring price
+    if let Some(interval_str) = &local_price.recurring_interval {
+        let interval = match interval_str.as_str() {
+            "day" => CreatePriceRecurringInterval::Day,
+            "week" => CreatePriceRecurringInterval::Week,
+            "month" => CreatePriceRecurringInterval::Month,
+            "year" => CreatePriceRecurringInterval::Year,
+            _ => CreatePriceRecurringInterval::Month, // default to month
+        };
+
+        let mut recurring = CreatePriceRecurring {
+            interval,
+            aggregate_usage: None,
+            interval_count: None,
+            trial_period_days: None,
+            usage_type: None,
+        };
+
+        if let Some(interval_count) = local_price.recurring_interval_count {
+            recurring.interval_count = Some(interval_count as u64);
+        }
+
+        params.recurring = Some(recurring);
+    }
+
+    // Set active status
+    params.active = Some(local_price.active);
+
+    // Set nickname
+    if let Some(nickname) = &local_price.nickname {
+        params.nickname = Some(nickname.as_str());
+    }
+
+    // Set metadata (convert IndexMap to HashMap for Stripe API)
+    if !local_price.metadata.is_empty() {
+        params.metadata = Some(
+            local_price
+                .metadata
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        );
+    }
+
+    let created_price = StripePrice::create(&client, params).await?;
+
+    Ok(created_price.id.to_string())
+}
+
 /// Download all billing meters from Stripe
 ///
 /// # Arguments

@@ -39,7 +39,7 @@ metadata:
         key: edge_optimized
         name: Edge Optimized
         value: "Yes"
-    title: Cloud Subgraph (alpha)
+    title: Cloud Subgraph (beta)
   feature_subgraph_limits:
     features:
       - description: Number of subgraphs being indexed
@@ -76,7 +76,7 @@ metadata:
     - feature_subgraph_deployment
     - feature_subgraph_limits
 created_at: 1751038907
-updated_at: 1761847538
+updated_at: 1762194119
 product_type: Service
 images: []
 statement_descriptor: null

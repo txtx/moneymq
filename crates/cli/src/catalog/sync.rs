@@ -3,6 +3,7 @@ use std::{collections::HashMap, env, fs};
 use clap::Parser;
 use console::style;
 use dialoguer::Confirm;
+use indicatif::{ProgressBar, ProgressStyle};
 use moneymq_driver_stripe::{download_catalog, update_product};
 use moneymq_types::Product;
 
@@ -78,17 +79,17 @@ fn products_differ(local: &Product, remote: &Product) -> bool {
 /// Display differences between local and remote products with colored diff output
 fn display_diff(local: &Product, remote: &Product) {
     println!(
-        "  {} {}",
+        "  {} {} {}",
         style("Product:").bold(),
         style(local.name.as_deref().unwrap_or("Unnamed"))
             .cyan()
-            .bold()
+            .bold(),
+        style(format!("({})", &local.id)).dim()
     );
-    println!("  {} {}", style("ID:").bold(), style(&local.id).dim());
     println!();
 
     if local.name != remote.name {
-        println!("  {} {}", style("📝").yellow(), style("Name:").bold());
+        println!("  {}", style("Name:").bold());
         println!(
             "    {} {}",
             style("-").red().bold(),
@@ -103,11 +104,7 @@ fn display_diff(local: &Product, remote: &Product) {
     }
 
     if local.description != remote.description {
-        println!(
-            "  {} {}",
-            style("📝").yellow(),
-            style("Description:").bold()
-        );
+        println!("  {}", style("Description:").bold());
 
         let remote_desc = remote.description.as_deref().unwrap_or("(none)");
         let local_desc = local.description.as_deref().unwrap_or("(none)");
@@ -139,7 +136,7 @@ fn display_diff(local: &Product, remote: &Product) {
     }
 
     if local.active != remote.active {
-        println!("  {} {}", style("📝").yellow(), style("Active:").bold());
+        println!("  {}", style("Active:").bold());
         println!(
             "    {} {}",
             style("-").red().bold(),
@@ -154,11 +151,7 @@ fn display_diff(local: &Product, remote: &Product) {
     }
 
     if local.product_type != remote.product_type {
-        println!(
-            "  {} {}",
-            style("📝").yellow(),
-            style("Product Type:").bold()
-        );
+        println!("  {}", style("Product Type:").bold());
         println!(
             "    {} {}",
             style("-").red().bold(),
@@ -196,7 +189,7 @@ fn display_diff(local: &Product, remote: &Product) {
             }
         }
 
-        println!("  {} {}", style("📝").yellow(), style("Metadata:").bold());
+        println!("  {}", style("Metadata:").bold());
 
         for (key, local_val, remote_val) in changes {
             println!();
@@ -370,7 +363,7 @@ impl SyncCommand {
 
         // Load existing products from YAML files
         let mut local_products: HashMap<String, Product> = HashMap::new();
-        if catalog_dir.exists() {
+        let loaded_count = if catalog_dir.exists() {
             let entries = fs::read_dir(&catalog_dir)
                 .map_err(|e| format!("Failed to read catalog directory: {}", e))?;
 
@@ -387,26 +380,32 @@ impl SyncCommand {
                             local_products.insert(product.id.clone(), product);
                         }
                         Err(e) => {
-                            eprintln!("⚠️  Warning: Failed to parse {}: {}", path.display(), e);
-                            eprintln!("    Skipping this file. You may need to regenerate it.");
+                            eprintln!(
+                                "{} Failed to parse {}: {}",
+                                style("Warning:").yellow(),
+                                path.display(),
+                                e
+                            );
+                            eprintln!(
+                                "  {} You may need to regenerate it.",
+                                style("Skipping this file.").dim()
+                            );
                             continue;
                         }
                     }
                 }
             }
 
-            if !local_products.is_empty() {
-                println!(
-                    "✓ Loaded {} existing products from disk",
-                    local_products.len()
-                );
-            }
+            local_products.len()
         } else {
             // Create the catalog directory if it doesn't exist
             fs::create_dir_all(&catalog_dir)
                 .map_err(|e| format!("Failed to create catalog directory: {}", e))?;
-            println!("✓ Created catalog directory: {}", catalog_dir.display());
-        }
+            0
+        };
+
+        // Check if workspace is empty (no local products loaded)
+        let is_initial_sync = loaded_count == 0;
 
         // Get API key with priority:
         // 1. Command-line flag (--api-key)
@@ -434,20 +433,28 @@ impl SyncCommand {
             }
         };
 
-        println!(
-            "Fetching production catalog from Stripe (provider: {})...",
-            provider_name
-        );
-
         // Always sync from production (is_production = true)
         let is_production = !stripe_config.test_mode;
 
-        // Download the production catalog
+        // Download the production catalog with spinner
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg}")
+                .unwrap(),
+        );
+        spinner.set_message("Downloading production catalog...");
+        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
         let mut catalog = download_catalog(&api_key, &provider_name, is_production)
             .await
             .map_err(|e| format!("Failed to download catalog: {}", e))?;
 
-        println!("✓ Downloaded {} products from remote", catalog.total_count);
+        spinner.finish_and_clear();
+        let downloaded_count = catalog.total_count;
+
+        let mut matched_count = 0;
+        let mut sandbox_only_count = 0;
 
         // Check if we have a "default" sandbox configuration in the manifest
         if let Some(_sandbox_config) = stripe_config.sandboxes.get("default") {
@@ -455,22 +462,24 @@ impl SyncCommand {
             let sandbox_api_key = env::var("STRIPE_SANDBOX_SECRET_KEY").ok();
 
             if let Some(sandbox_key) = sandbox_api_key {
-                println!("Fetching sandbox catalog to match products...");
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner:.green} {msg}")
+                        .unwrap(),
+                );
+                spinner.set_message("Downloading sandbox catalog...");
+                spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
                 match download_catalog(&sandbox_key, &format!("{}_sandbox", provider_name), false)
                     .await
                 {
                     Ok(sandbox_catalog) => {
-                        println!(
-                            "✓ Downloaded {} products from sandbox",
-                            sandbox_catalog.total_count
-                        );
-
+                        spinner.finish_and_clear();
                         // Track which sandbox products were matched
                         let mut matched_sandbox_ids = std::collections::HashSet::new();
 
                         // Match sandbox products to production products by name
-                        let mut matched_count = 0;
                         for prod_product in &mut catalog.products {
                             // Find matching sandbox product by name
                             if let Some(sandbox_product) = sandbox_catalog
@@ -486,14 +495,30 @@ impl SyncCommand {
                                     matched_count += 1;
                                     matched_sandbox_ids.insert(sandbox_id.clone());
                                 }
-                            }
-                        }
 
-                        if matched_count > 0 {
-                            println!(
-                                "✓ Matched {} products with sandbox equivalents",
-                                matched_count
-                            );
+                                // Also match prices within the products
+                                for prod_price in &mut prod_product.prices {
+                                    // Match by currency, unit_amount, and interval (for recurring prices)
+                                    // Only set sandbox ID if the price actually exists in sandbox
+                                    if let Some(sandbox_price) = sandbox_product.prices.iter().find(|sp| {
+                                        sp.currency == prod_price.currency
+                                            && sp.unit_amount == prod_price.unit_amount
+                                            && sp.recurring_interval == prod_price.recurring_interval
+                                            && sp.recurring_interval_count == prod_price.recurring_interval_count
+                                            && sp.pricing_type == prod_price.pricing_type
+                                    }) {
+                                        // Copy sandbox ID from sandbox price to production price
+                                        // This means the price exists in both production and sandbox
+                                        if let Some(price_sandbox_id) = sandbox_price.sandboxes.get("default") {
+                                            prod_price
+                                                .sandboxes
+                                                .insert("default".to_string(), price_sandbox_id.clone());
+                                        }
+                                    }
+                                    // If no matching sandbox price found, prod_price.sandboxes remains empty
+                                    // which correctly indicates the price doesn't exist in sandbox yet
+                                }
+                            }
                         }
 
                         // Find sandbox-only products (not in production)
@@ -508,51 +533,72 @@ impl SyncCommand {
                             })
                             .collect();
 
-                        if !sandbox_only.is_empty() {
-                            println!(
-                                "✓ Found {} sandbox-only products (not in production)",
-                                sandbox_only.len()
-                            );
+                        sandbox_only_count = sandbox_only.len();
 
-                            // Save sandbox-only products to disk - they already have sandboxes["default"] set
-                            for sandbox_product in sandbox_only {
-                                // Sandbox products already have their ID in sandboxes["default"], no provider_id
+                        // Save sandbox-only products to disk
+                        for sandbox_product in sandbox_only {
+                            let filename = format!("{}.yaml", sandbox_product.id);
+                            let file_path = catalog_dir.join(&filename);
 
-                                let filename = format!("{}.yaml", sandbox_product.id);
-                                let file_path = catalog_dir.join(&filename);
+                            let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                                &sandbox_product,
+                                Some("Product"),
+                                Some("v1"),
+                            )?;
 
-                                let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
-                                    &sandbox_product,
-                                    Some("Product"),
-                                    Some("v1"),
-                                )?;
-
-                                fs::write(&file_path, yaml_content).map_err(|e| {
-                                    format!("Failed to write sandbox product file: {}", e)
-                                })?;
-
-                                println!("  📥 Saved sandbox-only product: {}", filename);
-                            }
+                            fs::write(&file_path, yaml_content).map_err(|e| {
+                                format!("Failed to write sandbox product file: {}", e)
+                            })?;
                         }
                     }
                     Err(e) => {
-                        eprintln!("⚠️  Warning: Failed to fetch sandbox catalog: {}", e);
-                        eprintln!("    Continuing with production data only...");
+                        spinner.finish_and_clear();
+                        eprintln!(
+                            "{} Failed to fetch sandbox catalog: {}",
+                            style("Warning:").yellow(),
+                            e
+                        );
+                        eprintln!("  {}", style("Continuing with production data only").dim());
                     }
                 }
             } else {
                 eprintln!(
-                    "⚠️  Warning: Sandbox provider configured but STRIPE_SANDBOX_SECRET_KEY not found"
+                    "{} Sandbox provider configured but STRIPE_SANDBOX_SECRET_KEY not found",
+                    style("Warning:").yellow()
                 );
-                eprintln!("    Skipping sandbox matching...");
+                eprintln!("  {}", style("Skipping sandbox matching").dim());
             }
         }
 
-        println!("\nAnalyzing changes...");
+        // Print condensed summary
+        if is_initial_sync {
+            println!(
+                "{} Initial sync: {} products downloaded{}",
+                style("✓").green(),
+                downloaded_count,
+                if matched_count > 0 {
+                    format!(", {} matched with sandbox", matched_count)
+                } else {
+                    String::new()
+                }
+            );
+        } else {
+            println!(
+                "{} {} loaded, {} downloaded{}",
+                style("✓").green(),
+                loaded_count,
+                downloaded_count,
+                if matched_count > 0 {
+                    format!(", {} matched with sandbox", matched_count)
+                } else {
+                    String::new()
+                }
+            );
+        }
 
-        let mut pull_count = 0;
+        let mut _pull_count = 0;
         let mut push_count = 0;
-        let mut create_count = 0;
+        let mut _create_count = 0;
         let mut no_change_count = 0;
 
         let mut products_to_push: Vec<(&Product, &Product)> = Vec::new(); // (local, remote)
@@ -565,14 +611,30 @@ impl SyncCommand {
             match action {
                 SyncAction::Pull => {
                     // Remote is newer or has changes - overwrite local
-                    // But preserve sandboxes from local if they exist
+                    // But preserve sandboxes from local if they exist (both product and price level)
                     let mut product_to_save = remote_product.clone();
                     if let Some(local) = local_product {
-                        // Merge sandboxes from local into the remote product
+                        // Merge product-level sandboxes from local into the remote product
                         for (sandbox_name, sandbox_id) in &local.sandboxes {
                             product_to_save
                                 .sandboxes
                                 .insert(sandbox_name.clone(), sandbox_id.clone());
+                        }
+
+                        // Merge price-level sandboxes from local into the remote prices
+                        // Match by price attributes, not ID (since IDs differ between prod/sandbox)
+                        for price in &mut product_to_save.prices {
+                            if let Some(local_price) = local.prices.iter().find(|lp| {
+                                lp.currency == price.currency
+                                    && lp.unit_amount == price.unit_amount
+                                    && lp.recurring_interval == price.recurring_interval
+                                    && lp.recurring_interval_count == price.recurring_interval_count
+                                    && lp.pricing_type == price.pricing_type
+                            }) {
+                                for (sandbox_name, sandbox_id) in &local_price.sandboxes {
+                                    price.sandboxes.insert(sandbox_name.clone(), sandbox_id.clone());
+                                }
+                            }
                         }
                     }
 
@@ -589,8 +651,7 @@ impl SyncCommand {
                         format!("Failed to write file {}: {}", file_path.display(), e)
                     })?;
 
-                    println!("  ⬇  {} (pulled from remote)", filename);
-                    pull_count += 1;
+                    _pull_count += 1;
                 }
                 SyncAction::Push => {
                     // Local has changes - need to push to remote
@@ -614,31 +675,119 @@ impl SyncCommand {
                         format!("Failed to write file {}: {}", file_path.display(), e)
                     })?;
 
-                    println!("  ✨ {} (new from remote)", filename);
-                    create_count += 1;
+                    _create_count += 1;
                 }
                 SyncAction::NoChange => {
+                    // Check if sandboxes have changed (product-level or price-level)
+                    let sandboxes_changed = match local_product {
+                        Some(local) => {
+                            // Check product-level sandboxes
+                            let product_sandboxes_changed = local.sandboxes != remote_product.sandboxes;
+
+                            // Check price-level sandboxes
+                            // Match by price attributes, not ID (since IDs differ between prod/sandbox)
+                            let price_sandboxes_changed = local.prices.iter().any(|local_price| {
+                                // Find matching remote price by attributes
+                                remote_product.prices.iter()
+                                    .find(|rp| {
+                                        rp.currency == local_price.currency
+                                            && rp.unit_amount == local_price.unit_amount
+                                            && rp.recurring_interval == local_price.recurring_interval
+                                            && rp.recurring_interval_count == local_price.recurring_interval_count
+                                            && rp.pricing_type == local_price.pricing_type
+                                    })
+                                    .map(|remote_price| remote_price.sandboxes != local_price.sandboxes)
+                                    .unwrap_or(false)
+                            });
+
+                            product_sandboxes_changed || price_sandboxes_changed
+                        }
+                        None => {
+                            // Check if remote has any sandbox info
+                            !remote_product.sandboxes.is_empty()
+                                || remote_product.prices.iter().any(|p| !p.sandboxes.is_empty())
+                        }
+                    };
+
+                    if sandboxes_changed {
+                        // Sandboxes have changed, need to update the file
+                        // Preserve deployed_id from local if it exists
+                        let mut product_to_save = remote_product.clone();
+
+                        if let Some(local) = local_product {
+                            // Preserve deployed_id from local (in case remote doesn't have it)
+                            if product_to_save.deployed_id.is_none() && local.deployed_id.is_some() {
+                                product_to_save.deployed_id = local.deployed_id.clone();
+                            }
+
+                            // Merge price-level sandboxes and deployed_ids from local
+                            for price in &mut product_to_save.prices {
+                                if let Some(local_price) = local.prices.iter().find(|lp| {
+                                    lp.currency == price.currency
+                                        && lp.unit_amount == price.unit_amount
+                                        && lp.recurring_interval == price.recurring_interval
+                                        && lp.recurring_interval_count == price.recurring_interval_count
+                                        && lp.pricing_type == price.pricing_type
+                                }) {
+                                    // Preserve deployed_id from local price
+                                    if price.deployed_id.is_none() && local_price.deployed_id.is_some() {
+                                        price.deployed_id = local_price.deployed_id.clone();
+                                    }
+
+                                    // Merge sandbox IDs from local price
+                                    for (sandbox_name, sandbox_id) in &local_price.sandboxes {
+                                        price.sandboxes.insert(sandbox_name.clone(), sandbox_id.clone());
+                                    }
+                                }
+                            }
+                        }
+
+                        let filename = format!("{}.yaml", product_to_save.id);
+                        let file_path = catalog_dir.join(&filename);
+
+                        let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                            &product_to_save,
+                            Some("Product"),
+                            Some("v1"),
+                        )?;
+
+                        fs::write(&file_path, yaml_content).map_err(|e| {
+                            format!("Failed to write file {}: {}", file_path.display(), e)
+                        })?;
+                    }
+
                     no_change_count += 1;
                 }
             }
         }
 
-        println!("\n📊 Sync Summary:");
-        if create_count > 0 {
-            println!("  ✨ {} new products", create_count);
-        }
-        if pull_count > 0 {
-            println!("  ⬇  {} products pulled from remote", pull_count);
-        }
-        if no_change_count > 0 {
-            println!("  ✓  {} products unchanged", no_change_count);
-        }
-        if push_count > 0 {
+        // Print condensed sync summary
+        if is_initial_sync {
             println!(
-                "  ⚠️  {} products with local changes need to be pushed",
-                push_count
+                "{} {} products saved to {}",
+                style("✓").green(),
+                _create_count,
+                catalog_dir.display()
             );
+        } else {
+            println!(
+                "{} {} unchanged{}{}",
+                style("✓").green(),
+                no_change_count,
+                if push_count > 0 {
+                    format!(", {} with local changes", push_count)
+                } else {
+                    String::new()
+                },
+                if sandbox_only_count > 0 {
+                    format!(", {} sandbox-only", sandbox_only_count)
+                } else {
+                    String::new()
+                }
+            );
+        }
 
+        if push_count > 0 {
             // Handle push workflow interactively
             self.handle_push_workflow(products_to_push, &provider_config, ctx, &catalog_dir)
                 .await?;
@@ -651,8 +800,10 @@ impl SyncCommand {
             .collect();
 
         if !sandbox_only_products.is_empty() {
+            println!();
             println!(
-                "\n🆕 Found {} sandbox-only products that can be created in production",
+                "{} Found {} sandbox-only products that can be created in production",
+                style("Note:").yellow(),
                 sandbox_only_products.len()
             );
 
@@ -666,7 +817,7 @@ impl SyncCommand {
         }
 
         // Sync meters
-        println!("\n📊 Syncing meters...");
+        println!("{} Syncing meters", style("»").dim());
         self.sync_meters(&api_key, &provider_name, &metering_dir)
             .await?;
 
@@ -682,34 +833,46 @@ impl SyncCommand {
     ) -> Result<(), String> {
         use moneymq_driver_stripe::download_meters;
 
-        // Download production meters from Stripe
+        // Download production meters from Stripe with spinner
+        let spinner = ProgressBar::new_spinner();
+        spinner.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg}")
+                .unwrap(),
+        );
+        spinner.set_message("Downloading production meters...");
+        spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
         let mut meter_collection = download_meters(api_key, provider_name, true)
             .await
             .map_err(|e| format!("Failed to download meters: {}", e))?;
 
-        println!(
-            "✓ Downloaded {} meters from production",
-            meter_collection.total_count
-        );
+        spinner.finish_and_clear();
+
+        let mut matched_count = 0;
+        let mut sandbox_only_count = 0;
 
         // Check for sandbox meters if sandbox is configured
         let sandbox_api_key = env::var("STRIPE_SANDBOX_SECRET_KEY").ok();
         if let Some(sandbox_key) = sandbox_api_key {
-            println!("Fetching sandbox meters to match...");
+            let spinner = ProgressBar::new_spinner();
+            spinner.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.green} {msg}")
+                    .unwrap(),
+            );
+            spinner.set_message("Downloading sandbox meters...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
             match download_meters(&sandbox_key, &format!("{}_sandbox", provider_name), false).await
             {
                 Ok(sandbox_meter_collection) => {
-                    println!(
-                        "✓ Downloaded {} meters from sandbox",
-                        sandbox_meter_collection.total_count
-                    );
+                    spinner.finish_and_clear();
 
                     // Track which sandbox meters were matched
                     let mut matched_sandbox_ids = std::collections::HashSet::new();
 
                     // Match sandbox meters to production meters by event_name
-                    let mut matched_count = 0;
                     for prod_meter in &mut meter_collection.meters {
                         if let Some(sandbox_meter) = sandbox_meter_collection
                             .meters
@@ -727,13 +890,6 @@ impl SyncCommand {
                         }
                     }
 
-                    if matched_count > 0 {
-                        println!(
-                            "✓ Matched {} meters with sandbox equivalents",
-                            matched_count
-                        );
-                    }
-
                     // Find sandbox-only meters (not in production)
                     let sandbox_only: Vec<_> = sandbox_meter_collection
                         .meters
@@ -746,23 +902,23 @@ impl SyncCommand {
                         })
                         .collect();
 
-                    if !sandbox_only.is_empty() {
-                        println!(
-                            "✓ Found {} sandbox-only meters (not in production)",
-                            sandbox_only.len()
-                        );
+                    sandbox_only_count = sandbox_only.len();
 
-                        // Add sandbox-only meters to the collection
-                        for mut sandbox_meter in sandbox_only {
-                            // Clear deployed_id since it doesn't exist in production
-                            sandbox_meter.deployed_id = None;
-                            meter_collection.meters.push(sandbox_meter);
-                        }
+                    // Add sandbox-only meters to the collection
+                    for mut sandbox_meter in sandbox_only {
+                        // Clear deployed_id since it doesn't exist in production
+                        sandbox_meter.deployed_id = None;
+                        meter_collection.meters.push(sandbox_meter);
                     }
                 }
                 Err(e) => {
-                    eprintln!("⚠️  Warning: Failed to fetch sandbox meters: {}", e);
-                    eprintln!("    Continuing with production data only...");
+                    spinner.finish_and_clear();
+                    eprintln!(
+                        "{} Failed to fetch sandbox meters: {}",
+                        style("Warning:").yellow(),
+                        e
+                    );
+                    eprintln!("  {}", style("Continuing with production data only").dim());
                 }
             }
         }
@@ -771,16 +927,12 @@ impl SyncCommand {
         if !metering_dir.exists() {
             fs::create_dir_all(metering_dir)
                 .map_err(|e| format!("Failed to create metering directory: {}", e))?;
-            println!("✓ Created metering directory: {}", metering_dir.display());
         }
 
         // Save each meter as a YAML file
         for meter in &meter_collection.meters {
-            let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
-                &meter,
-                Some("Meter"),
-                Some("v1"),
-            )?;
+            let yaml_content =
+                crate::yaml_util::to_pretty_yaml_with_header(&meter, Some("Meter"), Some("v1"))?;
 
             let filename = format!("{}.yaml", meter.id);
             let file_path = metering_dir.join(&filename);
@@ -790,9 +942,19 @@ impl SyncCommand {
         }
 
         println!(
-            "✓ Saved {} meter files to {}\n",
+            "{} {} meters{}{}",
+            style("✓").green(),
             meter_collection.meters.len(),
-            metering_dir.display()
+            if matched_count > 0 {
+                format!(", {} matched with sandbox", matched_count)
+            } else {
+                String::new()
+            },
+            if sandbox_only_count > 0 {
+                format!(", {} sandbox-only", sandbox_only_count)
+            } else {
+                String::new()
+            }
         );
 
         Ok(())
@@ -806,142 +968,395 @@ impl SyncCommand {
         ctx: &Context,
         catalog_dir: &std::path::Path,
     ) -> Result<(), String> {
-        println!("\n🔍 Reviewing products with local changes...\n");
+        let stripe_config = provider_config.stripe_config().ok_or_else(|| {
+            format!(
+                "Provider '{}' is type {}, but this command requires a Stripe provider",
+                ctx.provider, provider_config
+            )
+        })?;
 
-        for (local, remote) in products_to_push {
+        // Check if we have sandbox configured
+        let has_sandbox_config = stripe_config.sandboxes.contains_key("default");
+        let has_sandbox_key = env::var("STRIPE_SANDBOX_SECRET_KEY").is_ok();
+
+        // First, display all changes
+        println!();
+        println!("{} Reviewing products with local changes", style("»").dim());
+        println!();
+
+        for (local, remote) in &products_to_push {
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
             display_diff(local, remote);
-            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+        }
+        println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        println!();
 
-            let stripe_config = provider_config.stripe_config().ok_or_else(|| {
-                format!(
-                    "Provider '{}' is type {}, but this command requires a Stripe provider",
-                    ctx.provider, provider_config
-                )
-            })?;
-            // Check if we have a "default" sandbox configured in the manifest
-            let has_sandbox_config = stripe_config.sandboxes.contains_key("default");
-            let has_sandbox_key = env::var("STRIPE_SANDBOX_SECRET_KEY").is_ok();
+        // Batch 1: Handle all sandbox updates
+        if has_sandbox_config && has_sandbox_key {
+            let products_with_sandbox: Vec<_> = products_to_push
+                .iter()
+                .filter(|(local, _)| local.has_sandbox("default"))
+                .collect();
 
-            if has_sandbox_config && has_sandbox_key {
-                // Handle sandbox product
-                if let Some(sandbox_id) = local.get_sandbox_id("default") {
-                    // Sandbox product exists - update it
-                    let sandbox_url =
-                        format!("https://dashboard.stripe.com/test/products/{}", sandbox_id);
+            let products_without_sandbox: Vec<_> = products_to_push
+                .iter()
+                .filter(|(local, _)| !local.has_sandbox("default"))
+                .collect();
 
-                    println!("🧪 Sandbox Update");
-                    println!("   URL: {}", sandbox_url);
-                    println!();
+            if !products_with_sandbox.is_empty() {
+                // Count prices that need to be created/updated in sandbox
+                let mut prices_to_create = 0;
+                let mut prices_to_update = 0;
 
-                    let confirm_sandbox = Confirm::new()
-                        .with_prompt("Update sandbox product?")
-                        .default(true)
-                        .interact()
-                        .map_err(|e| format!("Failed to get user input: {}", e))?;
-
-                    if confirm_sandbox {
-                        // Get sandbox API key from environment
-                        let sandbox_api_key =
-                            env::var("STRIPE_SANDBOX_SECRET_KEY").map_err(|_| {
-                                "Sandbox API key not found in STRIPE_SANDBOX_SECRET_KEY".to_string()
-                            })?;
-
-                        println!("  ⏳ Updating sandbox...");
-                        update_product(&sandbox_api_key, sandbox_id, local)
-                            .await
-                            .map_err(|e| format!("Failed to update sandbox product: {}", e))?;
-
-                        println!("  ✅ Sandbox updated successfully!");
-                        println!("  🔗 View at: {}", sandbox_url);
-                        println!();
-                    } else {
-                        println!("  ⏭️  Skipped sandbox update\n");
-                        continue;
+                for (local, _) in &products_with_sandbox {
+                    for price in &local.prices {
+                        if price.has_sandbox("default") {
+                            prices_to_update += 1;
+                        } else {
+                            prices_to_create += 1;
+                        }
                     }
-                } else {
-                    // Sandbox product doesn't exist - prompt to create
-                    println!("🧪 Sandbox Product Missing");
-                    println!("   This product exists in production but not in sandbox.");
+                }
+
+                println!(
+                    "{} {} products will be updated in sandbox",
+                    style("Sandbox").yellow(),
+                    products_with_sandbox.len()
+                );
+
+                if prices_to_create > 0 || prices_to_update > 0 {
+                    println!(
+                        "  {} {} prices ({} new, {} updates)",
+                        style("Prices:").dim(),
+                        prices_to_create + prices_to_update,
+                        prices_to_create,
+                        prices_to_update
+                    );
+                }
+
+                println!();
+
+                let confirm_sandbox = Confirm::new()
+                    .with_prompt("Deploy all changes to sandbox?")
+                    .default(true)
+                    .interact()
+                    .map_err(|e| format!("Failed to get user input: {}", e))?;
+
+                if confirm_sandbox {
+                    let sandbox_api_key = env::var("STRIPE_SANDBOX_SECRET_KEY").map_err(|_| {
+                        "Sandbox API key not found in STRIPE_SANDBOX_SECRET_KEY".to_string()
+                    })?;
+
+                    let spinner = ProgressBar::new(products_with_sandbox.len() as u64);
+                    spinner.set_style(
+                        ProgressStyle::default_bar()
+                            .template("{spinner:.green} [{bar:40.green/dim}] {pos}/{len} {msg}")
+                            .unwrap()
+                            .progress_chars("=> "),
+                    );
+
+                    for (local, _remote) in &products_with_sandbox {
+                        if let Some(sandbox_id) = local.get_sandbox_id("default") {
+                            spinner.set_message(format!(
+                                "Updating {}",
+                                local.name.as_deref().unwrap_or("product")
+                            ));
+
+                            update_product(&sandbox_api_key, sandbox_id, local)
+                                .await
+                                .map_err(|e| format!("Failed to update sandbox product: {}", e))?;
+
+                            spinner.inc(1);
+                        }
+                    }
+
+                    spinner.finish_and_clear();
+                    println!(
+                        "{} {} products updated in sandbox",
+                        style("✓").green(),
+                        products_with_sandbox.len()
+                    );
                     println!();
 
-                    let create_sandbox = Confirm::new()
-                        .with_prompt("Create this product in sandbox?")
-                        .default(true)
-                        .interact()
-                        .map_err(|e| format!("Failed to get user input: {}", e))?;
+                    // Handle price creation in sandbox
+                    if prices_to_create > 0 {
+                        use moneymq_driver_stripe::create_price;
 
-                    if create_sandbox {
-                        println!("  ⚠️  Note: Creating products via API is not yet implemented.");
-                        println!("  📝 Please create the product manually in Stripe Dashboard:");
-                        println!("      https://dashboard.stripe.com/test/products");
-                        println!();
                         println!(
-                            "  💡 Tip: After creating, run 'moneymq catalog sync' again to link it."
+                            "{} Creating {} prices in sandbox",
+                            style("»").dim(),
+                            prices_to_create
+                        );
+
+                        let spinner = ProgressBar::new(prices_to_create as u64);
+                        spinner.set_style(
+                            ProgressStyle::default_bar()
+                                .template("{spinner:.green} [{bar:40.green/dim}] {pos}/{len} {msg}")
+                                .unwrap()
+                                .progress_chars("=> "),
+                        );
+
+                        for (local, _) in &products_with_sandbox {
+                            if let Some(sandbox_product_id) = local.get_sandbox_id("default") {
+                                for price in &local.prices {
+                                    if !price.has_sandbox("default") {
+                                        let amount = price.unit_amount
+                                            .map(|a| format!("${}.{:02}", a / 100, a % 100))
+                                            .unwrap_or_else(|| "custom".to_string());
+
+                                        spinner.set_message(format!("Creating price {}", amount));
+
+                                        match create_price(&sandbox_api_key, sandbox_product_id, price).await {
+                                            Ok(_price_id) => {
+                                                // Price created successfully
+                                                // Note: We'll need to re-sync to capture the new price ID in the YAML
+                                                spinner.inc(1);
+                                            }
+                                            Err(e) => {
+                                                spinner.finish_and_clear();
+                                                eprintln!(
+                                                    "{} Failed to create price: {}",
+                                                    style("Warning:").yellow(),
+                                                    e
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        spinner.finish_and_clear();
+                        println!(
+                            "{} {} prices created in sandbox",
+                            style("✓").green(),
+                            prices_to_create
+                        );
+                        println!(
+                            "  {} Run 'catalog sync' again to capture new price IDs",
+                            style("Note:").dim()
                         );
                         println!();
+                    }
+                } else {
+                    println!("{} Skipped sandbox updates", style("✓").green());
+                    println!();
+                }
+            }
+
+            // Inform about products without sandbox
+            if !products_without_sandbox.is_empty() {
+                println!(
+                    "{} {} products don't have sandbox equivalents (skipping sandbox push)",
+                    style("Note:").yellow(),
+                    products_without_sandbox.len()
+                );
+                println!(
+                    "  {} Create them manually at: {}",
+                    style("Tip:").dim(),
+                    style("https://dashboard.stripe.com/test/products").dim()
+                );
+                println!();
+            }
+        }
+
+        // Batch 2: Handle all production updates
+        let products_with_deployed_id: Vec<_> = products_to_push
+            .iter()
+            .filter(|(local, _)| local.deployed_id.is_some())
+            .collect();
+
+        if !products_with_deployed_id.is_empty() {
+            // Count prices that need to be created/updated in production
+            let mut prices_to_create = 0;
+            let mut prices_to_update = 0;
+
+            for (local, _) in &products_with_deployed_id {
+                for price in &local.prices {
+                    if price.deployed_id.is_some() {
+                        prices_to_update += 1;
+                    } else {
+                        prices_to_create += 1;
                     }
                 }
             }
 
-            // Update production
-            if let Some(deployed_id) = &local.deployed_id {
-                let production_url =
-                    format!("https://dashboard.stripe.com/products/{}", deployed_id);
+            println!(
+                "{} {} products can be updated in production",
+                style("Production").yellow(),
+                products_with_deployed_id.len()
+            );
 
-                println!("🚀 Production Update");
-                println!("   URL: {}", production_url);
+            if prices_to_create > 0 || prices_to_update > 0 {
+                println!(
+                    "  {} {} prices ({} new, {} updates)",
+                    style("Prices:").dim(),
+                    prices_to_create + prices_to_update,
+                    prices_to_create,
+                    prices_to_update
+                );
+            }
+
+            println!();
+
+            let confirm_production = Confirm::new()
+                .with_prompt("Deploy all changes to production? (This affects live data!)")
+                .default(false)
+                .interact()
+                .map_err(|e| format!("Failed to get user input: {}", e))?;
+
+            if confirm_production {
+                // Get production API key
+                let production_api_key = match &self.api_key {
+                    Some(key) => key.clone(),
+                    None => match env::var("STRIPE_SECRET_KEY") {
+                        Ok(key) => key,
+                        Err(_) => stripe_config
+                            .api_key
+                            .as_ref()
+                            .ok_or_else(|| format!("Production API key not found"))?
+                            .clone(),
+                    },
+                };
+
+                let spinner = ProgressBar::new(products_with_deployed_id.len() as u64);
+                spinner.set_style(
+                    ProgressStyle::default_bar()
+                        .template("{spinner:.green} [{bar:40.green/dim}] {pos}/{len} {msg}")
+                        .unwrap()
+                        .progress_chars("=> "),
+                );
+
+                for (local, _remote) in &products_with_deployed_id {
+                    if let Some(deployed_id) = &local.deployed_id {
+                        spinner.set_message(format!(
+                            "Updating {}",
+                            local.name.as_deref().unwrap_or("product")
+                        ));
+
+                        update_product(&production_api_key, deployed_id, local)
+                            .await
+                            .map_err(|e| format!("Failed to update production product: {}", e))?;
+
+                        spinner.inc(1);
+                    }
+                }
+
+                spinner.finish_and_clear();
+
+                println!(
+                    "{} {} products updated in production",
+                    style("✓").green(),
+                    products_with_deployed_id.len()
+                );
                 println!();
 
-                let confirm_production = Confirm::new()
-                    .with_prompt("Update production product? (This affects live data!)")
-                    .default(false)
-                    .interact()
-                    .map_err(|e| format!("Failed to get user input: {}", e))?;
+                // Handle price creation in production
+                if prices_to_create > 0 {
+                    use moneymq_driver_stripe::create_price;
 
-                if confirm_production {
-                    // Get production API key
-                    let production_api_key = match &self.api_key {
-                        Some(key) => key.clone(),
-                        None => match env::var("STRIPE_SECRET_KEY") {
-                            Ok(key) => key,
-                            Err(_) => stripe_config
-                                .api_key
-                                .as_ref()
-                                .ok_or_else(|| format!("Production API key not found"))?
-                                .clone(),
-                        },
-                    };
+                    println!(
+                        "{} Creating {} prices in production",
+                        style("»").dim(),
+                        prices_to_create
+                    );
 
-                    println!("  ⏳ Updating production...");
-                    update_product(&production_api_key, deployed_id, local)
-                        .await
-                        .map_err(|e| format!("Failed to update production product: {}", e))?;
+                    let spinner = ProgressBar::new(prices_to_create as u64);
+                    spinner.set_style(
+                        ProgressStyle::default_bar()
+                            .template("{spinner:.green} [{bar:40.green/dim}] {pos}/{len} {msg}")
+                            .unwrap()
+                            .progress_chars("=> "),
+                    );
 
-                    println!("  ✅ Production updated successfully!");
-                    println!("  🔗 View at: {}", production_url);
+                    for (local, _) in &products_with_deployed_id {
+                        if let Some(production_product_id) = &local.deployed_id {
+                            for price in &local.prices {
+                                if price.deployed_id.is_none() {
+                                    let amount = price.unit_amount
+                                        .map(|a| format!("${}.{:02}", a / 100, a % 100))
+                                        .unwrap_or_else(|| "custom".to_string());
+
+                                    spinner.set_message(format!("Creating price {}", amount));
+
+                                    match create_price(&production_api_key, production_product_id, price).await {
+                                        Ok(_price_id) => {
+                                            // Price created successfully
+                                            // Note: We'll need to re-sync to capture the new price ID in the YAML
+                                            spinner.inc(1);
+                                        }
+                                        Err(e) => {
+                                            spinner.finish_and_clear();
+                                            eprintln!(
+                                                "{} Failed to create price: {}",
+                                                style("Warning:").yellow(),
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    spinner.finish_and_clear();
+                    println!(
+                        "{} {} prices created in production",
+                        style("✓").green(),
+                        prices_to_create
+                    );
+                    println!(
+                        "  {} Run 'catalog sync' again to capture new price IDs",
+                        style("Note:").dim()
+                    );
                     println!();
+                }
 
-                    // Update local file with new timestamp
-                    let filename = format!("{}.yaml", local.id);
-                    let file_path = catalog_dir.join(&filename);
+                // Update all local files with new timestamps
+                let spinner = ProgressBar::new_spinner();
+                spinner.set_style(
+                    ProgressStyle::default_spinner()
+                        .template("{spinner:.green} {msg}")
+                        .unwrap(),
+                );
+                spinner.set_message("Refreshing local catalog...");
+                spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-                    // Re-fetch the updated product to get new timestamp
-                    let updated_catalog =
-                        download_catalog(&production_api_key, &ctx.provider, true)
-                            .await
-                            .map_err(|e| format!("Failed to fetch updated catalog: {}", e))?;
+                let updated_catalog = download_catalog(&production_api_key, &ctx.provider, true)
+                    .await
+                    .map_err(|e| format!("Failed to fetch updated catalog: {}", e))?;
 
+                spinner.finish_and_clear();
+
+                for (local, _remote) in products_with_deployed_id {
                     if let Some(updated_product) =
                         updated_catalog.products.iter().find(|p| p.id == local.id)
                     {
-                        // Preserve sandboxes from local
+                        // Preserve sandboxes from local (both product and price level)
                         let mut product_to_save = updated_product.clone();
                         for (sandbox_name, sandbox_id) in &local.sandboxes {
                             product_to_save
                                 .sandboxes
                                 .insert(sandbox_name.clone(), sandbox_id.clone());
                         }
+
+                        // Preserve price-level sandboxes from local
+                        for price in &mut product_to_save.prices {
+                            if let Some(local_price) = local.prices.iter().find(|lp| {
+                                lp.currency == price.currency
+                                    && lp.unit_amount == price.unit_amount
+                                    && lp.recurring_interval == price.recurring_interval
+                                    && lp.recurring_interval_count == price.recurring_interval_count
+                                    && lp.pricing_type == price.pricing_type
+                            }) {
+                                for (sandbox_name, sandbox_id) in &local_price.sandboxes {
+                                    price.sandboxes.insert(sandbox_name.clone(), sandbox_id.clone());
+                                }
+                            }
+                        }
+
+                        let filename = format!("{}.yaml", local.id);
+                        let file_path = catalog_dir.join(&filename);
 
                         let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
                             &product_to_save,
@@ -956,13 +1371,14 @@ impl SyncCommand {
                                 e
                             )
                         })?;
-
-                        println!("  💾 Local file updated with new timestamp");
-                        println!();
                     }
-                } else {
-                    println!("  ⏭️  Skipped production update\n");
                 }
+
+                println!("{} Local files updated", style("✓").green());
+                println!();
+            } else {
+                println!("{} Skipped production updates", style("✓").green());
+                println!();
             }
         }
 
@@ -980,23 +1396,31 @@ impl SyncCommand {
         use dialoguer::Confirm;
         use moneymq_driver_stripe::create_product;
 
-        println!("\n🔍 Reviewing sandbox-only products...\n");
+        println!();
+        println!("{} Reviewing sandbox-only products", style("»").dim());
+        println!();
 
         for product in products {
             println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-            println!("📦 {}", product.name.as_deref().unwrap_or("(unnamed)"));
-            println!();
+            println!(
+                "  {} {}",
+                style("Product:").bold(),
+                style(product.name.as_deref().unwrap_or("(unnamed)"))
+                    .cyan()
+                    .bold()
+            );
 
             if let Some(description) = &product.description {
-                println!("Description: {}", description);
+                println!("  {} {}", style("Description:").dim(), description);
             }
 
-            println!("Active: {}", product.active);
+            println!("  {} {}", style("Active:").dim(), product.active);
 
             if let Some(sandbox_id) = product.get_sandbox_id("default") {
-                println!("Sandbox ID: {}", sandbox_id);
+                println!("  {} {}", style("Sandbox ID:").dim(), sandbox_id);
                 println!(
-                    "Sandbox URL: https://dashboard.stripe.com/test/products/{}",
+                    "  {} https://dashboard.stripe.com/test/products/{}",
+                    style("Sandbox URL:").dim(),
                     sandbox_id
                 );
             }
@@ -1011,21 +1435,31 @@ impl SyncCommand {
                 .map_err(|e| format!("Failed to get confirmation: {}", e))?;
 
             if !create {
-                println!("  ⏭️  Skipped\n");
+                println!("{} Skipped", style("✓").green());
+                println!();
                 continue;
             }
 
             // Create the product in production
-            println!("  ⏳ Creating product in production...");
+            let spinner = ProgressBar::new_spinner();
+            spinner.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.green} {msg}")
+                    .unwrap(),
+            );
+            spinner.set_message("Creating product in production...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
             let production_id = create_product(production_api_key, product)
                 .await
                 .map_err(|e| format!("Failed to create product: {}", e))?;
 
-            println!("  ✅ Product created successfully!");
-            println!("  🔗 Production ID: {}", production_id);
+            spinner.finish_and_clear();
+
+            println!("{} Product created: {}", style("✓").green(), production_id);
             println!(
-                "  🔗 View at: https://dashboard.stripe.com/products/{}",
+                "  {} https://dashboard.stripe.com/products/{}",
+                style("View at:").dim(),
                 production_id
             );
 
@@ -1045,7 +1479,8 @@ impl SyncCommand {
             fs::write(&file_path, yaml_content)
                 .map_err(|e| format!("Failed to write updated file: {}", e))?;
 
-            println!("  💾 Local file updated with production ID\n");
+            println!("{} Local file updated", style("✓").green());
+            println!();
         }
 
         Ok(())
