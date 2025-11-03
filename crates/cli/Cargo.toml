@@ -30,4 +30,3 @@ solana-keypair = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 toml = "0.9"
 tracing-subscriber = "0.3"
-x402-rs = { workspace = true }
