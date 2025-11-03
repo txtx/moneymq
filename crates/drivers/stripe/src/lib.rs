@@ -1,5 +1,8 @@
+use std::collections::HashMap;
+
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use indexmap::IndexMap;
 use moneymq_types::{
     Catalog, Meter as MoneymqMeter, MeterAggregation, MeterCollection, MeterCustomerMapping,
     MeterValueSettings, Price as MoneymqPrice, Product as MoneymqProduct,
@@ -9,6 +12,94 @@ use stripe::{
     Client, ListPrices, ListProducts, Price as StripePrice, PriceId, Product as StripeProduct,
     ProductId,
 };
+
+/// Convert Stripe metadata (HashMap) to IndexMap with sorted keys for consistent ordering
+fn metadata_to_sorted_indexmap(metadata: HashMap<String, String>) -> IndexMap<String, String> {
+    let mut keys: Vec<_> = metadata.keys().collect();
+    keys.sort();
+    keys.into_iter()
+        .map(|k| (k.clone(), metadata.get(k).unwrap().clone()))
+        .collect()
+}
+
+/// Information about a Stripe account
+#[derive(Debug, Clone)]
+pub struct AccountInfo {
+    pub business_name: Option<String>,
+    pub display_name: Option<String>,
+    pub account_id: String,
+    pub is_test: bool,
+}
+
+/// Retrieve account information from Stripe
+///
+/// # Arguments
+/// * `api_key` - Your Stripe secret API key
+///
+/// # Returns
+/// `AccountInfo` containing account details
+///
+/// # Example
+/// ```no_run
+/// use moneymq_driver_stripe::get_account_info;
+///
+/// #[tokio::main]
+/// async fn main() -> anyhow::Result<()> {
+///     let api_key = std::env::var("STRIPE_SECRET_KEY")?;
+///     let account_info = get_account_info(&api_key).await?;
+///     println!("Account: {}", account_info.display_name.unwrap_or_default());
+///     Ok(())
+/// }
+/// ```
+pub async fn get_account_info(api_key: &str) -> Result<AccountInfo> {
+    // Use the account endpoint directly via HTTP
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .get("https://api.stripe.com/v1/account")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!(
+            "Failed to fetch account info ({}): {}",
+            status,
+            error_body
+        ));
+    }
+
+    let account_json: serde_json::Value = response.json().await?;
+    let is_test = api_key.starts_with("sk_test_") || api_key.starts_with("rk_test_");
+
+    // Extract account information from JSON
+    let business_name = account_json
+        .get("business_profile")
+        .and_then(|bp| bp.get("name"))
+        .and_then(|n| n.as_str())
+        .map(|s| s.to_string());
+
+    let display_name = account_json
+        .get("settings")
+        .and_then(|s| s.get("dashboard"))
+        .and_then(|d| d.get("display_name"))
+        .and_then(|n| n.as_str())
+        .map(|s| s.to_string());
+
+    let account_id = account_json
+        .get("id")
+        .and_then(|id| id.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+
+    Ok(AccountInfo {
+        business_name,
+        display_name,
+        account_id,
+        is_test,
+    })
+}
 
 /// Generate a base58-encoded ID from a Stripe product ID
 /// Uses SHA256 hash to ensure consistent length and valid base58 characters
@@ -42,18 +133,21 @@ fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqPrice
             ("one_time".to_string(), None, None)
         };
 
+    use indexmap::IndexMap;
+
+    let (deployed_id, sandboxes) = if is_production {
+        (Some(stripe_id), IndexMap::new())
+    } else {
+        // For sandbox, create an IndexMap with "default" sandbox
+        let mut sandbox_map = IndexMap::new();
+        sandbox_map.insert("default".to_string(), stripe_id);
+        (None, sandbox_map)
+    };
+
     MoneymqPrice {
         id: base58_id,
-        external_id: if is_production {
-            Some(stripe_id.clone())
-        } else {
-            None
-        },
-        sandbox_external_id: if !is_production {
-            Some(stripe_id)
-        } else {
-            None
-        },
+        deployed_id,
+        sandboxes,
         active: stripe_price.active.unwrap_or(true),
         currency: stripe_price.currency.unwrap_or_default().to_string(),
         unit_amount: stripe_price.unit_amount,
@@ -61,7 +155,7 @@ fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqPrice
         recurring_interval,
         recurring_interval_count,
         nickname: stripe_price.nickname,
-        metadata: stripe_price.metadata.unwrap_or_default(),
+        metadata: metadata_to_sorted_indexmap(stripe_price.metadata.unwrap_or_default()),
         created_at,
     }
 }
@@ -69,9 +163,11 @@ fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqPrice
 /// Convert Stripe Product to MoneyMQ Product
 fn convert_product(
     stripe_product: StripeProduct,
-    _is_production: bool,
+    is_production: bool,
     prices: Vec<MoneymqPrice>,
 ) -> MoneymqProduct {
+    use indexmap::IndexMap;
+
     let created_at = stripe_product
         .created
         .and_then(|ts| DateTime::from_timestamp(ts, 0))
@@ -84,14 +180,23 @@ fn convert_product(
     let stripe_id = stripe_product.id.to_string();
     let base58_id = generate_base58_id(&stripe_id);
 
+    let (deployed_id, sandboxes) = if is_production {
+        (Some(stripe_id), IndexMap::new())
+    } else {
+        // For sandbox, create an IndexMap with "default" sandbox
+        let mut sandbox_map = IndexMap::new();
+        sandbox_map.insert("default".to_string(), stripe_id);
+        (None, sandbox_map)
+    };
+
     MoneymqProduct {
         id: base58_id,
-        external_id: Some(stripe_id),
-        sandbox_external_id: None,
+        deployed_id,
+        sandboxes,
         name: stripe_product.name,
         description: stripe_product.description,
         active: stripe_product.active.unwrap_or(true),
-        metadata: stripe_product.metadata.unwrap_or_default(),
+        metadata: metadata_to_sorted_indexmap(stripe_product.metadata.unwrap_or_default()),
         created_at,
         updated_at,
         product_type: stripe_product.type_.map(|t| format!("{:?}", t)),
@@ -237,9 +342,15 @@ pub async fn update_product(
 
     params.active = Some(local_product.active);
 
-    // Update metadata
+    // Update metadata (convert IndexMap to HashMap for Stripe API)
     if !local_product.metadata.is_empty() {
-        params.metadata = Some(local_product.metadata.clone());
+        params.metadata = Some(
+            local_product
+                .metadata
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        );
     }
 
     StripeProduct::update(&client, &product_id, params).await?;
@@ -271,9 +382,15 @@ pub async fn create_product(api_key: &str, local_product: &MoneymqProduct) -> Re
 
     params.active = Some(local_product.active);
 
-    // Set metadata
+    // Set metadata (convert IndexMap to HashMap for Stripe API)
     if !local_product.metadata.is_empty() {
-        params.metadata = Some(local_product.metadata.clone());
+        params.metadata = Some(
+            local_product
+                .metadata
+                .iter()
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        );
     }
 
     let created_product = StripeProduct::create(&client, params).await?;
@@ -345,8 +462,10 @@ pub async fn download_meters(
 /// Convert Stripe meter JSON to MoneyMQ Meter
 fn convert_stripe_meter(
     meter_json: &serde_json::Value,
-    _is_production: bool,
+    is_production: bool,
 ) -> Result<MoneymqMeter> {
+    use indexmap::IndexMap;
+
     let stripe_id = meter_json
         .get("id")
         .and_then(|v| v.as_str())
@@ -354,6 +473,15 @@ fn convert_stripe_meter(
         .to_string();
 
     let base58_id = generate_base58_id(&stripe_id);
+
+    let (deployed_id, sandboxes) = if is_production {
+        (Some(stripe_id), IndexMap::new())
+    } else {
+        // For sandbox, create an IndexMap with "default" sandbox
+        let mut sandbox_map = IndexMap::new();
+        sandbox_map.insert("default".to_string(), stripe_id);
+        (None, sandbox_map)
+    };
 
     let created = meter_json
         .get("created")
@@ -406,8 +534,8 @@ fn convert_stripe_meter(
 
     Ok(MoneymqMeter {
         id: base58_id,
-        external_id: Some(stripe_id),
-        sandbox_external_id: None,
+        deployed_id,
+        sandboxes,
         display_name,
         event_name,
         status,

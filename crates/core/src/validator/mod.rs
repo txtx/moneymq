@@ -1,6 +1,7 @@
+use std::process::{Child, Stdio};
+
 use serde_json::json;
 use solana_client::{rpc_client::RpcClient, rpc_request::RpcRequest};
-use std::process::{Child, Stdio};
 use url::Url;
 
 pub struct SolanaValidatorConfig {

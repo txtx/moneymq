@@ -1,6 +1,10 @@
+---
+# MoneyMQ Meter - API version v1
+# This file is managed by MoneyMQ - edit carefully
 id: QSwAgyt25wWS5H9DC2VnzY
-external_id: mtr_61TXRkwaZI4PAzyj641EnJqOnsxQ2Jcu
-sandbox_external_id: mtr_test_61TXRkdqR17XQUilx41ISlaF29E0RWHY
+deployed_id: mtr_61TXRkwaZI4PAzyj641EnJqOnsxQ2Jcu
+sandboxes:
+  default: mtr_test_61TXRkdqR17XQUilx41ISlaF29E0RWHY
 display_name: Surfnet RPC requests
 event_name: surfnet_rpc_requests
 status: active

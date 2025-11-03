@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
-use dialoguer::{Confirm, Input, Select, theme::ColorfulTheme};
+use console::style;
+use dialoguer::{Password, Select, theme::ColorfulTheme};
 
 use crate::Context;
 
@@ -9,10 +10,33 @@ pub struct InitCommand {}
 
 impl InitCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
-        println!("🚀 MoneyMQ Initialization\n");
-        println!("This wizard will help you set up MoneyMQ with your payment provider.");
-        println!("We'll create restricted API keys with the minimum required permissions.\n");
-
+        // Print banner
+        // println!();
+        // println!(" ::::::::::::::::::::::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!("::::::::::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!(":::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!("::::::::::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!("::::::::::::::::::::::::::::");
+        // println!(" ::::::::::::::::::::::::::");
+        // println!();
+        // println!("          {}{}",
+        //     style("Money").white().bold(),
+        //     style("MQ").cyan().bold()
+        // );
+        // println!();
+        println!(
+            "{}{} {}\n",
+            style("Money"),
+            style("MQ").green(),
+            style("helps you manage your billing using infrastructure as code.").dim()
+        );
         // Step 1: Select provider
         let providers = vec!["Stripe"];
         let provider_selection = Select::with_theme(&ColorfulTheme::default())
@@ -23,20 +47,14 @@ impl InitCommand {
             .map_err(|e| format!("Failed to get provider selection: {}", e))?;
 
         let provider = providers[provider_selection].to_lowercase();
-        println!("✓ Selected provider: {}\n", provider);
 
         // Step 2: Choose key type
-        println!("\n🔑 API Key Setup");
-        println!("Choose your setup method:");
-        println!("  1. I have a restricted key (rk_live_...) - Recommended, limited permissions");
-        println!("  2. Use my master secret key (sk_live_...) - Simpler, full access\n");
-
         let key_type_options = vec![
-            "I have a restricted key already (recommended)",
-            "Use my master secret key",
+            "Restricted key (rk_live_...) - recommended",
+            "Master secret key (sk_live_...)",
         ];
         let key_type_selection = Select::with_theme(&ColorfulTheme::default())
-            .with_prompt("Select your setup method")
+            .with_prompt("API key type")
             .items(&key_type_options)
             .default(0)
             .interact()
@@ -44,115 +62,80 @@ impl InitCommand {
 
         let use_restricted = key_type_selection == 0;
 
-        // Step 3: Get keys based on selection
+        // Step 3: Get production key
         let production_key = if use_restricted {
-            println!("\n📱 Production Restricted Key Setup:");
-            println!("\n✨ Required Permissions:");
-            println!("  • Products: Write");
-            println!("  • Prices: Write");
-            println!("\n📋 Steps to create in Dashboard:");
-            println!("  1. Open: https://dashboard.stripe.com/apikeys");
-            println!("  2. Click '+ Create restricted key'");
-            println!("  3. Name: 'MoneyMQ Production'");
-            println!("  4. Enable: Products (Write) and Prices (Write)");
-            println!("  5. Click 'Create key' and copy it\n");
+            println!("\nCreate at: https://dashboard.stripe.com/apikeys");
+            println!("Permissions needed: Products (Write), Prices (Write)\n");
 
-            Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Paste your restricted key (rk_live_...)")
+            Password::with_theme(&ColorfulTheme::default())
+                .with_prompt("Production restricted key (rk_live_...)")
                 .validate_with(|input: &String| -> Result<(), &str> {
                     if input.starts_with("rk_live_") {
                         Ok(())
                     } else {
-                        Err("Restricted key must start with rk_live_")
+                        Err("Must start with rk_live_")
                     }
                 })
-                .interact_text()
+                .interact()
                 .map_err(|e| format!("Failed to get restricted key: {}", e))?
         } else {
-            println!("\n📱 Production Master Key:");
-            println!("⚠️  Warning: Master keys have full access to your Stripe account.");
-            println!("   Consider using restricted keys for better security.\n");
-            println!("Find your master key at: https://dashboard.stripe.com/apikeys\n");
-
-            Input::with_theme(&ColorfulTheme::default())
-                .with_prompt("Enter your master secret key (sk_live_...)")
+            Password::with_theme(&ColorfulTheme::default())
+                .with_prompt("Production secret key (sk_live_...)")
                 .validate_with(|input: &String| -> Result<(), &str> {
                     if input.starts_with("sk_live_") {
                         Ok(())
                     } else {
-                        Err("Master key must start with sk_live_")
+                        Err("Must start with sk_live_")
                     }
                 })
-                .interact_text()
+                .interact()
                 .map_err(|e| format!("Failed to get master key: {}", e))?
         };
 
-        println!("✓ Production key received\n");
-
-        // Step 4: Ask about sandbox
-        let setup_sandbox = Confirm::with_theme(&ColorfulTheme::default())
-            .with_prompt("Do you also want to set up a sandbox (test) environment?")
-            .default(true)
-            .interact()
-            .map_err(|e| format!("Failed to get sandbox confirmation: {}", e))?;
-
-        let sandbox_key = if setup_sandbox {
-            if use_restricted {
-                println!("\n📱 Sandbox Restricted Key Setup:");
-                println!("\n✨ Required Permissions:");
-                println!("  • Products: Write");
-                println!("  • Prices: Write");
-                println!("\n📋 Steps to create in Dashboard:");
-                println!("  1. Switch to Test mode (toggle in top left)");
-                println!("  2. Open: https://dashboard.stripe.com/test/apikeys");
-                println!("  3. Click '+ Create restricted key'");
-                println!("  4. Name: 'MoneyMQ Sandbox'");
-                println!("  5. Enable: Products (Write) and Prices (Write)");
-                println!("  6. Click 'Create key' and copy it\n");
-
-                let key: String = Input::with_theme(&ColorfulTheme::default())
-                    .with_prompt("Paste your restricted key (rk_test_...)")
-                    .validate_with(|input: &String| -> Result<(), &str> {
-                        if input.starts_with("rk_test_") {
-                            Ok(())
-                        } else {
-                            Err("Restricted key must start with rk_test_")
-                        }
-                    })
-                    .interact_text()
-                    .map_err(|e| format!("Failed to get sandbox restricted key: {}", e))?;
-
-                println!("✓ Sandbox key received\n");
-                Some(key)
-            } else {
-                println!("\n📱 Sandbox Master Key:");
-                println!(
-                    "Find your test master key at: https://dashboard.stripe.com/test/apikeys\n"
-                );
-
-                let key: String = Input::with_theme(&ColorfulTheme::default())
-                    .with_prompt("Enter your sandbox master secret key (sk_test_...)")
-                    .validate_with(|input: &String| -> Result<(), &str> {
-                        if input.starts_with("sk_test_") {
-                            Ok(())
-                        } else {
-                            Err("Master key must start with sk_test_")
-                        }
-                    })
-                    .interact_text()
-                    .map_err(|e| format!("Failed to get sandbox master key: {}", e))?;
-
-                println!("✓ Sandbox key received\n");
-                Some(key)
-            }
+        // Step 4: Get sandbox key (optional - leave empty to skip)
+        let expected_prefix = if use_restricted {
+            "rk_test_"
         } else {
-            None
+            "sk_test_"
         };
+
+        let sandbox_key: Option<String> = Password::with_theme(&ColorfulTheme::default())
+            .with_prompt(format!(
+                "Sandbox secret key ({}) [press Enter to skip]",
+                expected_prefix
+            ))
+            .allow_empty_password(true)
+            .validate_with(move |input: &String| -> Result<(), &str> {
+                if input.is_empty() || input.starts_with(expected_prefix) {
+                    Ok(())
+                } else {
+                    Err("Must start with rk_test_ or sk_test_")
+                }
+            })
+            .interact()
+            .map_err(|e| format!("Failed to get sandbox key: {}", e))
+            .map(|s| if s.is_empty() { None } else { Some(s) })?;
 
         // Step 6: Create keys using the provider driver
         match provider.as_str() {
             "stripe" => {
-                // Step 6: Save to .env file
+                // Fetch account information to validate production key
+                let account_info = moneymq_driver_stripe::get_account_info(&production_key)
+                    .await
+                    .map_err(|e| format!("Failed to fetch account info: {}", e))?;
+
+                let sandbox_account_info = if let Some(ref sandbox_key_value) = sandbox_key {
+                    let info = moneymq_driver_stripe::get_account_info(sandbox_key_value)
+                        .await
+                        .ok();
+                    info
+                } else {
+                    None
+                };
+
+                let provider_name = generate_provider_name(&account_info, "stripe");
+
+                // Save configuration
                 let env_path = ctx.manifest_path.join(".env");
                 save_env_file(
                     &env_path,
@@ -161,44 +144,41 @@ impl InitCommand {
                     sandbox_key.as_deref(),
                 )?;
 
-                // Step 7: Generate Money.toml if it doesn't exist
-                let manifest_toml_path = ctx.manifest_path.join("Money.toml");
-                if !manifest_toml_path.exists() {
-                    println!("Creating Money.toml...");
-                    save_manifest_file(&manifest_toml_path, &provider, sandbox_key.is_some())?;
-                    println!("✓ Created Money.toml\n");
+                let manifest_yaml_path = ctx.manifest_path.join("billing.yaml");
+                if !manifest_yaml_path.exists() {
+                    save_manifest_file(
+                        &manifest_yaml_path,
+                        &provider_name,
+                        &account_info,
+                        sandbox_account_info.as_ref(),
+                        sandbox_key.is_some(),
+                    )?;
                 }
 
-                // Step 8: Create billing directory structure
-                let billing_path = ctx.manifest_path.join("billing");
-                let catalog_path = billing_path.join("catalog");
-                let metering_path = billing_path.join("metering");
+                // Create directories
+                let catalog_path = ctx.manifest_path.join("billing/catalog/v1");
+                let metering_path = ctx.manifest_path.join("billing/metering/v1");
 
-                if !billing_path.exists() {
+                if !catalog_path.exists() {
                     fs::create_dir_all(&catalog_path)
                         .map_err(|e| format!("Failed to create catalog directory: {}", e))?;
+                }
+                if !metering_path.exists() {
                     fs::create_dir_all(&metering_path)
                         .map_err(|e| format!("Failed to create metering directory: {}", e))?;
-                    println!("✓ Created billing/ directory structure\n");
                 }
 
-                // Step 9: Perform initial sync
-                println!("Performing initial catalog sync...");
-                // Reload environment to pick up new keys
+                // Fetch catalog
+                println!("\nFetching products and meters...");
                 let _ = dotenvy::from_path(&env_path);
 
-                // Use the new production key to fetch the catalog
                 let mut catalog =
                     moneymq_driver_stripe::download_catalog(&production_key, &provider, true)
                         .await
                         .map_err(|e| format!("Failed to fetch catalog: {}", e))?;
 
-                println!("✓ Downloaded {} products\n", catalog.total_count);
-
                 // If sandbox key is provided, fetch sandbox catalog and match products
                 if let Some(ref sandbox_key_value) = sandbox_key {
-                    println!("Fetching sandbox catalog to match products...");
-
                     match moneymq_driver_stripe::download_catalog(
                         sandbox_key_value,
                         &provider,
@@ -207,13 +187,10 @@ impl InitCommand {
                     .await
                     {
                         Ok(sandbox_catalog) => {
-                            println!(
-                                "✓ Downloaded {} products from sandbox",
-                                sandbox_catalog.total_count
-                            );
-
                             // Match sandbox products to production products by name
                             let mut matched_count = 0;
+                            let mut matched_sandbox_ids = std::collections::HashSet::new();
+
                             for prod_product in &mut catalog.products {
                                 // Find matching sandbox product by name
                                 if let Some(sandbox_product) = sandbox_catalog
@@ -221,75 +198,218 @@ impl InitCommand {
                                     .iter()
                                     .find(|sp| sp.name == prod_product.name && sp.name.is_some())
                                 {
-                                    if let Some(sandbox_id) = &sandbox_product.external_id {
-                                        prod_product.sandbox_external_id = Some(sandbox_id.clone());
+                                    // The sandbox product should have its ID in sandboxes["default"]
+                                    if let Some(sandbox_id) =
+                                        sandbox_product.sandboxes.get("default")
+                                    {
+                                        // Add the sandbox ID to the production product
+                                        prod_product
+                                            .sandboxes
+                                            .insert("default".to_string(), sandbox_id.clone());
+                                        matched_sandbox_ids.insert(sandbox_id.clone());
                                         matched_count += 1;
+
+                                        // Also match prices within the product
+                                        for prod_price in &mut prod_product.prices {
+                                            if let Some(sandbox_price) = sandbox_product
+                                                .prices
+                                                .iter()
+                                                .find(|sp| sp.nickname == prod_price.nickname)
+                                            {
+                                                if let Some(sandbox_price_id) =
+                                                    sandbox_price.sandboxes.get("default")
+                                                {
+                                                    prod_price.sandboxes.insert(
+                                                        "default".to_string(),
+                                                        sandbox_price_id.clone(),
+                                                    );
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
 
-                            if matched_count > 0 {
+                            // Add sandbox-only products (products that exist in sandbox but not in production)
+                            let mut sandbox_only_count = 0;
+                            for sandbox_product in &sandbox_catalog.products {
+                                // Check if this sandbox product was matched to a production product
+                                if let Some(sandbox_id) = sandbox_product.sandboxes.get("default") {
+                                    if !matched_sandbox_ids.contains(sandbox_id) {
+                                        // This is a sandbox-only product - add it to the catalog
+                                        let mut new_product = sandbox_product.clone();
+                                        // Clear deployed_id since it doesn't exist in production
+                                        new_product.deployed_id = None;
+                                        catalog.products.push(new_product);
+                                        sandbox_only_count += 1;
+                                    }
+                                }
+                            }
+
+                            let total_changes = matched_count + sandbox_only_count;
+                            if total_changes > 0 {
                                 println!(
-                                    "✓ Matched {} products with sandbox equivalents\n",
-                                    matched_count
-                                );
-                            } else {
-                                println!(
-                                    "⚠️  No matching products found between production and sandbox\n"
+                                    "{} Matched {} sandbox items",
+                                    style("✓").green(),
+                                    total_changes
                                 );
                             }
                         }
-                        Err(e) => {
-                            eprintln!("⚠️  Warning: Failed to fetch sandbox catalog: {}", e);
-                            eprintln!("    Continuing with production data only...\n");
-                        }
+                        Err(_) => {}
                     }
                 }
 
+                // Update total count after adding sandbox-only products
+                catalog.total_count = catalog.products.len();
+
                 // Save products as YAML files
                 for product in &catalog.products {
-                    let yaml_content = serde_yml::to_string(&product)
-                        .map_err(|e| format!("Failed to serialize product: {}", e))?;
+                    let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                        &product,
+                        Some("Product"),
+                        Some("v1"),
+                    )?;
 
                     let product_path = catalog_path.join(format!("{}.yaml", product.id));
                     fs::write(&product_path, yaml_content)
                         .map_err(|e| format!("Failed to write product file: {}", e))?;
-                }
 
-                println!(
-                    "✓ Saved {} product files to catalog/\n",
-                    catalog.total_count
-                );
-
-                println!("✅ Initialization complete!");
-                println!("\n🔐 Security Notes:");
-                if use_restricted {
+                    // Display relative path from manifest directory
+                    let relative_path = product_path
+                        .strip_prefix(&ctx.manifest_path)
+                        .unwrap_or(&product_path);
                     println!(
-                        "  • Your restricted keys have minimal permissions (Products & Prices Write)"
+                        "{} {} ./{}",
+                        style("✔").green(),
+                        style("Product saved to").dim(),
+                        relative_path.display()
                     );
-                    println!("  • You can rotate these keys anytime through the Stripe Dashboard");
-                } else {
-                    println!("  • Your secret keys have full access to your Stripe account");
-                    println!("  • Consider using restricted keys for better security");
-                    println!("  • You can rotate these keys anytime through the Stripe Dashboard");
                 }
-                println!("\n📁 Created Files:");
-                println!("  • {} - Environment configuration", env_path.display());
-                println!("  • {} - Manifest file", manifest_toml_path.display());
+
+                // Fetch and save meters
+                let mut meter_collection =
+                    moneymq_driver_stripe::download_meters(&production_key, &provider_name, true)
+                        .await
+                        .map_err(|e| format!("Failed to fetch meters: {}", e))?;
+
+                // If sandbox key is provided, fetch sandbox meters and match
+                if let Some(ref sandbox_key_value) = sandbox_key {
+                    match moneymq_driver_stripe::download_meters(
+                        sandbox_key_value,
+                        &format!("{}_sandbox", provider_name),
+                        false,
+                    )
+                    .await
+                    {
+                        Ok(sandbox_meter_collection) => {
+                            // Track which sandbox meters were matched
+                            let mut matched_sandbox_ids = std::collections::HashSet::new();
+
+                            // Match sandbox meters to production meters by event_name
+                            let mut _matched_count = 0;
+                            for prod_meter in &mut meter_collection.meters {
+                                if let Some(sandbox_meter) = sandbox_meter_collection
+                                    .meters
+                                    .iter()
+                                    .find(|sm| sm.event_name == prod_meter.event_name)
+                                {
+                                    if let Some(sandbox_id) = sandbox_meter.sandboxes.get("default")
+                                    {
+                                        prod_meter
+                                            .sandboxes
+                                            .insert("default".to_string(), sandbox_id.clone());
+                                        matched_sandbox_ids.insert(sandbox_id.clone());
+                                        _matched_count += 1;
+                                    }
+                                }
+                            }
+
+                            // Add sandbox-only meters
+                            let mut _sandbox_only_count = 0;
+                            for sandbox_meter in &sandbox_meter_collection.meters {
+                                if let Some(sandbox_id) = sandbox_meter.sandboxes.get("default") {
+                                    if !matched_sandbox_ids.contains(sandbox_id) {
+                                        let mut new_meter = sandbox_meter.clone();
+                                        new_meter.deployed_id = None;
+                                        meter_collection.meters.push(new_meter);
+                                        _sandbox_only_count += 1;
+                                    }
+                                }
+                            }
+                        }
+                        Err(_) => {}
+                    }
+                }
+
+                // Update total count and save meters
+                meter_collection.total_count = meter_collection.meters.len();
+
+                for meter in &meter_collection.meters {
+                    let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                        &meter,
+                        Some("Meter"),
+                        Some("v1"),
+                    )?;
+                    let meter_path = metering_path.join(format!("{}.yaml", meter.id));
+                    fs::write(&meter_path, yaml_content)
+                        .map_err(|e| format!("Failed to write meter file: {}", e))?;
+
+                    // Display relative path from manifest directory
+                    let relative_path = meter_path
+                        .strip_prefix(&ctx.manifest_path)
+                        .unwrap_or(&meter_path);
+                    println!(
+                        "{} {} ./{}",
+                        style("✔").green(),
+                        style("Meter saved to").dim(),
+                        relative_path.display()
+                    );
+                }
+
                 println!(
-                    "  • billing/catalog/ - {} product YAML files",
-                    catalog.total_count
+                    "\n{}: Edit YAML files in billing/ and run 'moneymq catalog sync'",
+                    style("Next steps").yellow()
                 );
-                println!("  • billing/metering/ - meter definitions");
-                println!("\n📚 Next Steps:");
-                println!("  • Edit your product YAML files in billing/catalog/");
-                println!("  • Run 'moneymq catalog sync' to sync with Stripe");
             }
             _ => return Err(format!("Unsupported provider: {}", provider)),
         }
 
         Ok(())
     }
+}
+
+/// Generate a provider name from account info
+/// Format: <company_slug>_stripe or just "stripe" if no business name
+fn generate_provider_name(
+    account_info: &moneymq_driver_stripe::AccountInfo,
+    provider_type: &str,
+) -> String {
+    // Try to use business name first, then display name
+    let name = account_info
+        .business_name
+        .as_ref()
+        .or(account_info.display_name.as_ref());
+
+    if let Some(name) = name {
+        // Convert to slug: lowercase, replace spaces/special chars with underscores
+        let slug = name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '_' })
+            .collect::<String>()
+            // Remove consecutive underscores
+            .split('_')
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join("_");
+
+        if !slug.is_empty() {
+            return format!("{}_{}", slug, provider_type);
+        }
+    }
+
+    // Fallback to just the provider type
+    provider_type.to_string()
 }
 
 fn save_env_file(
@@ -321,40 +441,73 @@ fn save_env_file(
     Ok(())
 }
 
-fn save_manifest_file(path: &Path, provider: &str, has_sandbox: bool) -> Result<(), String> {
-    let sandbox_config = if has_sandbox {
-        format!("\nsandbox = \"{}_sandbox\"", provider)
-    } else {
-        String::new()
-    };
+fn save_manifest_file(
+    path: &Path,
+    provider_name: &str,
+    account_info: &moneymq_driver_stripe::AccountInfo,
+    sandbox_account_info: Option<&moneymq_driver_stripe::AccountInfo>,
+    has_sandbox: bool,
+) -> Result<(), String> {
+    // Generate description from account info
+    let account_name = account_info
+        .display_name
+        .as_deref()
+        .or(account_info.business_name.as_deref())
+        .unwrap_or("(no name)");
 
-    let sandbox_provider = if has_sandbox {
+    let description = format!("Stripe account - {}", account_name);
+
+    let sandbox_section = if has_sandbox {
+        let sandbox_description = if let Some(sandbox_info) = sandbox_account_info {
+            let sandbox_name = sandbox_info
+                .display_name
+                .as_deref()
+                .or(sandbox_info.business_name.as_deref())
+                .unwrap_or("(no name)");
+            format!("Stripe sandbox - {}", sandbox_name)
+        } else {
+            "Stripe sandbox".to_string()
+        };
+
         format!(
             r#"
-
-[providers.{}_sandbox]
-provider_type = "{}"
-test_mode = true"#,
-            provider, provider
+    # The "default" sandbox is used when --sandbox is specified
+    sandboxes:
+      default:
+        description: "{}"
+        # api_key: sk_test_...  # Optional - overridden by STRIPE_SANDBOX_SECRET_KEY env var
+        # api_version: "2023-10-16"  # Optional - defaults to Stripe's latest"#,
+            sandbox_description
         )
     } else {
-        String::new()
+        r#"
+    # The "default" sandbox is used when --sandbox is specified
+    # sandboxes:
+    #   default:
+    #     description: "Stripe sandbox"
+    #     api_key: sk_test_...  # Optional - overridden by STRIPE_SANDBOX_SECRET_KEY env var
+    #     api_version: "2023-10-16"  # Optional - defaults to Stripe's latest"#
+            .to_string()
     };
 
     let content = format!(
-        r#"# MoneyMQ Manifest
+        r#"---
+# MoneyMQ Billing Configuration - API version v1
 # Generated by 'moneymq init'
+# This file defines your billing providers and their configurations
 
-[project]
-name = "my-project"
-version = "0.1.0"
-
-[providers.{}]
-provider_type = "{}"{}{}"#,
-        provider, provider, sandbox_config, sandbox_provider
+providers:
+  {}:
+    provider_type: stripe
+    description: "{}"
+    # api_key: sk_live_...  # Optional - overridden by STRIPE_SECRET_KEY env var
+    # api_version: "2023-10-16"  # Optional - defaults to Stripe's latest
+    # catalog_path: billing/catalog/v1  # Optional - catalog path (default: billing/catalog/v1)
+{}"#,
+        provider_name, description, sandbox_section
     );
 
-    fs::write(path, content).map_err(|e| format!("Failed to write Money.toml: {}", e))?;
+    fs::write(path, content).map_err(|e| format!("Failed to write billing.yaml: {}", e))?;
 
     Ok(())
 }

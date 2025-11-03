@@ -327,17 +327,46 @@ fn display_diff(local: &Product, remote: &Product) {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct SyncCommand {
-    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or Money.toml
+    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or billing.yaml
     #[arg(long = "api-key", short = 'k')]
     pub api_key: Option<String>,
 }
 
 impl SyncCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
-        // Get the billing directory paths: <manifest-dir>/billing/catalog/ and <manifest-dir>/billing/metering/
-        let billing_dir = ctx.manifest_path.join("billing");
-        let catalog_dir = billing_dir.join("catalog");
-        let metering_dir = billing_dir.join("metering");
+        // Always fetch from production provider (ignore --sandbox flag for sync)
+        let provider_name = ctx.provider.clone();
+        let provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
+            format!(
+                "Provider '{}' not found in billing.yaml. Available providers: {}",
+                provider_name,
+                if ctx.manifest.providers.is_empty() {
+                    "none".to_string()
+                } else {
+                    ctx.manifest
+                        .providers
+                        .keys()
+                        .map(|k| k.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            )
+        })?;
+
+        // Verify it's a Stripe provider and get the catalog path
+        let stripe_config = provider_config.stripe_config().ok_or_else(|| {
+            format!(
+                "Provider '{}' is type {}, but this command requires a Stripe provider",
+                provider_name, provider_config
+            )
+        })?;
+
+        let catalog_path = &stripe_config.catalog_path;
+
+        // Get the catalog and metering directories
+        let catalog_dir = ctx.manifest_path.join(catalog_path);
+        let metering_path = catalog_path.replace("/catalog/", "/metering/");
+        let metering_dir = ctx.manifest_path.join(&metering_path);
 
         // Load existing products from YAML files
         let mut local_products: HashMap<String, Product> = HashMap::new();
@@ -379,33 +408,6 @@ impl SyncCommand {
             println!("✓ Created catalog directory: {}", catalog_dir.display());
         }
 
-        // Always fetch from production provider (ignore --sandbox flag for sync)
-        let provider_name = ctx.provider.clone();
-        let provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
-            format!(
-                "Provider '{}' not found in Money.toml. Available providers: {}",
-                provider_name,
-                if ctx.manifest.providers.is_empty() {
-                    "none".to_string()
-                } else {
-                    ctx.manifest
-                        .providers
-                        .keys()
-                        .map(|k| k.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                }
-            )
-        })?;
-
-        // Verify it's a Stripe provider
-        let stripe_config = provider_config.stripe_config().ok_or_else(|| {
-            format!(
-                "Provider '{}' is type {}, but this command requires a Stripe provider",
-                provider_name, provider_config
-            )
-        })?;
-
         // Get API key with priority:
         // 1. Command-line flag (--api-key)
         // 2. Environment variable (STRIPE_SECRET_KEY)
@@ -422,7 +424,7 @@ impl SyncCommand {
                             .as_ref()
                             .ok_or_else(|| {
                                 format!(
-                                    "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in Money.toml",
+                                    "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in billing.yaml",
                                     provider_name
                                 )
                             })?
@@ -447,15 +449,17 @@ impl SyncCommand {
 
         println!("✓ Downloaded {} products from remote", catalog.total_count);
 
-        // Check if we have a sandbox pointer configured in the manifest
-        if let Some(sandbox_provider_name) = &stripe_config.sandbox {
+        // Check if we have a "default" sandbox configuration in the manifest
+        if let Some(_sandbox_config) = stripe_config.sandboxes.get("default") {
             // Try to get sandbox API key from environment
             let sandbox_api_key = env::var("STRIPE_SANDBOX_SECRET_KEY").ok();
 
             if let Some(sandbox_key) = sandbox_api_key {
                 println!("Fetching sandbox catalog to match products...");
 
-                match download_catalog(&sandbox_key, sandbox_provider_name, false).await {
+                match download_catalog(&sandbox_key, &format!("{}_sandbox", provider_name), false)
+                    .await
+                {
                     Ok(sandbox_catalog) => {
                         println!(
                             "✓ Downloaded {} products from sandbox",
@@ -474,8 +478,11 @@ impl SyncCommand {
                                 .iter()
                                 .find(|sp| sp.name == prod_product.name && sp.name.is_some())
                             {
-                                if let Some(sandbox_id) = &sandbox_product.external_id {
-                                    prod_product.sandbox_external_id = Some(sandbox_id.clone());
+                                // Sandbox product has ID in sandboxes["default"]
+                                if let Some(sandbox_id) = sandbox_product.sandboxes.get("default") {
+                                    prod_product
+                                        .sandboxes
+                                        .insert("default".to_string(), sandbox_id.clone());
                                     matched_count += 1;
                                     matched_sandbox_ids.insert(sandbox_id.clone());
                                 }
@@ -494,8 +501,8 @@ impl SyncCommand {
                             .products
                             .into_iter()
                             .filter(|sp| {
-                                sp.external_id
-                                    .as_ref()
+                                sp.sandboxes
+                                    .get("default")
                                     .map(|id| !matched_sandbox_ids.contains(id))
                                     .unwrap_or(false)
                             })
@@ -507,20 +514,18 @@ impl SyncCommand {
                                 sandbox_only.len()
                             );
 
-                            // Save sandbox-only products to disk with sandbox_external_id set
-                            for mut sandbox_product in sandbox_only {
-                                // Move external_id to sandbox_external_id since this is a sandbox product
-                                sandbox_product.sandbox_external_id =
-                                    sandbox_product.external_id.clone();
-                                sandbox_product.external_id = None; // No production ID yet
+                            // Save sandbox-only products to disk - they already have sandboxes["default"] set
+                            for sandbox_product in sandbox_only {
+                                // Sandbox products already have their ID in sandboxes["default"], no provider_id
 
                                 let filename = format!("{}.yaml", sandbox_product.id);
                                 let file_path = catalog_dir.join(&filename);
 
-                                let yaml_content =
-                                    serde_yml::to_string(&sandbox_product).map_err(|e| {
-                                        format!("Failed to serialize sandbox product: {}", e)
-                                    })?;
+                                let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                                    &sandbox_product,
+                                    Some("Product"),
+                                    Some("v1"),
+                                )?;
 
                                 fs::write(&file_path, yaml_content).map_err(|e| {
                                     format!("Failed to write sandbox product file: {}", e)
@@ -560,21 +565,25 @@ impl SyncCommand {
             match action {
                 SyncAction::Pull => {
                     // Remote is newer or has changes - overwrite local
-                    // But preserve sandbox_external_id from local if it exists
+                    // But preserve sandboxes from local if they exist
                     let mut product_to_save = remote_product.clone();
                     if let Some(local) = local_product {
-                        product_to_save.sandbox_external_id = local.sandbox_external_id.clone();
+                        // Merge sandboxes from local into the remote product
+                        for (sandbox_name, sandbox_id) in &local.sandboxes {
+                            product_to_save
+                                .sandboxes
+                                .insert(sandbox_name.clone(), sandbox_id.clone());
+                        }
                     }
 
                     let filename = format!("{}.yaml", product_to_save.id);
                     let file_path = catalog_dir.join(&filename);
 
-                    let yaml_content = serde_yml::to_string(&product_to_save).map_err(|e| {
-                        format!(
-                            "Failed to serialize product {} to YAML: {}",
-                            product_to_save.id, e
-                        )
-                    })?;
+                    let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                        &product_to_save,
+                        Some("Product"),
+                        Some("v1"),
+                    )?;
 
                     fs::write(&file_path, yaml_content).map_err(|e| {
                         format!("Failed to write file {}: {}", file_path.display(), e)
@@ -595,12 +604,11 @@ impl SyncCommand {
                     let filename = format!("{}.yaml", remote_product.id);
                     let file_path = catalog_dir.join(&filename);
 
-                    let yaml_content = serde_yml::to_string(&remote_product).map_err(|e| {
-                        format!(
-                            "Failed to serialize product {} to YAML: {}",
-                            remote_product.id, e
-                        )
-                    })?;
+                    let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                        &remote_product,
+                        Some("Product"),
+                        Some("v1"),
+                    )?;
 
                     fs::write(&file_path, yaml_content).map_err(|e| {
                         format!("Failed to write file {}: {}", file_path.display(), e)
@@ -639,7 +647,7 @@ impl SyncCommand {
         // Check for sandbox-only products that need to be created in production
         let sandbox_only_products: Vec<&Product> = local_products
             .values()
-            .filter(|p| p.sandbox_external_id.is_some() && p.external_id.is_none())
+            .filter(|p| p.has_sandbox("default") && p.deployed_id.is_none())
             .collect();
 
         if !sandbox_only_products.is_empty() {
@@ -708,8 +716,11 @@ impl SyncCommand {
                             .iter()
                             .find(|sm| sm.event_name == prod_meter.event_name)
                         {
-                            if let Some(sandbox_id) = &sandbox_meter.external_id {
-                                prod_meter.sandbox_external_id = Some(sandbox_id.clone());
+                            // Sandbox meter has ID in sandboxes["default"]
+                            if let Some(sandbox_id) = sandbox_meter.sandboxes.get("default") {
+                                prod_meter
+                                    .sandboxes
+                                    .insert("default".to_string(), sandbox_id.clone());
                                 matched_count += 1;
                                 matched_sandbox_ids.insert(sandbox_id.clone());
                             }
@@ -728,8 +739,8 @@ impl SyncCommand {
                         .meters
                         .into_iter()
                         .filter(|sm| {
-                            sm.external_id
-                                .as_ref()
+                            sm.sandboxes
+                                .get("default")
                                 .map(|id| !matched_sandbox_ids.contains(id))
                                 .unwrap_or(false)
                         })
@@ -743,8 +754,8 @@ impl SyncCommand {
 
                         // Add sandbox-only meters to the collection
                         for mut sandbox_meter in sandbox_only {
-                            sandbox_meter.sandbox_external_id = sandbox_meter.external_id.clone();
-                            sandbox_meter.external_id = None;
+                            // Clear deployed_id since it doesn't exist in production
+                            sandbox_meter.deployed_id = None;
                             meter_collection.meters.push(sandbox_meter);
                         }
                     }
@@ -765,8 +776,11 @@ impl SyncCommand {
 
         // Save each meter as a YAML file
         for meter in &meter_collection.meters {
-            let yaml_content = serde_yml::to_string(&meter)
-                .map_err(|e| format!("Failed to serialize meter {}: {}", meter.id, e))?;
+            let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                &meter,
+                Some("Meter"),
+                Some("v1"),
+            )?;
 
             let filename = format!("{}.yaml", meter.id);
             let file_path = metering_dir.join(&filename);
@@ -805,18 +819,16 @@ impl SyncCommand {
                     ctx.provider, provider_config
                 )
             })?;
-            // Check if we have a sandbox provider configured in the manifest
-            let has_sandbox_config = stripe_config.sandbox.is_some();
+            // Check if we have a "default" sandbox configured in the manifest
+            let has_sandbox_config = stripe_config.sandboxes.contains_key("default");
             let has_sandbox_key = env::var("STRIPE_SANDBOX_SECRET_KEY").is_ok();
 
             if has_sandbox_config && has_sandbox_key {
                 // Handle sandbox product
-                if let Some(sandbox_external_id) = &local.sandbox_external_id {
+                if let Some(sandbox_id) = local.get_sandbox_id("default") {
                     // Sandbox product exists - update it
-                    let sandbox_url = format!(
-                        "https://dashboard.stripe.com/test/products/{}",
-                        sandbox_external_id
-                    );
+                    let sandbox_url =
+                        format!("https://dashboard.stripe.com/test/products/{}", sandbox_id);
 
                     println!("🧪 Sandbox Update");
                     println!("   URL: {}", sandbox_url);
@@ -836,7 +848,7 @@ impl SyncCommand {
                             })?;
 
                         println!("  ⏳ Updating sandbox...");
-                        update_product(&sandbox_api_key, sandbox_external_id, local)
+                        update_product(&sandbox_api_key, sandbox_id, local)
                             .await
                             .map_err(|e| format!("Failed to update sandbox product: {}", e))?;
 
@@ -873,9 +885,9 @@ impl SyncCommand {
             }
 
             // Update production
-            if let Some(external_id) = &local.external_id {
+            if let Some(deployed_id) = &local.deployed_id {
                 let production_url =
-                    format!("https://dashboard.stripe.com/products/{}", external_id);
+                    format!("https://dashboard.stripe.com/products/{}", deployed_id);
 
                 println!("🚀 Production Update");
                 println!("   URL: {}", production_url);
@@ -902,7 +914,7 @@ impl SyncCommand {
                     };
 
                     println!("  ⏳ Updating production...");
-                    update_product(&production_api_key, external_id, local)
+                    update_product(&production_api_key, deployed_id, local)
                         .await
                         .map_err(|e| format!("Failed to update production product: {}", e))?;
 
@@ -923,12 +935,19 @@ impl SyncCommand {
                     if let Some(updated_product) =
                         updated_catalog.products.iter().find(|p| p.id == local.id)
                     {
-                        // Preserve sandbox_external_id from local
+                        // Preserve sandboxes from local
                         let mut product_to_save = updated_product.clone();
-                        product_to_save.sandbox_external_id = local.sandbox_external_id.clone();
+                        for (sandbox_name, sandbox_id) in &local.sandboxes {
+                            product_to_save
+                                .sandboxes
+                                .insert(sandbox_name.clone(), sandbox_id.clone());
+                        }
 
-                        let yaml_content = serde_yml::to_string(&product_to_save)
-                            .map_err(|e| format!("Failed to serialize updated product: {}", e))?;
+                        let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                            &product_to_save,
+                            Some("Product"),
+                            Some("v1"),
+                        )?;
 
                         fs::write(&file_path, yaml_content).map_err(|e| {
                             format!(
@@ -974,7 +993,7 @@ impl SyncCommand {
 
             println!("Active: {}", product.active);
 
-            if let Some(sandbox_id) = &product.sandbox_external_id {
+            if let Some(sandbox_id) = product.get_sandbox_id("default") {
                 println!("Sandbox ID: {}", sandbox_id);
                 println!(
                     "Sandbox URL: https://dashboard.stripe.com/test/products/{}",
@@ -1010,15 +1029,18 @@ impl SyncCommand {
                 production_id
             );
 
-            // Update local file with production external_id
+            // Update local file with production deployed_id
             let mut updated_product = product.clone();
-            updated_product.external_id = Some(production_id);
+            updated_product.deployed_id = Some(production_id);
 
             let filename = format!("{}.yaml", updated_product.id);
             let file_path = catalog_dir.join(&filename);
 
-            let yaml_content = serde_yml::to_string(&updated_product)
-                .map_err(|e| format!("Failed to serialize updated product: {}", e))?;
+            let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                &updated_product,
+                Some("Product"),
+                Some("v1"),
+            )?;
 
             fs::write(&file_path, yaml_content)
                 .map_err(|e| format!("Failed to write updated file: {}", e))?;

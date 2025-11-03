@@ -140,9 +140,9 @@ impl ProviderState {
 /// Convert MoneyMQ Product to Stripe Product
 fn to_stripe_product(product: &Product, use_sandbox: bool) -> StripeProduct {
     let external_id = if use_sandbox {
-        product.sandbox_external_id.as_ref()
+        product.sandboxes.get("default")
     } else {
-        product.external_id.as_ref()
+        product.deployed_id.as_ref()
     };
 
     StripeProduct {
@@ -176,15 +176,15 @@ fn to_stripe_price(
     use_sandbox: bool,
 ) -> StripePrice {
     let external_id = if use_sandbox {
-        price.sandbox_external_id.as_ref()
+        price.sandboxes.get("default")
     } else {
-        price.external_id.as_ref()
+        price.deployed_id.as_ref()
     };
 
     let product_external_id = if use_sandbox {
-        product.sandbox_external_id.as_ref()
+        product.sandboxes.get("default")
     } else {
-        product.external_id.as_ref()
+        product.deployed_id.as_ref()
     };
 
     let recurring = if price.pricing_type == "recurring" {
@@ -231,9 +231,9 @@ async fn list_products(
             .iter()
             .position(|p| {
                 let external_id = if state.use_sandbox {
-                    p.sandbox_external_id.as_ref()
+                    p.sandboxes.get("default")
                 } else {
-                    p.external_id.as_ref()
+                    p.deployed_id.as_ref()
                 };
                 external_id.map(|id| id == &starting_after).unwrap_or(false)
             })
@@ -275,9 +275,9 @@ async fn list_prices(
         // If product filter is specified, only include prices for that product
         if let Some(ref product_filter) = params.product {
             let product_external_id = if state.use_sandbox {
-                product.sandbox_external_id.as_ref()
+                product.sandboxes.get("default")
             } else {
-                product.external_id.as_ref()
+                product.deployed_id.as_ref()
             };
 
             if product_external_id
@@ -299,9 +299,9 @@ async fn list_prices(
             .iter()
             .position(|(price, _)| {
                 let external_id = if state.use_sandbox {
-                    price.sandbox_external_id.as_ref()
+                    price.sandboxes.get("default")
                 } else {
-                    price.external_id.as_ref()
+                    price.deployed_id.as_ref()
                 };
                 external_id.map(|id| id == &starting_after).unwrap_or(false)
             })
@@ -332,9 +332,9 @@ async fn list_prices(
 /// Convert MoneyMQ Meter to Stripe Billing Meter
 fn to_stripe_meter(meter: &Meter, use_sandbox: bool) -> StripeBillingMeter {
     let external_id = if use_sandbox {
-        meter.sandbox_external_id.as_ref()
+        meter.sandboxes.get("default")
     } else {
-        meter.external_id.as_ref()
+        meter.deployed_id.as_ref()
     };
 
     StripeBillingMeter {
@@ -381,9 +381,9 @@ async fn list_meters(
             .iter()
             .position(|m| {
                 let external_id = if state.use_sandbox {
-                    m.sandbox_external_id.as_ref()
+                    m.sandboxes.get("default")
                 } else {
-                    m.external_id.as_ref()
+                    m.deployed_id.as_ref()
                 };
                 external_id.map(|id| id == &starting_after).unwrap_or(false)
             })

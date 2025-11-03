@@ -1,4 +1,4 @@
-use axum::{response::IntoResponse, Json};
+use axum::{Json, response::IntoResponse};
 
 pub async fn handler() -> impl IntoResponse {
     Json(serde_json::json!({

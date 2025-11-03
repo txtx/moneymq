@@ -1,12 +1,13 @@
 pub mod endpoints;
 pub mod networks;
 
+use std::sync::Arc;
+
 use axum::{
     Router,
     routing::{get, post},
 };
 use moneymq_types::x402::Network;
-use std::sync::Arc;
 use tracing::info;
 
 /// Configuration for the facilitator

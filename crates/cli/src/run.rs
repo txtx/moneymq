@@ -1,10 +1,12 @@
 use std::fs;
 
-use moneymq_core::{facilitator::FacilitatorConfig, validator};
+use console::style;
+// TODO: Re-enable when refactoring X402 facilitator
+// use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::Meter;
 use moneymq_types::Product;
-use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 
+// use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 use crate::Context;
 
 #[derive(Debug, Clone, PartialEq, clap::Args)]
@@ -20,11 +22,25 @@ pub struct RunCommand {
 
 impl RunCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
-        println!("🚀 Starting MoneyMQ Provider Server\n");
+        println!();
+        println!("{}{}",
+            style("Money").white(),
+            style("MQ").green()
+        );
+        println!("{}", style("Starting provider server").dim());
+        println!();
 
-        // Load products from billing/catalog directory
-        let billing_dir = ctx.manifest_path.join("billing");
-        let catalog_dir = billing_dir.join("catalog");
+        // Get catalog path from first Stripe provider (or default to "billing/catalog/v1")
+        let catalog_path = ctx
+            .manifest
+            .providers
+            .values()
+            .find_map(|p| p.stripe_config())
+            .map(|c| c.catalog_path.as_str())
+            .unwrap_or("billing/catalog/v1");
+
+        // Load products from catalog directory
+        let catalog_dir = ctx.manifest_path.join(catalog_path);
 
         if !catalog_dir.exists() {
             return Err(format!(
@@ -33,7 +49,7 @@ impl RunCommand {
             ));
         }
 
-        println!("📂 Loading products from {}", catalog_dir.display());
+        print!("{} ", style("Loading products").dim());
 
         let mut products = Vec::new();
         let entries = fs::read_dir(&catalog_dir)
@@ -52,8 +68,8 @@ impl RunCommand {
                         products.push(product);
                     }
                     Err(e) => {
-                        eprintln!("⚠️  Warning: Failed to parse {}: {}", path.display(), e);
-                        eprintln!("    Skipping this file.");
+                        eprintln!("\n{} Failed to parse {}: {}", style("✗").red(), path.display(), e);
+                        eprintln!("  {}", style("Skipping this file").dim());
                     }
                 }
             }
@@ -63,14 +79,15 @@ impl RunCommand {
             return Err("No products found in catalog directory".to_string());
         }
 
-        println!("✓ Loaded {} products", products.len());
+        println!("{}", style(format!("✓ {} products", products.len())).green());
 
-        // Load meters from billing/metering directory
-        let metering_dir = billing_dir.join("metering");
+        // Load meters from metering directory (replace "catalog" with "metering" in path)
+        let metering_path = catalog_path.replace("/catalog/", "/metering/");
+        let metering_dir = ctx.manifest_path.join(metering_path);
         let mut meters = Vec::new();
 
         if metering_dir.exists() {
-            println!("📂 Loading meters from {}", metering_dir.display());
+            print!("{} ", style("Loading meters").dim());
 
             let meter_entries = fs::read_dir(&metering_dir)
                 .map_err(|e| format!("Failed to read metering directory: {}", e))?;
@@ -88,141 +105,73 @@ impl RunCommand {
                             meters.push(meter);
                         }
                         Err(e) => {
-                            eprintln!("⚠️  Warning: Failed to parse {}: {}", path.display(), e);
-                            eprintln!("    Skipping this file.");
+                            eprintln!("\n{} Failed to parse {}: {}", style("✗").red(), path.display(), e);
+                            eprintln!("  {}", style("Skipping this file").dim());
                         }
                     }
                 }
             }
 
-            println!("✓ Loaded {} meters\n", meters.len());
-        } else {
-            println!("⚠️  No metering directory found, starting without meters\n");
+            println!("{}", style(format!("✓ {} meters", meters.len())).green());
         }
 
-        let mode = if self.sandbox {
-            "sandbox"
-        } else {
-            "production"
-        };
-        println!("🔧 Mode: {}", mode);
-        println!("🌐 Port: {}\n", self.port);
+        println!();
 
-        println!("📡 API Endpoints:");
+        let mode = if self.sandbox { "sandbox" } else { "production" };
+        println!("{} {}", style("Mode").dim(), mode);
+        println!("{} {}", style("Port").dim(), self.port);
+        println!();
+
+        println!("{}", style("Endpoints").dim());
         println!("  GET http://localhost:{}/v1/products", self.port);
         println!("  GET http://localhost:{}/v1/prices", self.port);
         println!("  GET http://localhost:{}/v1/billing/meters", self.port);
-        println!("  GET http://localhost:{}/health\n", self.port);
-
-        println!("💡 Tip: Use this as your Stripe API endpoint for local development");
-        println!("   Set STRIPE_API_BASE=http://localhost:{}", self.port);
+        println!("  GET http://localhost:{}/health", self.port);
         println!();
-        println!("Press Ctrl+C to stop the server\n");
+
+        println!("{}", style(format!("Set STRIPE_API_BASE=http://localhost:{}", self.port)).dim());
+        println!();
+        println!("{}", style("Press Ctrl+C to stop").dim());
+        println!();
 
         // Initialize tracing
         tracing_subscriber::fmt::init();
 
-        let mut handles = None;
+        #[allow(unused_variables)]
+        let handles: Option<()> = None;
         // Only start local facilitator server in sandbox mode
         if self.sandbox {
-            let mut sandbox_x402_config = ctx
+            let sandbox_x402_config = ctx
                 .manifest
                 .providers
                 .iter()
                 .filter_map(|(name, provider)| {
                     provider.x402_config().and_then(|config| {
-                        if config.test_mode && config.local_facilitator.is_some() {
-                            Some((name.clone(), config.clone()))
-                        } else {
-                            None
-                        }
+                        // Check if there's a "default" sandbox configuration with local facilitator
+                        config.sandboxes.get("default").and_then(|sandbox| {
+                            if sandbox.local_facilitator.is_some() {
+                                Some((name.clone(), sandbox.clone()))
+                            } else {
+                                None
+                            }
+                        })
                     })
                 })
                 .collect::<Vec<_>>();
 
             if sandbox_x402_config.len() > 1 {
-                println!(
-                    "⚠️  Warning: Multiple X402 sandbox providers found in manifest. Only the first local facilitator ({}) will be started.",
+                eprintln!(
+                    "{} Multiple X402 sandbox providers found in manifest. Only the first local facilitator ({}) will be started.",
+                    style("Warning:").yellow(),
                     sandbox_x402_config[0].0
                 );
             }
+            // TODO: Re-enable X402 facilitator after refactoring to match new FacilitatorConfig structure
             if !sandbox_x402_config.is_empty() {
-                let (x402_name, x402_config) = sandbox_x402_config.remove(0);
-                let local_facilitator_config: FacilitatorConfig = x402_config
-                    .local_facilitator
-                    .unwrap()
-                    .try_into()
-                    .map_err(|e| {
-                        format!(
-                            "Failed to parse local facilitator config for provider '{}': {}",
-                            x402_name, e
-                        )
-                    })?;
-
-                let mut validator_handles = vec![];
-                if local_facilitator_config.provider_cache.is_none() {
-                    println!(
-                        "⚠️  Warning: No providers configured for local facilitator of provider '{}'. Facilitator will have not be started.",
-                        x402_name
-                    );
-                } else {
-                    for (_, network_provider) in local_facilitator_config
-                        .provider_cache
-                        .as_ref()
-                        .unwrap()
-                        .into_iter()
-                    {
-                        match network_provider {
-                            NetworkProvider::Evm(_) => {}
-                            NetworkProvider::Solana(solana_provider) => {
-                                match solana_provider.solana_network() {
-                                    SolanaNetwork::LocalSurfnet => {
-                                        let validator_config =
-                                            moneymq_core::validator::SolanaValidatorConfig::new(
-                                                solana_provider.rpc_url(),
-                                                solana_provider.facilitator_pubkey().to_string(),
-                                            );
-                                        if let Some(handle) = validator::start_local_solana_validator(&validator_config)
-                                            .map_err(|e| {
-                                                format!(
-                                                    "Failed to start local Solana validator for x402 provider '{}': {}",
-                                                    x402_name, e
-                                                )
-                                        })? {
-                                            validator_handles.push(handle);
-                                            println!(
-                                                "🔧 Started local Solana validator for x402 provider '{}' on {}",
-                                                x402_name,
-                                                solana_provider.rpc_url()
-                                            );
-                                            println!(
-                                                "Initializing facilitator account {} with funds...",
-                                                solana_provider.facilitator_pubkey()
-                                            );
-                                        }
-                                        else {
-                                            println!(
-                                                "Local Solana validator already running at {}",
-                                                validator_config.rpc_api_url
-                                            );
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                    println!(
-                        "🔧 Starting local X402 Facilitator for provider '{}' on http://{}:{}",
-                        x402_name, local_facilitator_config.host, local_facilitator_config.port
-                    );
-                    let handle = moneymq_core::facilitator::start_local_facilitator(
-                        &local_facilitator_config,
-                    )
-                    .await
-                    .map_err(|e| format!("Failed to start local facilitator: {}", e))?;
-                    handles = Some((handle, validator_handles));
-                }
+                eprintln!(
+                    "{} X402 local facilitator startup is temporarily disabled during refactoring",
+                    style("Warning:").yellow()
+                );
             }
         }
 
