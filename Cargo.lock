@@ -4582,6 +4582,7 @@ dependencies = [
  "solana-client",
  "solana-keypair",
  "surfpool-core",
+ "thiserror 2.0.17",
  "tokio",
  "tower-http 0.6.6",
  "tracing",
@@ -4626,6 +4627,7 @@ dependencies = [
  "serde",
  "serde_json",
  "solana-keypair",
+ "thiserror 2.0.17",
  "url 2.5.7",
 ]
 
