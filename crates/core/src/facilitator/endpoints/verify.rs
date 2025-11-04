@@ -55,7 +55,7 @@ pub async fn handler(
 
     // Delegate to network-specific verification
     match network_config.network() {
-        Network::SolanaSurfnet | Network::SolanaMainnet => {
+        Network::Solana => {
             let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
             match networks::solana::verify_solana_payment(&request, &network_config, &rpc_client)
                 .await
