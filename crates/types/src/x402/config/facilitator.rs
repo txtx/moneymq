@@ -22,8 +22,8 @@ pub enum FacilitatorNetworkConfig {
 impl FacilitatorNetworkConfig {
     pub fn network(&self) -> Network {
         match self {
-            FacilitatorNetworkConfig::SolanaSurfnet(_) => Network::SolanaSurfnet,
-            FacilitatorNetworkConfig::SolanaMainnet(_) => Network::SolanaMainnet,
+            FacilitatorNetworkConfig::SolanaSurfnet(_) => Network::Solana,
+            FacilitatorNetworkConfig::SolanaMainnet(_) => Network::Solana,
         }
     }
     pub fn extra(&self) -> Option<SupportedPaymentKindExtra> {
@@ -75,10 +75,7 @@ impl Display for FacilitatorConfig {
         writeln!(
             f,
             "  api_token: {}",
-            self.api_token
-                .as_ref()
-                .map(|_| "***")
-                .unwrap_or("None")
+            self.api_token.as_ref().map(|_| "***").unwrap_or("None")
         )?;
         writeln!(f, "  networks: {{")?;
         for (name, config) in &self.networks {
