@@ -22,3 +22,6 @@ target
 
 .DS_Store
 .surfpool
+
+examples/surfpool/dist
+examples/surfpool/node_modules

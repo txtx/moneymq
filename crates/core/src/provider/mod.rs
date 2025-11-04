@@ -9,7 +9,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use moneymq_types::{Meter, Product};
+use moneymq_types::{Meter, Product, x402::config::facilitator::FacilitatorConfig};
 
 /// Application state
 #[derive(Clone)]
@@ -17,14 +17,29 @@ pub struct ProviderState {
     pub products: Arc<Vec<Product>>,
     pub meters: Arc<Vec<Meter>>,
     pub use_sandbox: bool,
+    pub facilitator_config: Arc<FacilitatorConfig>,
+}
+
+/// Application state
+#[derive(Clone)]
+pub struct Facilitator {
+    pub products: Arc<Vec<Product>>,
+    pub meters: Arc<Vec<Meter>>,
+    pub use_sandbox: bool,
 }
 
 impl ProviderState {
-    pub fn new(products: Vec<Product>, meters: Vec<Meter>, use_sandbox: bool) -> Self {
+    pub fn new(
+        products: Vec<Product>,
+        meters: Vec<Meter>,
+        use_sandbox: bool,
+        facilitator_config: Arc<FacilitatorConfig>,
+    ) -> Self {
         Self {
             products: Arc::new(products),
             meters: Arc::new(meters),
             use_sandbox,
+            facilitator_config,
         }
     }
 }
@@ -38,10 +53,11 @@ async fn health_check() -> impl IntoResponse {
 pub async fn start_provider(
     products: Vec<Product>,
     meters: Vec<Meter>,
+    facilitator_config: Arc<FacilitatorConfig>,
     port: u16,
     use_sandbox: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let state = ProviderState::new(products, meters, use_sandbox);
+    let state = ProviderState::new(products, meters, use_sandbox, facilitator_config);
 
     let app = Router::new()
         // Health check

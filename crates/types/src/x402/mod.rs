@@ -73,6 +73,7 @@ pub enum Scheme {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Network {
+    #[serde(rename = "solana")]
     SolanaMainnet,
     SolanaSurfnet,
 }
@@ -389,4 +390,47 @@ pub struct SupportedPaymentKindExtra {
 #[serde(rename_all = "camelCase")]
 pub struct SupportedResponse {
     pub kinds: Vec<SupportedPaymentKind>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_network_serialization() {
+        // Test SolanaMainnet serializes to "solana"
+        let mainnet = Network::SolanaMainnet;
+        let json = serde_json::to_string(&mainnet).unwrap();
+        assert_eq!(json, r#""solana""#);
+        
+        // Test SolanaSurfnet serializes to "solana-surfnet"
+        let surfnet = Network::SolanaSurfnet;
+        let json = serde_json::to_string(&surfnet).unwrap();
+        assert_eq!(json, r#""solana-surfnet""#);
+        
+        // Test deserialization
+        let parsed: Network = serde_json::from_str(r#""solana""#).unwrap();
+        assert_eq!(parsed, Network::SolanaMainnet);
+        
+        let parsed: Network = serde_json::from_str(r#""solana-surfnet""#).unwrap();
+        assert_eq!(parsed, Network::SolanaSurfnet);
+    }
+}
+
+#[test]
+fn test_supported_payment_kind_extra_serialization() {
+    use solana_keypair::Pubkey;
+    use std::str::FromStr;
+    
+    let pubkey = Pubkey::from_str("11111111111111111111111111111112").unwrap();
+    let extra = SupportedPaymentKindExtra {
+        fee_payer: MixedAddress::Solana(pubkey),
+    };
+    
+    let json = serde_json::to_string(&extra).unwrap();
+    println!("Serialized: {}", json);
+    
+    // Should be camelCase
+    assert!(json.contains("feePayer"));
+    assert!(!json.contains("fee_payer"));
 }
