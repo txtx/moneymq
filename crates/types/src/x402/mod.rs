@@ -259,21 +259,26 @@ pub struct VerifyRequest {
 pub type SettleRequest = VerifyRequest;
 
 /// Facilitator error reasons
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 #[serde(untagged, rename_all = "camelCase")]
 pub enum FacilitatorErrorReason {
     /// Payer doesn't have sufficient funds.
+    #[error("insufficient_funds")]
     #[serde(rename = "insufficient_funds")]
     InsufficientFunds,
     /// The scheme in PaymentPayload didn't match expected (e.g., not 'exact'), or settlement failed.
+    #[error("invalid_scheme")]
     #[serde(rename = "invalid_scheme")]
     InvalidScheme,
     /// Network in PaymentPayload didn't match a facilitator's expected network.
+    #[error("invalid_network")]
     #[serde(rename = "invalid_network")]
     InvalidNetwork,
     /// Unexpected settle error
+    #[error("unexpected_settle_error")]
     #[serde(rename = "unexpected_settle_error")]
     UnexpectedSettleError,
+    #[error("{0}")]
     FreeForm(String),
 }
 
