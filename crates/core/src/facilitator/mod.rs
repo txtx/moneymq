@@ -133,10 +133,10 @@ pub async fn start_facilitator(
 
     info!("🚀 Facilitator server starting on {}", url);
     info!("📍 Endpoints:");
-    info!("  GET  {}/health", url);
-    info!("  POST {}/verify", url);
-    info!("  POST {}/settle", url);
-    info!("  GET  {}/supported", url);
+    info!("  GET  {}health", url);
+    info!("  POST {}verify", url);
+    info!("  POST {}settle", url);
+    info!("  GET  {}supported", url);
 
     let handle =
         tokio::spawn(async move { axum::serve(listener, app).await.map_err(|e| e.into()) });
