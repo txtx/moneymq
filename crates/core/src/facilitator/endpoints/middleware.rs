@@ -8,70 +8,159 @@ use axum::{
     routing::{MethodRouter, post},
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
-use moneymq_types::x402::{PaymentPayload, PaymentRequirements};
+use moneymq_types::x402::{
+    FacilitatorErrorReason, PaymentPayload, PaymentRequirements, SupportedResponse,
+};
 use serde_json::json;
+use tracing::{debug, error, info};
 
 use crate::provider::ProviderState;
+
+#[derive(thiserror::Error, Debug)]
+pub enum X402FacilitatorRequestError {
+    #[error("Failed to contact facilitator: {0}")]
+    FailedToContactFacilitator(reqwest::Error),
+    #[error("Facilitator error: {0}")]
+    FacilitatorError(reqwest::Error),
+    #[error("Failed to parse facilitator response: {0}")]
+    FacilitatorResponseParseError(reqwest::Error),
+    #[error("Payment verification failed: {0}")]
+    PaymentVerificationFailed(FacilitatorErrorReason),
+    #[error("Payment settlement failed{}", .0.as_ref().map(|r| format!(": {:?}", r)).unwrap_or_default())]
+    PaymentSettlementFailed(Option<FacilitatorErrorReason>),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum X402MiddlewareError {
+    #[error("Failed to fetch /supported from facilitator: {0}")]
+    SupportedFetchError(X402FacilitatorRequestError),
+    #[error("Failed to verify with facilitator: {0}")]
+    VerifyError(X402FacilitatorRequestError),
+    #[error("Failed to settle with facilitator: {0}")]
+    SettleError(X402FacilitatorRequestError),
+    #[error("Payment required to access this resource. Please include X-Payment header.")]
+    PaymentRequired(Vec<PaymentRequirements>),
+    #[error("Invalid X-Payment header: {0}")]
+    InvalidPaymentHeader(String),
+}
+impl Into<Response> for X402MiddlewareError {
+    fn into(self) -> Response {
+        let (status, code, err_type) = match &self {
+            X402MiddlewareError::SupportedFetchError(_) => (
+                StatusCode::BAD_GATEWAY,
+                "get_supported_failed",
+                "invalid_request_error",
+            ),
+            X402MiddlewareError::VerifyError(_) => (
+                StatusCode::PAYMENT_REQUIRED,
+                "payment_verification_failed",
+                "invalid_request_error",
+            ),
+            X402MiddlewareError::SettleError(_) => (
+                StatusCode::PAYMENT_REQUIRED,
+                "payment_settlement_failed",
+                "invalid_request_error",
+            ),
+            X402MiddlewareError::PaymentRequired(_) => (
+                StatusCode::PAYMENT_REQUIRED,
+                "payment_required",
+                "invalid_request_error",
+            ),
+            X402MiddlewareError::InvalidPaymentHeader(_) => (
+                StatusCode::BAD_REQUEST,
+                "invalid_payment_header",
+                "invalid_request_error",
+            ),
+        };
+
+        let some_payment_requirements = match &self {
+            X402MiddlewareError::PaymentRequired(items) => Some(items),
+            _ => None,
+        };
+
+        let message = self.to_string();
+        let body = json!({
+            "error": {
+                "code": code,
+                "message": message,
+                "type": err_type,
+                "payment_requirements": some_payment_requirements,
+
+            }
+        });
+
+        (status, axum::Json(body)).into_response()
+    }
+}
+
+async fn fetch_supported(
+    state: &ProviderState,
+) -> Result<SupportedResponse, X402FacilitatorRequestError> {
+    let supported_url = format!("{}supported", state.facilitator_url);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .get(&supported_url)
+        .send()
+        .await
+        .map_err(|e| X402FacilitatorRequestError::FailedToContactFacilitator(e))?;
+
+    if !response.status().is_success() {
+        let error = response.error_for_status().unwrap_err();
+        return Err(X402FacilitatorRequestError::FacilitatorError(error));
+    }
+
+    let supported: SupportedResponse = response
+        .json()
+        .await
+        .map_err(|e| X402FacilitatorRequestError::FacilitatorResponseParseError(e))?;
+
+    debug!(
+        "Fetched supported payment kinds from facilitator: {:?}",
+        supported.kinds
+    );
+
+    Ok(supported)
+}
 
 /// Extract and validate payment payload from request headers
 async fn extract_payment_payload(
     headers: &HeaderMap,
     payment_requirements: &[PaymentRequirements],
-) -> Result<PaymentPayload, (StatusCode, axum::Json<serde_json::Value>)> {
+) -> Result<PaymentPayload, X402MiddlewareError> {
     // Check for X-Payment header
     let payment_header = headers.get("X-Payment");
-    println!("=> {:?}", payment_header);
+    debug!("Payment Header => {:?}", payment_header);
 
     match payment_header {
         None => {
             // No payment header - return 402 with requirements
-            println!("\x1b[31m$ Required\x1b[0m - No X-Payment header found");
-            let error_response = json!({
-                "error": {
-                    "code": "payment_required",
-                    "message": "Payment required to access this resource. Please include X-Payment header.",
-                    "type": "invalid_request_error",
-                    "payment_requirements": payment_requirements
-                }
-            });
-            Err((StatusCode::PAYMENT_REQUIRED, axum::Json(error_response)))
+            info!("Required - No X-Payment header found");
+
+            Err(X402MiddlewareError::PaymentRequired(
+                payment_requirements.to_vec(),
+            ))
         }
         Some(payment_header) => {
-            println!("\x1b[33m$ Verifying\x1b[0m - X-Payment header found");
+            info!("Verifying - X-Payment header found");
             // Parse the payment payload
             let header_str = payment_header.to_str().map_err(|_| {
-                let error_response = json!({
-                    "error": {
-                        "code": "invalid_payment_header",
-                        "message": "X-Payment header contains invalid characters",
-                        "type": "invalid_request_error"
-                    }
-                });
-                (StatusCode::BAD_REQUEST, axum::Json(error_response))
+                X402MiddlewareError::InvalidPaymentHeader(
+                    "Header contains invalid characters".to_string(),
+                )
             })?;
 
             // Decode base64 and parse JSON
             let decoded = BASE64.decode(header_str.as_bytes()).map_err(|_| {
-                let error_response = json!({
-                    "error": {
-                        "code": "invalid_payment_header",
-                        "message": "X-Payment header is not valid base64",
-                        "type": "invalid_request_error"
-                    }
-                });
-                (StatusCode::BAD_REQUEST, axum::Json(error_response))
+                X402MiddlewareError::InvalidPaymentHeader("Header is not valid base64".to_string())
             })?;
 
             let payment_payload: PaymentPayload =
                 serde_json::from_slice(&decoded).map_err(|e| {
-                    let error_response = json!({
-                        "error": {
-                            "code": "invalid_payment_payload",
-                            "message": format!("Failed to parse payment payload: {}", e),
-                            "type": "invalid_request_error"
-                        }
-                    });
-                    (StatusCode::BAD_REQUEST, axum::Json(error_response))
+                    X402MiddlewareError::InvalidPaymentHeader(format!(
+                        "Failed to parse payment payload: {}",
+                        e
+                    ))
                 })?;
 
             Ok(payment_payload)
@@ -84,7 +173,7 @@ async fn verify_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<moneymq_types::x402::MixedAddress, String> {
+) -> Result<moneymq_types::x402::MixedAddress, X402FacilitatorRequestError> {
     use moneymq_types::x402::{VerifyRequest, VerifyResponse, X402Version};
 
     // Construct the verify request
@@ -95,7 +184,7 @@ async fn verify_payment_with_facilitator(
     };
 
     // Build the facilitator verify URL
-    let verify_url = format!("{}verify", state.facilitator_config.url);
+    let verify_url = format!("{}verify", state.facilitator_url);
 
     // Make HTTP request to facilitator
     let client = reqwest::Client::new();
@@ -104,28 +193,26 @@ async fn verify_payment_with_facilitator(
         .json(&verify_request)
         .send()
         .await
-        .map_err(|e| format!("Failed to contact facilitator: {}", e))?;
+        .map_err(X402FacilitatorRequestError::FailedToContactFacilitator)?;
 
     // Check status code
     if !response.status().is_success() {
-        return Err(format!(
-            "Facilitator returned error status: {}",
-            response.status()
-        ));
+        let error = response.error_for_status().unwrap_err();
+        return Err(X402FacilitatorRequestError::FacilitatorError(error));
     }
 
     // Parse response
     let verify_response: VerifyResponse = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse facilitator response: {}", e))?;
+        .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
 
     // Check if payment is valid
     match verify_response {
         VerifyResponse::Valid { payer } => Ok(payer),
-        VerifyResponse::Invalid { reason, .. } => {
-            Err(format!("Payment verification failed: {:?}", reason))
-        }
+        VerifyResponse::Invalid { reason, .. } => Err(
+            X402FacilitatorRequestError::PaymentVerificationFailed(reason),
+        ),
     }
 }
 
@@ -134,7 +221,7 @@ async fn settle_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<(), String> {
+) -> Result<(), X402FacilitatorRequestError> {
     use moneymq_types::x402::{SettleRequest, SettleResponse, X402Version};
 
     // Construct the settle request (identical structure to verify request)
@@ -145,7 +232,7 @@ async fn settle_payment_with_facilitator(
     };
 
     // Build the facilitator settle URL
-    let settle_url = format!("{}settle", state.facilitator_config.url);
+    let settle_url = format!("{}settle", state.facilitator_url);
 
     // Make HTTP request to facilitator
     let client = reqwest::Client::new();
@@ -154,32 +241,29 @@ async fn settle_payment_with_facilitator(
         .json(&settle_request)
         .send()
         .await
-        .map_err(|e| format!("Failed to contact facilitator: {}", e))?;
+        .map_err(X402FacilitatorRequestError::FailedToContactFacilitator)?;
 
     // Check status code
     if !response.status().is_success() {
-        return Err(format!(
-            "Facilitator returned error status: {}",
-            response.status()
-        ));
+        let error = response.error_for_status().unwrap_err();
+        return Err(X402FacilitatorRequestError::FacilitatorError(error));
     }
 
     // Parse response
     let settle_response: SettleResponse = response
         .json()
         .await
-        .map_err(|e| format!("Failed to parse facilitator response: {}", e))?;
+        .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
 
     // Check if settlement was successful
     if settle_response.success {
         if let Some(tx_hash) = settle_response.transaction {
-            println!("  Transaction hash: {}", tx_hash);
+            debug!("  Transaction hash: {}", tx_hash);
         }
         Ok(())
     } else {
-        Err(format!(
-            "Payment settlement failed: {:?}",
-            settle_response.error_reason
+        Err(X402FacilitatorRequestError::PaymentSettlementFailed(
+            settle_response.error_reason,
         ))
     }
 }
@@ -192,40 +276,22 @@ pub async fn payment_middleware(
 ) -> Response {
     use moneymq_types::x402::{MixedAddress, Network, Scheme, TokenAmount};
     use solana_keypair::Pubkey;
-    use std::str::FromStr;
+
+    let supported = match fetch_supported(&state).await {
+        Ok(supported) => supported,
+        Err(e) => {
+            debug!("Failed to fetch supported payment kinds: {}", e);
+            return X402MiddlewareError::SupportedFetchError(e).into();
+        }
+    };
 
     // TODO: Get payment requirements from state/config
     // For now, create a mock payment requirement for testing
-
-    // Determine network based on sandbox mode
-    // let network = if state.use_sandbox {
-    //     Network::SolanaSurfnet
-    // } else {
-    //     Network::SolanaMainnet
-    // };
-
-    // Get the facilitator's fee payer info for ATA creation
-    // Try to find any Solana network config (could be under "solana", "solana-mainnet", etc.)
-    let extra = state
-        .facilitator_config
-        .networks
-        .values()
-        .find_map(|config| {
-            // Check if this is a Solana network
-            match config {
-                moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig::SolanaMainnet(_)
-                | moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig::SolanaSurfnet(_) => {
-                    // Get the extra field with fee_payer from the network config
-                    config.extra().and_then(|e| serde_json::to_value(e).ok())
-                }
-            }
-        });
-
     let payment_requirements: Vec<PaymentRequirements> = vec![PaymentRequirements {
         scheme: Scheme::Exact,
-        network: Network::SolanaMainnet,
+        network: Network::Solana,
         max_amount_required: TokenAmount("1000000".to_string()), // 1 USDC (6 decimals)
-        resource: state.facilitator_config.url.clone(),
+        resource: state.facilitator_url.clone(), // TODO: I think this should actually be the resource being accessed
         description: "Payment for meter event".to_string(),
         mime_type: "application/json".to_string(),
         output_schema: None,
@@ -236,16 +302,31 @@ pub async fn payment_middleware(
         asset: MixedAddress::Solana(Pubkey::from_str_const(
             "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
         )),
-        extra,
+        extra: None,
     }];
+
+    let payment_requirements = payment_requirements
+        .into_iter()
+        .map(|mut req| {
+            if let Some(extra) = supported
+                .kinds
+                .iter()
+                .find(|kind| kind.network == req.network)
+                .and_then(|kind| kind.extra.clone())
+            {
+                req.extra = Some(serde_json::to_value(&extra).unwrap());
+            }
+            req
+        })
+        .collect::<Vec<_>>();
 
     let headers = req.headers();
 
     match extract_payment_payload(headers, &payment_requirements).await {
         Ok(payment_payload) => {
             // Payment header found and valid
-            println!("\x1b[32m$ Received\x1b[0m - Valid payment payload received");
-            println!(
+            info!("Received - Valid payment payload received");
+            debug!(
                 "  Payment scheme: {:?}, network: {:?}",
                 payment_payload.scheme, payment_payload.network
             );
@@ -259,8 +340,8 @@ pub async fn payment_middleware(
             .await
             {
                 Ok(payer) => {
-                    println!("\x1b[32m$ Verified\x1b[0m - Payment verified by facilitator");
-                    println!("  Payer: {:?}", payer);
+                    info!("Verified - Payment verified by facilitator");
+                    debug!("  Payer: {:?}", payer);
 
                     // Store payer in request extensions for use by handler
                     req.extensions_mut().insert(payer.clone());
@@ -282,10 +363,10 @@ pub async fn payment_middleware(
                         .await
                         {
                             Ok(()) => {
-                                println!("\x1b[32m$ Settled\x1b[0m - Payment settled on-chain");
+                                info!("Settled - Payment settled on-chain");
                             }
                             Err(error_message) => {
-                                println!("\x1b[31m$ Settlement Failed\x1b[0m - {}", error_message);
+                                error!("Settlement Failed - {}", error_message);
                                 // Note: We don't fail the request here since the service was already provided
                             }
                         }
@@ -294,21 +375,15 @@ pub async fn payment_middleware(
                     response
                 }
                 Err(error_message) => {
-                    println!("\x1b[31m$ Verification Failed\x1b[0m - {}", error_message);
-                    let error_response = json!({
-                        "error": {
-                            "code": "payment_verification_failed",
-                            "message": error_message,
-                            "type": "invalid_request_error"
-                        }
-                    });
-                    (StatusCode::PAYMENT_REQUIRED, axum::Json(error_response)).into_response()
+                    error!("Payment verification failed: {}", error_message);
+                    X402MiddlewareError::VerifyError(error_message).into()
                 }
             }
         }
-        Err((status, json_error)) => {
+        Err(error) => {
+            error!("Payment extraction failed: {}", error);
             // No payment or invalid payment
-            (status, json_error).into_response()
+            error.into()
         }
     }
 }
