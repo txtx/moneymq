@@ -2,6 +2,7 @@ pub mod stripe;
 
 use std::sync::Arc;
 
+use crate::facilitator::endpoints::middleware::x402_post;
 use axum::{
     Router,
     http::StatusCode,
@@ -50,7 +51,10 @@ pub async fn start_provider(
         .route("/v1/prices", get(stripe::list_prices))
         // Billing endpoints
         .route("/v1/billing/meters", get(stripe::list_meters))
-        .route("/v1/billing/meter_events", post(stripe::create_meter_event))
+        .route(
+            "/v1/billing/meter_events",
+            x402_post(stripe::create_meter_event, state.clone()),
+        )
         // Customer endpoints
         .route("/v1/customers", post(stripe::create_customer))
         .route("/v1/customers/{id}", post(stripe::update_customer))

@@ -80,5 +80,5 @@ pub async fn create_meter_event(
         identifier: None,
     };
 
-    (StatusCode::OK, Json(meter_event))
+    (StatusCode::OK, Json(meter_event)).into_response()
 }
