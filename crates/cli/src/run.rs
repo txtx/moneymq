@@ -1,13 +1,19 @@
+use std::collections::HashMap;
 use std::fs;
 
 use console::style;
+use moneymq_core::validator::SolanaValidatorConfig;
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::Meter;
 use moneymq_types::Product;
+use moneymq_types::x402::config::facilitator::FacilitatorConfig;
+use moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig;
+use solana_keypair::Signer;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 use crate::Context;
+use crate::manifest::ProviderConfig;
 
 #[derive(Debug, Clone, PartialEq, clap::Args)]
 pub struct RunCommand {
@@ -23,10 +29,7 @@ pub struct RunCommand {
 impl RunCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         println!();
-        println!("{}{}",
-            style("Money").white(),
-            style("MQ").green()
-        );
+        println!("{}{}", style("Money").white(), style("MQ").green());
         println!("{}", style("Starting provider server").dim());
         println!();
 
@@ -68,7 +71,12 @@ impl RunCommand {
                         products.push(product);
                     }
                     Err(e) => {
-                        eprintln!("\n{} Failed to parse {}: {}", style("✗").red(), path.display(), e);
+                        eprintln!(
+                            "\n{} Failed to parse {}: {}",
+                            style("✗").red(),
+                            path.display(),
+                            e
+                        );
                         eprintln!("  {}", style("Skipping this file").dim());
                     }
                 }
@@ -79,7 +87,10 @@ impl RunCommand {
             return Err("No products found in catalog directory".to_string());
         }
 
-        println!("{}", style(format!("✓ {} products", products.len())).green());
+        println!(
+            "{}",
+            style(format!("✓ {} products", products.len())).green()
+        );
 
         // Load meters from metering directory (replace "catalog" with "metering" in path)
         let metering_path = catalog_path.replace("/catalog/", "/metering/");
@@ -105,7 +116,12 @@ impl RunCommand {
                             meters.push(meter);
                         }
                         Err(e) => {
-                            eprintln!("\n{} Failed to parse {}: {}", style("✗").red(), path.display(), e);
+                            eprintln!(
+                                "\n{} Failed to parse {}: {}",
+                                style("✗").red(),
+                                path.display(),
+                                e
+                            );
                             eprintln!("  {}", style("Skipping this file").dim());
                         }
                     }
@@ -117,7 +133,11 @@ impl RunCommand {
 
         println!();
 
-        let mode = if self.sandbox { "sandbox" } else { "production" };
+        let mode = if self.sandbox {
+            "sandbox"
+        } else {
+            "production"
+        };
         println!("{} {}", style("Mode").dim(), mode);
         println!("{} {}", style("Port").dim(), self.port);
         println!();
@@ -129,7 +149,14 @@ impl RunCommand {
         println!("  GET http://localhost:{}/health", self.port);
         println!();
 
-        println!("{}", style(format!("Set STRIPE_API_BASE=http://localhost:{}", self.port)).dim());
+        println!(
+            "{}",
+            style(format!(
+                "Set STRIPE_API_BASE=http://localhost:{}",
+                self.port
+            ))
+            .dim()
+        );
         println!();
         println!("{}", style("Press Ctrl+C to stop").dim());
         println!();
@@ -137,43 +164,12 @@ impl RunCommand {
         // Initialize tracing
         tracing_subscriber::fmt::init();
 
-        #[allow(unused_variables)]
-        let handles: Option<()> = None;
         // Only start local facilitator server in sandbox mode
-        if self.sandbox {
-            let sandbox_x402_config = ctx
-                .manifest
-                .providers
-                .iter()
-                .filter_map(|(name, provider)| {
-                    provider.x402_config().and_then(|config| {
-                        // Check if there's a "default" sandbox configuration with local facilitator
-                        config.sandboxes.get("default").and_then(|sandbox| {
-                            if sandbox.local_facilitator.is_some() {
-                                Some((name.clone(), sandbox.clone()))
-                            } else {
-                                None
-                            }
-                        })
-                    })
-                })
-                .collect::<Vec<_>>();
-
-            if sandbox_x402_config.len() > 1 {
-                eprintln!(
-                    "{} Multiple X402 sandbox providers found in manifest. Only the first local facilitator ({}) will be started.",
-                    style("Warning:").yellow(),
-                    sandbox_x402_config[0].0
-                );
-            }
-            // TODO: Re-enable X402 facilitator after refactoring to match new FacilitatorConfig structure
-            if !sandbox_x402_config.is_empty() {
-                eprintln!(
-                    "{} X402 local facilitator startup is temporarily disabled during refactoring",
-                    style("Warning:").yellow()
-                );
-            }
-        }
+        let handles = if self.sandbox {
+            start_facilitator_networks(&ctx.manifest.providers).await?
+        } else {
+            None
+        };
 
         // Start the server
         moneymq_core::provider::start_provider(products, meters, self.port, self.sandbox)
@@ -182,4 +178,93 @@ impl RunCommand {
 
         Ok(())
     }
+}
+
+type Error = Box<dyn std::error::Error + Send + Sync>;
+type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
+type ValidatorHandles = Vec<std::process::Child>;
+type LocalNetworkHandles = (FacilitatorHandle, ValidatorHandles);
+
+async fn start_facilitator_networks(
+    providers: &HashMap<String, ProviderConfig>,
+) -> Result<Option<LocalNetworkHandles>, String> {
+    let sandbox_x402_config = providers
+        .iter()
+        .filter_map(|(name, provider)| {
+            provider.x402_config().and_then(|config| {
+                // Check if there's a "default" sandbox configuration with local facilitator
+                config
+                    .sandboxes
+                    .get("default")
+                    .map(|c| (name.clone(), c.clone()))
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if sandbox_x402_config.len() > 1 {
+        eprintln!(
+            "{} Multiple X402 sandbox providers found in manifest. Only the first local facilitator ({}) will be started.",
+            style("Warning:").yellow(),
+            sandbox_x402_config[0].0
+        );
+    }
+
+    let Some((sandbox_name, sandbox_x402_config)) = sandbox_x402_config.get(0) else {
+        return Ok(None);
+    };
+
+    let facilitator_config = &sandbox_x402_config.facilitator;
+    let facilitator_config: FacilitatorConfig = facilitator_config.try_into()?;
+
+    let mut local_validator_handles = vec![];
+    for (network_name, network_config) in facilitator_config.networks.iter() {
+        match network_config {
+            FacilitatorNetworkConfig::SolanaSurfnet(surfnet_config) => {
+                let validator_config = SolanaValidatorConfig {
+                    rpc_api_url: surfnet_config.rpc_url.clone(),
+                    facilitator_pubkey: surfnet_config.payer_keypair.pubkey().to_string(),
+                };
+                let Some(handle) = moneymq_core::validator::start_local_solana_validator(
+                    validator_config
+                )
+                .map_err(|e| {
+                    format!(
+                        "Failed to start Solana Surfnet validator for facilitator sandbox '{}', network '{}': {}",
+                        sandbox_name, network_name, e
+                    )
+                })? else {
+                    println!(
+                        "Local Solana validator already running at {}",
+                        surfnet_config.rpc_url
+                    );
+                    continue;
+                };
+                println!("{}", style("Local Solana Validator").dim());
+                println!("   Network: {}", network_name);
+                println!("   RPC URL: {}", surfnet_config.rpc_url);
+                println!(
+                    "   Transaction Fee Payer: {}",
+                    surfnet_config.payer_keypair.pubkey()
+                );
+                local_validator_handles.push(handle);
+            }
+            FacilitatorNetworkConfig::SolanaMainnet(_) => {
+                // No local validator for mainnet
+            }
+        }
+    }
+
+    let url = facilitator_config.url.clone();
+    let handle = moneymq_core::facilitator::start_facilitator(facilitator_config)
+        .await
+        .map_err(|e| format!("Failed to start facilitator: {e}"))?;
+
+    println!("\n");
+    println!("{}", style("Local X402 Facilitator Endpoints").dim());
+    println!("   GET {}supported", url);
+    println!("   POST {}verify", url);
+    println!("   POST {}settle", url);
+    println!("   GET {}health", url);
+
+    Ok(Some((handle, local_validator_handles)))
 }

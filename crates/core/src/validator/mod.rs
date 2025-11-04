@@ -6,18 +6,9 @@ use url::Url;
 
 pub struct SolanaValidatorConfig {
     /// RPC API URL for the local Solana validator
-    pub rpc_api_url: String,
+    pub rpc_api_url: Url,
 
     pub facilitator_pubkey: String,
-}
-
-impl SolanaValidatorConfig {
-    pub fn new(rpc_api_url: String, facilitator_pubkey: String) -> Self {
-        Self {
-            rpc_api_url,
-            facilitator_pubkey,
-        }
-    }
 }
 
 fn check_if_validator_running(rpc_client: &RpcClient) -> bool {
@@ -28,10 +19,9 @@ fn check_if_validator_running(rpc_client: &RpcClient) -> bool {
 }
 
 pub fn start_local_solana_validator(
-    config: &SolanaValidatorConfig,
+    config: SolanaValidatorConfig,
 ) -> Result<Option<Child>, Box<dyn std::error::Error>> {
-    let rpc_url = Url::parse(&config.rpc_api_url)
-        .map_err(|e| format!("Invalid RPC URL {}: {}", config.rpc_api_url, e))?;
+    let rpc_url = config.rpc_api_url.clone();
 
     let rpc_client = RpcClient::new(rpc_url.as_str());
 

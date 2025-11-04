@@ -17,3 +17,17 @@ providers:
         description: "Stripe sandbox - Sandbox"
         # api_key: sk_test_...  # Optional - overridden by STRIPE_SANDBOX_SECRET_KEY env var
         # api_version: "2023-10-16"  # Optional - defaults to Stripe's latest
+
+  my_own_x402_provider:
+    provider_type: x402
+    # Using an existing facilitator
+    facilitator:
+      url: "https://coinbase.com/facilitator"
+      api_token: "<api_token>"
+
+    sandboxes:
+      default:
+        facilitator:
+          networks:
+            solana:
+              network_type: "solana-surfnet"

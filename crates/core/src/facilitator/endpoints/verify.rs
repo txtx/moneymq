@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use moneymq_types::x402::{FacilitatorErrorReason, VerifyRequest, VerifyResponse};
+use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, VerifyResponse};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use tracing::{error, info};
 
@@ -22,7 +22,17 @@ pub async fn handler(
     );
 
     // Verify network matches
-    if request.payment_requirements.network != state.config.network {
+    let Some(network_config) = state
+        .config
+        .networks
+        .iter()
+        .find_map(|(_, network_config)| {
+            network_config
+                .network()
+                .eq(&request.payment_requirements.network)
+                .then(|| network_config)
+        })
+    else {
         return (
             StatusCode::BAD_REQUEST,
             Json(VerifyResponse::Invalid {
@@ -30,7 +40,7 @@ pub async fn handler(
                 payer: None,
             }),
         );
-    }
+    };
 
     // Verify payment payload network matches requirements
     if request.payment_payload.network != request.payment_requirements.network {
@@ -44,18 +54,24 @@ pub async fn handler(
     }
 
     // Delegate to network-specific verification
-    let rpc_client = Arc::new(RpcClient::new(state.config.rpc_url.clone()));
-    match networks::solana::verify_solana_payment(&request, &state.config, &rpc_client).await {
-        Ok(response) => (StatusCode::OK, Json(response)),
-        Err(e) => {
-            error!("Verification failed: {}", e);
-            (
-                StatusCode::BAD_REQUEST,
-                Json(VerifyResponse::Invalid {
-                    reason: FacilitatorErrorReason::UnknownError,
-                    payer: None,
-                }),
-            )
+    match network_config.network() {
+        Network::SolanaSurfnet | Network::SolanaMainnet => {
+            let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
+            match networks::solana::verify_solana_payment(&request, &network_config, &rpc_client)
+                .await
+            {
+                Ok(response) => (StatusCode::OK, Json(response)),
+                Err(e) => {
+                    error!("Verification failed: {}", e);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(VerifyResponse::Invalid {
+                            reason: FacilitatorErrorReason::FreeForm(e.to_string()),
+                            payer: None,
+                        }),
+                    )
+                }
+            }
         }
     }
 }
