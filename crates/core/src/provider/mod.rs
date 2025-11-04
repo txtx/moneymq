@@ -10,6 +10,11 @@ use axum::{
     routing::{get, post},
 };
 use moneymq_types::{Meter, Product, x402::config::facilitator::FacilitatorConfig};
+use reqwest::{
+    Method,
+    header::{AUTHORIZATION, CONTENT_TYPE},
+};
+use tower_http::cors::{Any, CorsLayer};
 
 /// Application state
 #[derive(Clone)]
@@ -59,6 +64,11 @@ pub async fn start_provider(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let state = ProviderState::new(products, meters, use_sandbox, facilitator_config);
 
+    let cors_layer = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET])
+        .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
+
     let app = Router::new()
         // Health check
         .route("/health", get(health_check))
@@ -82,6 +92,7 @@ pub async fn start_provider(
         )
         // Subscription endpoints
         .route("/v1/subscriptions", post(stripe::create_subscription))
+        .layer(cors_layer)
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
