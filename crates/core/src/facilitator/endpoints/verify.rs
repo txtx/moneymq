@@ -7,7 +7,7 @@ use axum::{
 };
 use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, VerifyResponse};
 use solana_client::nonblocking::rpc_client::RpcClient;
-use tracing::{error, info};
+use tracing::error;
 
 use crate::facilitator::{FacilitatorState, networks};
 
@@ -16,7 +16,7 @@ pub async fn handler(
     State(state): State<FacilitatorState>,
     Json(request): Json<VerifyRequest>,
 ) -> impl IntoResponse {
-    info!(
+    println!(
         "Received verify request for network: {:?}",
         request.payment_requirements.network
     );

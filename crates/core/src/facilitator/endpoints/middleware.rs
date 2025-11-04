@@ -229,13 +229,13 @@ pub async fn payment_middleware(
         description: "Payment for meter event".to_string(),
         mime_type: "application/json".to_string(),
         output_schema: None,
-        pay_to: MixedAddress::Solana(
-            Pubkey::from_str("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA").unwrap(),
-        ),
+        pay_to: MixedAddress::Solana(Pubkey::from_str_const(
+            "CGRsTkDKysipPZMcvM4BxVEXvp7Wa3v6MPTitVy2Dwa6",
+        )),
         max_timeout_seconds: 300,
-        asset: MixedAddress::Solana(
-            Pubkey::from_str("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").unwrap(),
-        ),
+        asset: MixedAddress::Solana(Pubkey::from_str_const(
+            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+        )),
         extra,
     }];
 
