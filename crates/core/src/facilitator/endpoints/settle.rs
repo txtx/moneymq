@@ -5,7 +5,7 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use moneymq_types::x402::{FacilitatorErrorReason, SettleRequest, SettleResponse};
+use moneymq_types::x402::{FacilitatorErrorReason, Network, SettleRequest, SettleResponse};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use tracing::{error, info};
 
@@ -22,7 +22,17 @@ pub async fn handler(
     );
 
     // Verify network matches
-    if request.payment_requirements.network != state.config.network {
+    let Some(network_config) = state
+        .config
+        .networks
+        .iter()
+        .find_map(|(_, network_config)| {
+            network_config
+                .network()
+                .eq(&request.payment_requirements.network)
+                .then(|| network_config)
+        })
+    else {
         return (
             StatusCode::BAD_REQUEST,
             Json(SettleResponse {
@@ -33,7 +43,7 @@ pub async fn handler(
                 network: request.payment_requirements.network.clone(),
             }),
         );
-    }
+    };
 
     // Verify payment payload network matches requirements
     if request.payment_payload.network != request.payment_requirements.network {
@@ -50,21 +60,27 @@ pub async fn handler(
     }
 
     // Delegate to network-specific settlement
-    let rpc_client = Arc::new(RpcClient::new(state.config.rpc_url.clone()));
-    match networks::solana::settle_solana_payment(&request, &state.config, &rpc_client).await {
-        Ok(response) => (StatusCode::OK, Json(response)),
-        Err(e) => {
-            error!("Settlement failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(SettleResponse {
-                    success: false,
-                    error_reason: Some(FacilitatorErrorReason::UnknownError),
-                    payer: request.payment_requirements.pay_to.clone(),
-                    transaction: None,
-                    network: request.payment_requirements.network.clone(),
-                }),
-            )
+    match network_config.network() {
+        Network::SolanaSurfnet | Network::SolanaMainnet => {
+            let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
+            match networks::solana::settle_solana_payment(&request, &network_config, &rpc_client)
+                .await
+            {
+                Ok(response) => (StatusCode::OK, Json(response)),
+                Err(e) => {
+                    error!("Settlement failed: {}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(SettleResponse {
+                            success: false,
+                            error_reason: Some(FacilitatorErrorReason::FreeForm(e.to_string())),
+                            payer: request.payment_requirements.pay_to.clone(),
+                            transaction: None,
+                            network: request.payment_requirements.network.clone(),
+                        }),
+                    )
+                }
+            }
         }
     }
 }

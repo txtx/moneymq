@@ -4539,6 +4539,7 @@ dependencies = [
  "tokio",
  "toml 0.9.8",
  "tracing-subscriber",
+ "url 2.5.7",
 ]
 
 [[package]]
@@ -4591,10 +4592,12 @@ version = "0.1.0"
 name = "moneymq-types"
 version = "0.1.0"
 dependencies = [
+ "bs58",
  "chrono",
  "indexmap 2.12.0",
  "serde",
  "serde_json",
+ "solana-keypair",
  "url 2.5.7",
 ]
 
