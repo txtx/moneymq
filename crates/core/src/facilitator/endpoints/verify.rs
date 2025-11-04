@@ -7,7 +7,7 @@ use axum::{
 };
 use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, VerifyResponse};
 use solana_client::nonblocking::rpc_client::RpcClient;
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::facilitator::{FacilitatorState, networks};
 
@@ -16,7 +16,7 @@ pub async fn handler(
     State(state): State<FacilitatorState>,
     Json(request): Json<VerifyRequest>,
 ) -> impl IntoResponse {
-    println!(
+    debug!(
         "Received verify request for network: {:?}",
         request.payment_requirements.network
     );
@@ -33,6 +33,10 @@ pub async fn handler(
                 .then(|| network_config)
         })
     else {
+        debug!(
+            "Invalid network in verify request: {:?}",
+            request.payment_requirements.network
+        );
         return (
             StatusCode::BAD_REQUEST,
             Json(VerifyResponse::Invalid {
@@ -44,6 +48,10 @@ pub async fn handler(
 
     // Verify payment payload network matches requirements
     if request.payment_payload.network != request.payment_requirements.network {
+        debug!(
+            "Payment payload network does not match requirements: {:?} != {:?}",
+            request.payment_payload.network, request.payment_requirements.network
+        );
         return (
             StatusCode::BAD_REQUEST,
             Json(VerifyResponse::Invalid {
