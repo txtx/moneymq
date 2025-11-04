@@ -45,7 +45,6 @@ pub struct X402Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "network_type", rename_all = "snake_case")]
 pub enum ServerConfigFile {
-    #[serde(alias = "solana")]
     SolanaSurfnet(SolanaSurfnetServerConfigFile),
     SolanaMainnet(SolanaMainnetServerConfigFile),
 }
@@ -155,7 +154,6 @@ impl TryInto<FacilitatorConfig> for &FacilitatorConfigFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "network_type", rename_all = "kebab-case")]
 pub enum FacilitatorProviderConfigFile {
-    #[serde(alias = "solana")]
     SolanaSurfnet(SolanaSurfnetFacilitatorProviderConfigFile),
     SolanaMainnet(SolanaMainnetFacilitatorProviderConfigFile),
 }
