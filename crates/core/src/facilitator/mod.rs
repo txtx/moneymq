@@ -7,17 +7,28 @@ use axum::{
     Router,
     routing::{get, post},
 };
-use moneymq_types::x402::Network;
+use kora_lib::{
+    Config,
+    config::{FeePayerPolicy, KoraConfig, MetricsConfig, Token2022Config, ValidationConfig},
+    fee::price::{PriceConfig, PriceModel},
+    oracle::PriceSource,
+    signer::{
+        MemorySignerConfig, SelectionStrategy, SignerConfig, SignerPool, SignerPoolConfig,
+        SignerTypeConfig, config::SignerPoolSettings,
+    },
+    state::{init_config, init_signer_pool},
+    usage_limit::UsageTracker,
+};
+use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
+use tokio::task::JoinHandle;
 use tracing::info;
 
-/// Configuration for the facilitator
-#[derive(Clone)]
-pub struct FacilitatorConfig {
-    /// RPC URL
-    pub rpc_url: String,
-    /// Default network to support
-    pub network: Network,
-}
+pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
+pub const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
+pub const SPL_TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+pub const SPL_TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+pub const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID: &str =
+    "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
 
 /// Shared state for the facilitator
 #[derive(Clone)]
@@ -46,22 +57,88 @@ pub fn create_router(state: FacilitatorState) -> Router {
 /// Start the facilitator server
 pub async fn start_facilitator(
     config: FacilitatorConfig,
-    port: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<
+    JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    Box<dyn std::error::Error>,
+> {
+    let url = config.url.clone();
+
+    let kora_config = Config {
+        validation: ValidationConfig {
+            max_allowed_lamports: 100_000_000, // 0.1 SOL
+            max_signatures: 10,
+            allowed_programs: vec![
+                SYSTEM_PROGRAM_ID.to_string(),
+                COMPUTE_BUDGET_PROGRAM_ID.to_string(),
+                SPL_TOKEN_PROGRAM_ID.to_string(),
+                SPL_TOKEN_2022_PROGRAM_ID.to_string(),
+                SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID.to_string(),
+            ],
+            allowed_tokens: vec![],
+            allowed_spl_paid_tokens: kora_lib::config::SplTokenConfig::All,
+            disallowed_accounts: vec![],
+            price_source: PriceSource::Mock,
+            fee_payer_policy: FeePayerPolicy::default(),
+            price: PriceConfig {
+                model: PriceModel::Free,
+            },
+            token_2022: Token2022Config::default(),
+        },
+        kora: KoraConfig::default(),
+        metrics: MetricsConfig::default(),
+    };
+    init_config(kora_config)?;
+    UsageTracker::init_usage_limiter().await?;
+
+    let signers = config
+        .networks
+        .iter()
+        .filter_map(|(n, c)| match c {
+            FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
+                let key = format!("FACILITATOR_{}_SIGNER_POOL", n);
+                unsafe {
+                    let value = cfg.payer_keypair.to_base58_string();
+                    std::env::set_var(key.clone(), value);
+                }
+                Some(SignerConfig {
+                    name: format!("facilitator-{}-signer", n),
+                    weight: None,
+                    config: SignerTypeConfig::Memory {
+                        config: MemorySignerConfig {
+                            private_key_env: key,
+                        },
+                    },
+                })
+            }
+            FacilitatorNetworkConfig::SolanaMainnet(_) => None,
+        })
+        .collect::<Vec<_>>();
+
+    let signer_pool_config = SignerPoolConfig {
+        signers,
+        signer_pool: SignerPoolSettings {
+            strategy: SelectionStrategy::RoundRobin,
+        },
+    };
+    let signer_pool = SignerPool::from_config(signer_pool_config).await?;
+    init_signer_pool(signer_pool)?;
+
     let state = FacilitatorState::new(config);
     let app = create_router(state);
 
-    let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let addr = format!("0.0.0.0:{}", url.port().expect("URL must have a port"));
+    let listener = tokio::net::TcpListener::bind(&addr)
+        .await
+        .map_err(|e| format!("Failed to bind to facilitator URL {}: {}", url, e))?;
 
-    info!("🚀 Facilitator server starting on {}", addr);
+    info!("🚀 Facilitator server starting on {}", url);
     info!("📍 Endpoints:");
-    info!("  GET  http://localhost:{}/health", port);
-    info!("  POST http://localhost:{}/verify", port);
-    info!("  POST http://localhost:{}/settle", port);
-    info!("  GET  http://localhost:{}/supported", port);
+    info!("  GET  {}/health", url);
+    info!("  POST {}/verify", url);
+    info!("  POST {}/settle", url);
+    info!("  GET  {}/supported", url);
 
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    let handle =
+        tokio::spawn(async move { axum::serve(listener, app).await.map_err(|e| e.into()) });
+    Ok(handle)
 }

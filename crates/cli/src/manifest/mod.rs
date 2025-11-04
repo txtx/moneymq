@@ -1,9 +1,10 @@
 use std::{collections::HashMap, fs, path::Path};
 
 use indexmap::IndexMap;
-use moneymq_core::facilitator::FacilitatorConfig;
-use moneymq_types::x402::Network;
 use serde::{Deserialize, Serialize};
+
+use crate::manifest::x402::X402Config;
+mod x402;
 // TODO: Re-enable x402_rs imports when refactoring X402 facilitator
 // use x402_rs::{
 //     chain::{NetworkProvider, solana::SolanaProvider},
@@ -188,154 +189,6 @@ impl Default for StripeConfig {
             sandboxes: IndexMap::new(),
         }
     }
-}
-
-/// X402 sandbox/test configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct X402SandboxConfig {
-    /// Optional description of this sandbox environment
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    /// Facilitator service URL
-    pub facilitator_url: Option<String>,
-
-    /// Configuration for local facilitator
-    pub local_facilitator: Option<FacilitatorConfigFile>,
-}
-
-impl Default for X402SandboxConfig {
-    fn default() -> Self {
-        Self {
-            description: None,
-            facilitator_url: None,
-            local_facilitator: None,
-        }
-    }
-}
-
-/// x402 provider configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct X402Config {
-    /// Optional description of this provider
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
-    /// Whether to use test mode (default: true)
-    #[serde(default = "default_test_mode")]
-    pub test_mode: bool,
-
-    /// Facilitator service URL
-    pub facilitator_url: Option<String>,
-
-    /// Configuration for local facilitator
-    pub local_facilitator: Option<FacilitatorConfigFile>,
-
-    /// Nested sandbox/test configurations
-    /// Key is the sandbox name (e.g., "default", "staging", "test")
-    /// When --sandbox flag is used, the "default" sandbox will be used
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub sandboxes: IndexMap<String, X402SandboxConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FacilitatorConfigFile {
-    /// Facilitator service host (e.g., "localhost")
-    pub host: String,
-    /// Facilitator service port (e.g., 8080)
-    pub port: u16,
-    /// Facilitator provider configurations
-    pub providers: HashMap<String, FacilitatorProviderConfigFile>,
-}
-
-impl TryInto<FacilitatorConfig> for FacilitatorConfigFile {
-    type Error = String;
-
-    fn try_into(self) -> Result<FacilitatorConfig, Self::Error> {
-        // Get the first provider's RPC URL and network
-        let (rpc_url, network) = self
-            .providers
-            .values()
-            .next()
-            .ok_or_else(|| "No providers configured for facilitator".to_string())?
-            .get_rpc_and_network()?;
-
-        Ok(FacilitatorConfig { rpc_url, network })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "chain_type", rename_all = "snake_case")]
-pub enum FacilitatorProviderConfigFile {
-    Solana(SolanaFacilitatorProviderConfigFile),
-    Evm(EvmFacilitatorProviderConfig),
-}
-
-impl FacilitatorProviderConfigFile {
-    fn get_rpc_and_network(&self) -> Result<(String, Network), String> {
-        match self {
-            FacilitatorProviderConfigFile::Solana(config) => {
-                Ok((config.rpc_url.clone(), config.network.clone()))
-            }
-            FacilitatorProviderConfigFile::Evm(config) => {
-                let rpc_url = config
-                    .rpc_url
-                    .clone()
-                    .ok_or_else(|| "EVM provider requires rpc_url configuration".to_string())?;
-                Ok((rpc_url, config.network.clone()))
-            }
-        }
-    }
-}
-
-// TODO: Re-enable when refactoring X402 facilitator with x402_rs
-// impl TryInto<(Network, NetworkProvider)> for &FacilitatorProviderConfigFile {
-//     type Error = String;
-//
-//     fn try_into(self) -> Result<(Network, NetworkProvider), Self::Error> {
-//         match self {
-//             FacilitatorProviderConfigFile::Evm(_) => {
-//                 todo!("Implement EVM provider configuration")
-//             }
-//             FacilitatorProviderConfigFile::Solana(config) => {
-//                 let network = config.network;
-//                 let provider: NetworkProvider = config.try_into()?;
-//                 Ok((network, provider))
-//             }
-//         }
-//     }
-// }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaFacilitatorProviderConfigFile {
-    pub network: Network,
-    pub keypair_path: Option<String>,
-    pub rpc_url: String,
-}
-
-// TODO: Re-enable when refactoring X402 facilitator with x402_rs
-// impl TryInto<NetworkProvider> for &SolanaFacilitatorProviderConfigFile {
-//     type Error = String;
-//     fn try_into(self) -> Result<NetworkProvider, Self::Error> {
-//         let network = self.network;
-//         let keypair = if let Some(ref path) = self.keypair_path {
-//             Keypair::read_from_file(path)
-//                 .map_err(|e| format!("Failed to read Solana keypair from file: {}", e))?
-//         } else {
-//             Keypair::new()
-//         };
-//
-//         let provider = SolanaProvider::try_new(keypair, self.rpc_url.clone(), network)
-//             .expect("Failed to create Solana provider");
-//         Ok(NetworkProvider::Solana(provider))
-//     }
-// }
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EvmFacilitatorProviderConfig {
-    pub network: Network,
-    pub secret_key_path: Option<String>,
-    pub rpc_url: Option<String>,
 }
 
 fn default_test_mode() -> bool {
