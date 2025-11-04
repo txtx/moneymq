@@ -9,12 +9,13 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use moneymq_types::{Meter, Product, x402::config::facilitator::FacilitatorConfig};
+use moneymq_types::{Meter, Product};
 use reqwest::{
     Method,
     header::{AUTHORIZATION, CONTENT_TYPE},
 };
 use tower_http::cors::{Any, CorsLayer};
+use url::Url;
 
 /// Application state
 #[derive(Clone)]
@@ -22,7 +23,7 @@ pub struct ProviderState {
     pub products: Arc<Vec<Product>>,
     pub meters: Arc<Vec<Meter>>,
     pub use_sandbox: bool,
-    pub facilitator_config: Arc<FacilitatorConfig>,
+    pub facilitator_url: Url,
 }
 
 /// Application state
@@ -38,13 +39,13 @@ impl ProviderState {
         products: Vec<Product>,
         meters: Vec<Meter>,
         use_sandbox: bool,
-        facilitator_config: Arc<FacilitatorConfig>,
+        facilitator_url: Url,
     ) -> Self {
         Self {
             products: Arc::new(products),
             meters: Arc::new(meters),
             use_sandbox,
-            facilitator_config,
+            facilitator_url,
         }
     }
 }
@@ -58,11 +59,11 @@ async fn health_check() -> impl IntoResponse {
 pub async fn start_provider(
     products: Vec<Product>,
     meters: Vec<Meter>,
-    facilitator_config: Arc<FacilitatorConfig>,
+    facilitator_url: Url,
     port: u16,
     use_sandbox: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let state = ProviderState::new(products, meters, use_sandbox, facilitator_config);
+    let state = ProviderState::new(products, meters, use_sandbox, facilitator_url);
 
     let cors_layer = CorsLayer::new()
         .allow_origin(Any)
