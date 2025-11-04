@@ -125,7 +125,7 @@ export async function payUpon402<T>(
         const mockPayload = {
           x402Version,
           scheme: "exact",
-          network: "solana-surfnet",
+          network: "solana",
           payload: {
             transaction: "mock_base58_encoded_transaction",
           },

@@ -85,7 +85,7 @@ export function createStripeClient(
         const mockPayload = {
           x402Version: 1,
           scheme: "exact",
-          network: "solana-surfnet",
+          network: "solana",
           payload: {
             transaction: "mock_base58_encoded_transaction",
           },
@@ -94,6 +94,7 @@ export function createStripeClient(
           "base64",
         );
       } else {
+
         // Select appropriate payment requirement
         const selectedPaymentRequirement = selectPaymentRequirements(
           paymentRequirements,
@@ -104,6 +105,7 @@ export function createStripeClient(
         console.log(
           `💰 Creating payment for ${selectedPaymentRequirement.network}...`,
         );
+
 
         // Extract the appropriate signer for the network
         let signer: Signer;
