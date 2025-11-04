@@ -73,8 +73,7 @@ pub enum Scheme {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum Network {
-    SolanaMainnet,
-    SolanaSurfnet,
+    Solana,
 }
 
 /// Token amount (U256 as string)
@@ -258,21 +257,26 @@ pub struct VerifyRequest {
 pub type SettleRequest = VerifyRequest;
 
 /// Facilitator error reasons
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
 #[serde(untagged, rename_all = "camelCase")]
 pub enum FacilitatorErrorReason {
     /// Payer doesn't have sufficient funds.
+    #[error("insufficient_funds")]
     #[serde(rename = "insufficient_funds")]
     InsufficientFunds,
     /// The scheme in PaymentPayload didn't match expected (e.g., not 'exact'), or settlement failed.
+    #[error("invalid_scheme")]
     #[serde(rename = "invalid_scheme")]
     InvalidScheme,
     /// Network in PaymentPayload didn't match a facilitator's expected network.
+    #[error("invalid_network")]
     #[serde(rename = "invalid_network")]
     InvalidNetwork,
     /// Unexpected settle error
+    #[error("unexpected_settle_error")]
     #[serde(rename = "unexpected_settle_error")]
     UnexpectedSettleError,
+    #[error("{0}")]
     FreeForm(String),
 }
 
@@ -389,4 +393,39 @@ pub struct SupportedPaymentKindExtra {
 #[serde(rename_all = "camelCase")]
 pub struct SupportedResponse {
     pub kinds: Vec<SupportedPaymentKind>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_network_serialization() {
+        // Test SolanaMainnet serializes to "solana"
+        let mainnet = Network::Solana;
+        let json = serde_json::to_string(&mainnet).unwrap();
+        assert_eq!(json, r#""solana""#);
+
+        // Test deserialization
+        let parsed: Network = serde_json::from_str(r#""solana""#).unwrap();
+        assert_eq!(parsed, Network::Solana);
+    }
+}
+
+#[test]
+fn test_supported_payment_kind_extra_serialization() {
+    use solana_keypair::Pubkey;
+    use std::str::FromStr;
+
+    let pubkey = Pubkey::from_str("11111111111111111111111111111112").unwrap();
+    let extra = SupportedPaymentKindExtra {
+        fee_payer: MixedAddress::Solana(pubkey),
+    };
+
+    let json = serde_json::to_string(&extra).unwrap();
+    println!("Serialized: {}", json);
+
+    // Should be camelCase
+    assert!(json.contains("feePayer"));
+    assert!(!json.contains("fee_payer"));
 }

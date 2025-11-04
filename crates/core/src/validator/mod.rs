@@ -2,6 +2,7 @@ use std::process::{Child, Stdio};
 
 use serde_json::json;
 use solana_client::{rpc_client::RpcClient, rpc_request::RpcRequest};
+use tracing::info;
 use url::Url;
 
 pub struct SolanaValidatorConfig {
@@ -27,6 +28,10 @@ pub fn start_local_solana_validator(
 
     // Check if validator is already running at the rpc url
     if check_if_validator_running(&rpc_client) {
+        info!(
+            "Local Solana validator already running at {}",
+            config.rpc_api_url
+        );
         return Ok(None);
     }
 
@@ -77,6 +82,8 @@ pub fn start_local_solana_validator(
         .into());
     }
 
+    info!("Local Solana validator started at {}", config.rpc_api_url);
+
     // Todo: Set up token account for facilitator
     let _: serde_json::Value = rpc_client
         .send(
@@ -87,11 +94,16 @@ pub fn start_local_solana_validator(
                 config.facilitator_pubkey,
                 "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
                 {
-                    "amount": 1000000000
+                    "amount": 100_000_000
                 }
             ]),
         )
         .unwrap_or_default();
+
+    info!(
+        "Set up token account for facilitator {} on local Solana validator",
+        config.facilitator_pubkey
+    );
 
     Ok(Some(validator_handle))
 }

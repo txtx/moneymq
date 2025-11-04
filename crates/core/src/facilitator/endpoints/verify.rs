@@ -7,7 +7,7 @@ use axum::{
 };
 use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, VerifyResponse};
 use solana_client::nonblocking::rpc_client::RpcClient;
-use tracing::{error, info};
+use tracing::{debug, error};
 
 use crate::facilitator::{FacilitatorState, networks};
 
@@ -16,7 +16,7 @@ pub async fn handler(
     State(state): State<FacilitatorState>,
     Json(request): Json<VerifyRequest>,
 ) -> impl IntoResponse {
-    info!(
+    debug!(
         "Received verify request for network: {:?}",
         request.payment_requirements.network
     );
@@ -33,6 +33,10 @@ pub async fn handler(
                 .then(|| network_config)
         })
     else {
+        debug!(
+            "Invalid network in verify request: {:?}",
+            request.payment_requirements.network
+        );
         return (
             StatusCode::BAD_REQUEST,
             Json(VerifyResponse::Invalid {
@@ -44,6 +48,10 @@ pub async fn handler(
 
     // Verify payment payload network matches requirements
     if request.payment_payload.network != request.payment_requirements.network {
+        debug!(
+            "Payment payload network does not match requirements: {:?} != {:?}",
+            request.payment_payload.network, request.payment_requirements.network
+        );
         return (
             StatusCode::BAD_REQUEST,
             Json(VerifyResponse::Invalid {
@@ -55,7 +63,7 @@ pub async fn handler(
 
     // Delegate to network-specific verification
     match network_config.network() {
-        Network::SolanaSurfnet | Network::SolanaMainnet => {
+        Network::Solana => {
             let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
             match networks::solana::verify_solana_payment(&request, &network_config, &rpc_client)
                 .await

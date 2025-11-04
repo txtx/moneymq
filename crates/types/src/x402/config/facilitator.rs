@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt::{self, Display};
 
 use solana_keypair::{Keypair, Signer};
 use url::Url;
@@ -21,8 +22,8 @@ pub enum FacilitatorNetworkConfig {
 impl FacilitatorNetworkConfig {
     pub fn network(&self) -> Network {
         match self {
-            FacilitatorNetworkConfig::SolanaSurfnet(_) => Network::SolanaSurfnet,
-            FacilitatorNetworkConfig::SolanaMainnet(_) => Network::SolanaMainnet,
+            FacilitatorNetworkConfig::SolanaSurfnet(_) => Network::Solana,
+            FacilitatorNetworkConfig::SolanaMainnet(_) => Network::Solana,
         }
     }
     pub fn extra(&self) -> Option<SupportedPaymentKindExtra> {
@@ -64,5 +65,54 @@ impl SolanaMainnetFacilitatorConfig {
         Some(SupportedPaymentKindExtra {
             fee_payer: self.payer_keypair.pubkey().into(),
         })
+    }
+}
+
+impl Display for FacilitatorConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "FacilitatorConfig {{")?;
+        writeln!(f, "  url: {}", self.url)?;
+        writeln!(
+            f,
+            "  api_token: {}",
+            self.api_token.as_ref().map(|_| "***").unwrap_or("None")
+        )?;
+        writeln!(f, "  networks: {{")?;
+        for (name, config) in &self.networks {
+            writeln!(f, "    {}: {}", name, config)?;
+        }
+        writeln!(f, "  }}")?;
+        write!(f, "}}")
+    }
+}
+
+impl Display for FacilitatorNetworkConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FacilitatorNetworkConfig::SolanaSurfnet(config) => write!(f, "{}", config),
+            FacilitatorNetworkConfig::SolanaMainnet(config) => write!(f, "{}", config),
+        }
+    }
+}
+
+impl Display for SolanaSurfnetFacilitatorConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "SolanaSurfnet {{ rpc_url: {}, payer_pubkey: {} }}",
+            self.rpc_url,
+            self.payer_keypair.pubkey()
+        )
+    }
+}
+
+impl Display for SolanaMainnetFacilitatorConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "SolanaMainnet {{ rpc_url: {}, payer_pubkey: {} }}",
+            self.rpc_url,
+            self.payer_keypair.pubkey()
+        )
     }
 }

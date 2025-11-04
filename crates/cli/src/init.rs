@@ -120,14 +120,16 @@ impl InitCommand {
         match provider.as_str() {
             "stripe" => {
                 // Fetch account information to validate production key
-                let account_info = moneymq_driver_stripe::get_account_info(&production_key)
-                    .await
-                    .map_err(|e| format!("Failed to fetch account info: {}", e))?;
+                let account_info =
+                    moneymq_core::provider::stripe::iac::get_account_info(&production_key)
+                        .await
+                        .map_err(|e| format!("Failed to fetch account info: {}", e))?;
 
                 let sandbox_account_info = if let Some(ref sandbox_key_value) = sandbox_key {
-                    let info = moneymq_driver_stripe::get_account_info(sandbox_key_value)
-                        .await
-                        .ok();
+                    let info =
+                        moneymq_core::provider::stripe::iac::get_account_info(sandbox_key_value)
+                            .await
+                            .ok();
                     info
                 } else {
                     None
@@ -172,14 +174,17 @@ impl InitCommand {
                 println!("\nFetching products and meters...");
                 let _ = dotenvy::from_path(&env_path);
 
-                let mut catalog =
-                    moneymq_driver_stripe::download_catalog(&production_key, &provider, true)
-                        .await
-                        .map_err(|e| format!("Failed to fetch catalog: {}", e))?;
+                let mut catalog = moneymq_core::provider::stripe::iac::download_catalog(
+                    &production_key,
+                    &provider,
+                    true,
+                )
+                .await
+                .map_err(|e| format!("Failed to fetch catalog: {}", e))?;
 
                 // If sandbox key is provided, fetch sandbox catalog and match products
                 if let Some(ref sandbox_key_value) = sandbox_key {
-                    match moneymq_driver_stripe::download_catalog(
+                    match moneymq_core::provider::stripe::iac::download_catalog(
                         sandbox_key_value,
                         &provider,
                         false,
@@ -287,14 +292,17 @@ impl InitCommand {
                 }
 
                 // Fetch and save meters
-                let mut meter_collection =
-                    moneymq_driver_stripe::download_meters(&production_key, &provider_name, true)
-                        .await
-                        .map_err(|e| format!("Failed to fetch meters: {}", e))?;
+                let mut meter_collection = moneymq_core::provider::stripe::iac::download_meters(
+                    &production_key,
+                    &provider_name,
+                    true,
+                )
+                .await
+                .map_err(|e| format!("Failed to fetch meters: {}", e))?;
 
                 // If sandbox key is provided, fetch sandbox meters and match
                 if let Some(ref sandbox_key_value) = sandbox_key {
-                    match moneymq_driver_stripe::download_meters(
+                    match moneymq_core::provider::stripe::iac::download_meters(
                         sandbox_key_value,
                         &format!("{}_sandbox", provider_name),
                         false,
@@ -381,7 +389,7 @@ impl InitCommand {
 /// Generate a provider name from account info
 /// Format: <company_slug>_stripe or just "stripe" if no business name
 fn generate_provider_name(
-    account_info: &moneymq_driver_stripe::AccountInfo,
+    account_info: &moneymq_core::provider::stripe::iac::AccountInfo,
     provider_type: &str,
 ) -> String {
     // Try to use business name first, then display name
@@ -444,8 +452,8 @@ fn save_env_file(
 fn save_manifest_file(
     path: &Path,
     provider_name: &str,
-    account_info: &moneymq_driver_stripe::AccountInfo,
-    sandbox_account_info: Option<&moneymq_driver_stripe::AccountInfo>,
+    account_info: &moneymq_core::provider::stripe::iac::AccountInfo,
+    sandbox_account_info: Option<&moneymq_core::provider::stripe::iac::AccountInfo>,
     has_sandbox: bool,
 ) -> Result<(), String> {
     // Generate description from account info

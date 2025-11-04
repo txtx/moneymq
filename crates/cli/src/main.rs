@@ -51,11 +51,7 @@ struct Opts {
 
     /// Provider configuration to use (e.g., "stripe", "stripe_sandbox")
     /// If not specified, uses the first provider found in billing.yaml
-    #[arg(
-        long = "provider",
-        short = 'p',
-        global = true
-    )]
+    #[arg(long = "provider", short = 'p', global = true)]
     provider: Option<String>,
 
     /// Use the sandbox provider configuration referenced in the main provider

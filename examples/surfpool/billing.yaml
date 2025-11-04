@@ -30,4 +30,6 @@ providers:
         facilitator:
           networks:
             solana:
-              network_type: "solana-surfnet"
+              network_type: solana-surfnet
+              rpc_url: "http://127.0.0.1:8899"
+              # payer_keypair_path: "./keypair.json"  # Optional - if not provided, a new keypair is generated

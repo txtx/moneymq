@@ -4,7 +4,7 @@ use clap::Parser;
 use console::style;
 use dialoguer::Confirm;
 use indicatif::{ProgressBar, ProgressStyle};
-use moneymq_driver_stripe::{download_catalog, update_product};
+use moneymq_core::provider::stripe;
 use moneymq_types::Product;
 
 use crate::Context;
@@ -446,7 +446,7 @@ impl SyncCommand {
         spinner.set_message("Downloading production catalog...");
         spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-        let mut catalog = download_catalog(&api_key, &provider_name, is_production)
+        let mut catalog = stripe::iac::download_catalog(&api_key, &provider_name, is_production)
             .await
             .map_err(|e| format!("Failed to download catalog: {}", e))?;
 
@@ -471,8 +471,12 @@ impl SyncCommand {
                 spinner.set_message("Downloading sandbox catalog...");
                 spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-                match download_catalog(&sandbox_key, &format!("{}_sandbox", provider_name), false)
-                    .await
+                match stripe::iac::download_catalog(
+                    &sandbox_key,
+                    &format!("{}_sandbox", provider_name),
+                    false,
+                )
+                .await
                 {
                     Ok(sandbox_catalog) => {
                         spinner.finish_and_clear();
@@ -500,19 +504,26 @@ impl SyncCommand {
                                 for prod_price in &mut prod_product.prices {
                                     // Match by currency, unit_amount, and interval (for recurring prices)
                                     // Only set sandbox ID if the price actually exists in sandbox
-                                    if let Some(sandbox_price) = sandbox_product.prices.iter().find(|sp| {
-                                        sp.currency == prod_price.currency
-                                            && sp.unit_amount == prod_price.unit_amount
-                                            && sp.recurring_interval == prod_price.recurring_interval
-                                            && sp.recurring_interval_count == prod_price.recurring_interval_count
-                                            && sp.pricing_type == prod_price.pricing_type
-                                    }) {
+                                    if let Some(sandbox_price) =
+                                        sandbox_product.prices.iter().find(|sp| {
+                                            sp.currency == prod_price.currency
+                                                && sp.unit_amount == prod_price.unit_amount
+                                                && sp.recurring_interval
+                                                    == prod_price.recurring_interval
+                                                && sp.recurring_interval_count
+                                                    == prod_price.recurring_interval_count
+                                                && sp.pricing_type == prod_price.pricing_type
+                                        })
+                                    {
                                         // Copy sandbox ID from sandbox price to production price
                                         // This means the price exists in both production and sandbox
-                                        if let Some(price_sandbox_id) = sandbox_price.sandboxes.get("default") {
-                                            prod_price
-                                                .sandboxes
-                                                .insert("default".to_string(), price_sandbox_id.clone());
+                                        if let Some(price_sandbox_id) =
+                                            sandbox_price.sandboxes.get("default")
+                                        {
+                                            prod_price.sandboxes.insert(
+                                                "default".to_string(),
+                                                price_sandbox_id.clone(),
+                                            );
                                         }
                                     }
                                     // If no matching sandbox price found, prod_price.sandboxes remains empty
@@ -632,7 +643,9 @@ impl SyncCommand {
                                     && lp.pricing_type == price.pricing_type
                             }) {
                                 for (sandbox_name, sandbox_id) in &local_price.sandboxes {
-                                    price.sandboxes.insert(sandbox_name.clone(), sandbox_id.clone());
+                                    price
+                                        .sandboxes
+                                        .insert(sandbox_name.clone(), sandbox_id.clone());
                                 }
                             }
                         }
@@ -682,21 +695,28 @@ impl SyncCommand {
                     let sandboxes_changed = match local_product {
                         Some(local) => {
                             // Check product-level sandboxes
-                            let product_sandboxes_changed = local.sandboxes != remote_product.sandboxes;
+                            let product_sandboxes_changed =
+                                local.sandboxes != remote_product.sandboxes;
 
                             // Check price-level sandboxes
                             // Match by price attributes, not ID (since IDs differ between prod/sandbox)
                             let price_sandboxes_changed = local.prices.iter().any(|local_price| {
                                 // Find matching remote price by attributes
-                                remote_product.prices.iter()
+                                remote_product
+                                    .prices
+                                    .iter()
                                     .find(|rp| {
                                         rp.currency == local_price.currency
                                             && rp.unit_amount == local_price.unit_amount
-                                            && rp.recurring_interval == local_price.recurring_interval
-                                            && rp.recurring_interval_count == local_price.recurring_interval_count
+                                            && rp.recurring_interval
+                                                == local_price.recurring_interval
+                                            && rp.recurring_interval_count
+                                                == local_price.recurring_interval_count
                                             && rp.pricing_type == local_price.pricing_type
                                     })
-                                    .map(|remote_price| remote_price.sandboxes != local_price.sandboxes)
+                                    .map(|remote_price| {
+                                        remote_price.sandboxes != local_price.sandboxes
+                                    })
                                     .unwrap_or(false)
                             });
 
@@ -705,7 +725,10 @@ impl SyncCommand {
                         None => {
                             // Check if remote has any sandbox info
                             !remote_product.sandboxes.is_empty()
-                                || remote_product.prices.iter().any(|p| !p.sandboxes.is_empty())
+                                || remote_product
+                                    .prices
+                                    .iter()
+                                    .any(|p| !p.sandboxes.is_empty())
                         }
                     };
 
@@ -716,7 +739,8 @@ impl SyncCommand {
 
                         if let Some(local) = local_product {
                             // Preserve deployed_id from local (in case remote doesn't have it)
-                            if product_to_save.deployed_id.is_none() && local.deployed_id.is_some() {
+                            if product_to_save.deployed_id.is_none() && local.deployed_id.is_some()
+                            {
                                 product_to_save.deployed_id = local.deployed_id.clone();
                             }
 
@@ -726,17 +750,22 @@ impl SyncCommand {
                                     lp.currency == price.currency
                                         && lp.unit_amount == price.unit_amount
                                         && lp.recurring_interval == price.recurring_interval
-                                        && lp.recurring_interval_count == price.recurring_interval_count
+                                        && lp.recurring_interval_count
+                                            == price.recurring_interval_count
                                         && lp.pricing_type == price.pricing_type
                                 }) {
                                     // Preserve deployed_id from local price
-                                    if price.deployed_id.is_none() && local_price.deployed_id.is_some() {
+                                    if price.deployed_id.is_none()
+                                        && local_price.deployed_id.is_some()
+                                    {
                                         price.deployed_id = local_price.deployed_id.clone();
                                     }
 
                                     // Merge sandbox IDs from local price
                                     for (sandbox_name, sandbox_id) in &local_price.sandboxes {
-                                        price.sandboxes.insert(sandbox_name.clone(), sandbox_id.clone());
+                                        price
+                                            .sandboxes
+                                            .insert(sandbox_name.clone(), sandbox_id.clone());
                                     }
                                 }
                             }
@@ -831,8 +860,6 @@ impl SyncCommand {
         provider_name: &str,
         metering_dir: &std::path::Path,
     ) -> Result<(), String> {
-        use moneymq_driver_stripe::download_meters;
-
         // Download production meters from Stripe with spinner
         let spinner = ProgressBar::new_spinner();
         spinner.set_style(
@@ -843,7 +870,7 @@ impl SyncCommand {
         spinner.set_message("Downloading production meters...");
         spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-        let mut meter_collection = download_meters(api_key, provider_name, true)
+        let mut meter_collection = stripe::iac::download_meters(api_key, provider_name, true)
             .await
             .map_err(|e| format!("Failed to download meters: {}", e))?;
 
@@ -864,7 +891,12 @@ impl SyncCommand {
             spinner.set_message("Downloading sandbox meters...");
             spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-            match download_meters(&sandbox_key, &format!("{}_sandbox", provider_name), false).await
+            match stripe::iac::download_meters(
+                &sandbox_key,
+                &format!("{}_sandbox", provider_name),
+                false,
+            )
+            .await
             {
                 Ok(sandbox_meter_collection) => {
                     spinner.finish_and_clear();
@@ -1062,7 +1094,7 @@ impl SyncCommand {
                                 local.name.as_deref().unwrap_or("product")
                             ));
 
-                            update_product(&sandbox_api_key, sandbox_id, local)
+                            stripe::iac::update_product(&sandbox_api_key, sandbox_id, local)
                                 .await
                                 .map_err(|e| format!("Failed to update sandbox product: {}", e))?;
 
@@ -1080,8 +1112,6 @@ impl SyncCommand {
 
                     // Handle price creation in sandbox
                     if prices_to_create > 0 {
-                        use moneymq_driver_stripe::create_price;
-
                         println!(
                             "{} Creating {} prices in sandbox",
                             style("»").dim(),
@@ -1100,13 +1130,20 @@ impl SyncCommand {
                             if let Some(sandbox_product_id) = local.get_sandbox_id("default") {
                                 for price in &local.prices {
                                     if !price.has_sandbox("default") {
-                                        let amount = price.unit_amount
+                                        let amount = price
+                                            .unit_amount
                                             .map(|a| format!("${}.{:02}", a / 100, a % 100))
                                             .unwrap_or_else(|| "custom".to_string());
 
                                         spinner.set_message(format!("Creating price {}", amount));
 
-                                        match create_price(&sandbox_api_key, sandbox_product_id, price).await {
+                                        match stripe::iac::create_price(
+                                            &sandbox_api_key,
+                                            sandbox_product_id,
+                                            price,
+                                        )
+                                        .await
+                                        {
                                             Ok(_price_id) => {
                                                 // Price created successfully
                                                 // Note: We'll need to re-sync to capture the new price ID in the YAML
@@ -1234,7 +1271,7 @@ impl SyncCommand {
                             local.name.as_deref().unwrap_or("product")
                         ));
 
-                        update_product(&production_api_key, deployed_id, local)
+                        stripe::iac::update_product(&production_api_key, deployed_id, local)
                             .await
                             .map_err(|e| format!("Failed to update production product: {}", e))?;
 
@@ -1253,8 +1290,6 @@ impl SyncCommand {
 
                 // Handle price creation in production
                 if prices_to_create > 0 {
-                    use moneymq_driver_stripe::create_price;
-
                     println!(
                         "{} Creating {} prices in production",
                         style("»").dim(),
@@ -1273,13 +1308,20 @@ impl SyncCommand {
                         if let Some(production_product_id) = &local.deployed_id {
                             for price in &local.prices {
                                 if price.deployed_id.is_none() {
-                                    let amount = price.unit_amount
+                                    let amount = price
+                                        .unit_amount
                                         .map(|a| format!("${}.{:02}", a / 100, a % 100))
                                         .unwrap_or_else(|| "custom".to_string());
 
                                     spinner.set_message(format!("Creating price {}", amount));
 
-                                    match create_price(&production_api_key, production_product_id, price).await {
+                                    match stripe::iac::create_price(
+                                        &production_api_key,
+                                        production_product_id,
+                                        price,
+                                    )
+                                    .await
+                                    {
                                         Ok(_price_id) => {
                                             // Price created successfully
                                             // Note: We'll need to re-sync to capture the new price ID in the YAML
@@ -1322,9 +1364,10 @@ impl SyncCommand {
                 spinner.set_message("Refreshing local catalog...");
                 spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-                let updated_catalog = download_catalog(&production_api_key, &ctx.provider, true)
-                    .await
-                    .map_err(|e| format!("Failed to fetch updated catalog: {}", e))?;
+                let updated_catalog =
+                    stripe::iac::download_catalog(&production_api_key, &ctx.provider, true)
+                        .await
+                        .map_err(|e| format!("Failed to fetch updated catalog: {}", e))?;
 
                 spinner.finish_and_clear();
 
@@ -1350,7 +1393,9 @@ impl SyncCommand {
                                     && lp.pricing_type == price.pricing_type
                             }) {
                                 for (sandbox_name, sandbox_id) in &local_price.sandboxes {
-                                    price.sandboxes.insert(sandbox_name.clone(), sandbox_id.clone());
+                                    price
+                                        .sandboxes
+                                        .insert(sandbox_name.clone(), sandbox_id.clone());
                                 }
                             }
                         }
@@ -1393,9 +1438,6 @@ impl SyncCommand {
         production_api_key: &str,
         catalog_dir: &std::path::Path,
     ) -> Result<(), String> {
-        use dialoguer::Confirm;
-        use moneymq_driver_stripe::create_product;
-
         println!();
         println!("{} Reviewing sandbox-only products", style("»").dim());
         println!();
@@ -1450,7 +1492,7 @@ impl SyncCommand {
             spinner.set_message("Creating product in production...");
             spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-            let production_id = create_product(production_api_key, product)
+            let production_id = stripe::iac::create_product(production_api_key, product)
                 .await
                 .map_err(|e| format!("Failed to create product: {}", e))?;
 

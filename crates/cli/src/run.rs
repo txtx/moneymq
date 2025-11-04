@@ -171,10 +171,21 @@ impl RunCommand {
             None
         };
 
+        // Build facilitator config for provider server
+        let Some((_handles, facilitator_url)) = handles else {
+            panic!("Facilitator must be started in sandbox mode");
+        };
+
         // Start the server
-        moneymq_core::provider::start_provider(products, meters, self.port, self.sandbox)
-            .await
-            .map_err(|e| format!("Failed to start server: {}", e))?;
+        moneymq_core::provider::start_provider(
+            products,
+            meters,
+            facilitator_url,
+            self.port,
+            self.sandbox,
+        )
+        .await
+        .map_err(|e| format!("Failed to start server: {}", e))?;
 
         Ok(())
     }
@@ -185,9 +196,9 @@ type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
 type ValidatorHandles = Vec<std::process::Child>;
 type LocalNetworkHandles = (FacilitatorHandle, ValidatorHandles);
 
-async fn start_facilitator_networks(
+async fn build_facilitator_config(
     providers: &HashMap<String, ProviderConfig>,
-) -> Result<Option<LocalNetworkHandles>, String> {
+) -> Result<FacilitatorConfig, String> {
     let sandbox_x402_config = providers
         .iter()
         .filter_map(|(name, provider)| {
@@ -201,6 +212,10 @@ async fn start_facilitator_networks(
         })
         .collect::<Vec<_>>();
 
+    if sandbox_x402_config.is_empty() {
+        return Err("No X402 sandbox configuration found in manifest".to_string());
+    }
+
     if sandbox_x402_config.len() > 1 {
         eprintln!(
             "{} Multiple X402 sandbox providers found in manifest. Only the first local facilitator ({}) will be started.",
@@ -209,12 +224,16 @@ async fn start_facilitator_networks(
         );
     }
 
-    let Some((sandbox_name, sandbox_x402_config)) = sandbox_x402_config.get(0) else {
-        return Ok(None);
-    };
+    let facilitator_config_file = &sandbox_x402_config[0].1.facilitator;
+    let facilitator_config: FacilitatorConfig = facilitator_config_file.try_into()?;
+    Ok(facilitator_config)
+}
 
-    let facilitator_config = &sandbox_x402_config.facilitator;
-    let facilitator_config: FacilitatorConfig = facilitator_config.try_into()?;
+async fn start_facilitator_networks(
+    providers: &HashMap<String, ProviderConfig>,
+) -> Result<Option<(LocalNetworkHandles, url::Url)>, String> {
+    // Build facilitator config for starting the facilitator
+    let facilitator_config = build_facilitator_config(providers).await?;
 
     let mut local_validator_handles = vec![];
     for (network_name, network_config) in facilitator_config.networks.iter() {
@@ -224,28 +243,17 @@ async fn start_facilitator_networks(
                     rpc_api_url: surfnet_config.rpc_url.clone(),
                     facilitator_pubkey: surfnet_config.payer_keypair.pubkey().to_string(),
                 };
-                let Some(handle) = moneymq_core::validator::start_local_solana_validator(
-                    validator_config
-                )
-                .map_err(|e| {
-                    format!(
-                        "Failed to start Solana Surfnet validator for facilitator sandbox '{}', network '{}': {}",
-                        sandbox_name, network_name, e
-                    )
-                })? else {
-                    println!(
-                        "Local Solana validator already running at {}",
-                        surfnet_config.rpc_url
-                    );
+                let Some(handle) =
+                    moneymq_core::validator::start_local_solana_validator(validator_config)
+                        .map_err(|e| {
+                            format!(
+                                "Failed to start Solana Surfnet validator for network '{}': {}",
+                                network_name, e
+                            )
+                        })?
+                else {
                     continue;
                 };
-                println!("{}", style("Local Solana Validator").dim());
-                println!("   Network: {}", network_name);
-                println!("   RPC URL: {}", surfnet_config.rpc_url);
-                println!(
-                    "   Transaction Fee Payer: {}",
-                    surfnet_config.payer_keypair.pubkey()
-                );
                 local_validator_handles.push(handle);
             }
             FacilitatorNetworkConfig::SolanaMainnet(_) => {
@@ -259,12 +267,5 @@ async fn start_facilitator_networks(
         .await
         .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 
-    println!("\n");
-    println!("{}", style("Local X402 Facilitator Endpoints").dim());
-    println!("   GET {}supported", url);
-    println!("   POST {}verify", url);
-    println!("   POST {}settle", url);
-    println!("   GET {}health", url);
-
-    Ok(Some((handle, local_validator_handles)))
+    Ok(Some(((handle, local_validator_handles), url)))
 }
