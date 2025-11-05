@@ -16,6 +16,19 @@ images: []
 statement_descriptor: null
 unit_label: null
 prices:
+  - id: F7yp23K8Xv8dZ6RStsEXWL
+    deployed_id: null
+    sandboxes:
+      default: price_1SProUISlaF29E0RnE7H1J7m
+    active: true
+    currency: usd
+    unit_amount: 607
+    pricing_type: recurring
+    recurring_interval: month
+    recurring_interval_count: 1
+    nickname: null
+    metadata: {}
+    created_at: 1762291850
   - id: DxbAjT6NZpHjHweHNZAehL
     deployed_id: null
     sandboxes:
