@@ -69,7 +69,24 @@ pub enum Scheme {
     Exact,
 }
 
-/// Network identifier
+/// MoneyMQ internal networks
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MoneyMqNetwork {
+    SolanaSurfnet,
+    SolanaMainnet,
+}
+
+impl From<MoneyMqNetwork> for Network {
+    fn from(network: MoneyMqNetwork) -> Self {
+        match network {
+            MoneyMqNetwork::SolanaSurfnet => Network::Solana,
+            MoneyMqNetwork::SolanaMainnet => Network::Solana,
+        }
+    }
+}
+
+/// Network identifier for the x402 protocol
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum Network {

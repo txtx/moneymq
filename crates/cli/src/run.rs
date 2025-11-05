@@ -214,12 +214,13 @@ impl RunCommand {
                         config.network().clone(),
                         config.payment_recipient().clone(),
                         config.currencies().clone(),
+                        config.user_accounts().clone(),
                     ),
                 )
             })
             .collect::<IndexMap<_, _>>();
 
-        let billing_manager = BillingManager::initialize(billing_networks)
+        let billing_manager = BillingManager::initialize(billing_networks, self.sandbox)
             .await
             .map_err(RunCommandError::BillingManagerInitializationError)?;
 
@@ -232,7 +233,6 @@ impl RunCommand {
             None
         };
 
-        // Build facilitator config for provider server
         let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {
             panic!("Facilitator must be started in sandbox mode");
         };

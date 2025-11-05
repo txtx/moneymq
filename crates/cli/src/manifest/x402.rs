@@ -47,10 +47,14 @@ pub enum BillingNetworkConfigFile {
 }
 
 impl BillingNetworkConfigFile {
-    pub fn network(&self) -> moneymq_types::x402::Network {
+    pub fn network(&self) -> moneymq_types::x402::MoneyMqNetwork {
         match self {
-            BillingNetworkConfigFile::SolanaSurfnet(_) => moneymq_types::x402::Network::Solana,
-            BillingNetworkConfigFile::SolanaMainnet(_) => moneymq_types::x402::Network::Solana,
+            BillingNetworkConfigFile::SolanaSurfnet(_) => {
+                moneymq_types::x402::MoneyMqNetwork::SolanaSurfnet
+            }
+            BillingNetworkConfigFile::SolanaMainnet(_) => {
+                moneymq_types::x402::MoneyMqNetwork::SolanaMainnet
+            }
         }
     }
     pub fn payment_recipient(&self) -> Option<String> {
@@ -65,12 +69,20 @@ impl BillingNetworkConfigFile {
             BillingNetworkConfigFile::SolanaMainnet(cfg) => &cfg.currencies,
         }
     }
+    pub fn user_accounts(&self) -> Vec<String> {
+        match self {
+            BillingNetworkConfigFile::SolanaSurfnet(cfg) => cfg.user_accounts.clone(),
+            BillingNetworkConfigFile::SolanaMainnet(_) => vec![],
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SolanaSurfnetBillingConfigFile {
     pub payment_recipient: Option<String>,
     pub currencies: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_accounts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
