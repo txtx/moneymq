@@ -1,23 +1,28 @@
 use indexmap::IndexMap;
 use moneymq_types::x402::Network;
-use serde_json::json;
-use solana_client::{rpc_client::RpcClient, rpc_request::RpcRequest};
-use solana_keypair::Pubkey;
+use solana_client::rpc_client::RpcClient;
 use tracing::info;
 use url::Url;
 
-use crate::billing::{currency::Currency, recipient::Recipient};
+use crate::{
+    billing::{currency::Currency, recipient::Recipient},
+    validator::surfnet_utils::{surfnet_set_account, surfnet_set_token_account},
+};
 
 pub mod currency;
 pub mod recipient;
 
+/// Manages billing configurations across multiple networks
 #[derive(Debug, Clone)]
 pub struct BillingManager {
+    /// Mapping of network names to their billing configurations
     pub configs: IndexMap<String, NetworkBillingConfig>,
+    /// Mapping of networks to their names
     pub network_name_map: IndexMap<Network, String>,
 }
 
 impl BillingManager {
+    /// Initializes the [BillingManager] with the provided network configurations
     pub async fn initialize(
         networks_map: IndexMap<
             String,
@@ -63,6 +68,7 @@ impl BillingManager {
         })
     }
 
+    /// Funds local accounts and MoneyMQ-managed accounts
     pub async fn fund_accounts(
         &self,
         local_validator_rpc_urls: &IndexMap<Network, url::Url>,
@@ -99,7 +105,9 @@ impl BillingManager {
                     );
                 }
                 NetworkBillingConfig::SolanaMainnet(_) => {
-                    // TODO: Fund mainnet accounts if MoneyMqManaged
+                    if recipient.is_managed() {
+                        // TODO: Fund mainnet accounts if MoneyMqManaged
+                    }
                 }
             }
         }
@@ -107,63 +115,12 @@ impl BillingManager {
         Ok(())
     }
 
+    /// Retrieves the billing configuration for the specified network
     pub fn get_config_for_network(&self, network: &Network) -> Option<&NetworkBillingConfig> {
         self.network_name_map
             .get(network)
             .and_then(|name| self.configs.get(name))
     }
-}
-
-pub fn surfnet_set_account(
-    rpc_client: &solana_client::rpc_client::RpcClient,
-    pubkey: &Pubkey,
-) -> Result<(), String> {
-    let account_data = json!({
-        "lamports": 1_000_000_000,
-    });
-    let params = json!([pubkey.to_string(), account_data,]);
-
-    let _ = rpc_client
-        .send::<serde_json::Value>(
-            RpcRequest::Custom {
-                method: "surfnet_setAccount",
-            },
-            params,
-        )
-        .map_err(|e| format!("Failed to set account data for {}: {}", pubkey, e))?;
-    Ok(())
-}
-
-pub fn surfnet_set_token_account(
-    rpc_client: &solana_client::rpc_client::RpcClient,
-    pubkey: &Pubkey,
-    mint: &Pubkey,
-    token_program: &Pubkey,
-) -> Result<(), String> {
-    let account_data = json!({
-        "amount": 1_000_000,
-    });
-    let params = json!([
-        pubkey.to_string(),
-        mint.to_string(),
-        account_data,
-        token_program.to_string()
-    ]);
-
-    let _ = rpc_client
-        .send::<serde_json::Value>(
-            RpcRequest::Custom {
-                method: "surfnet_setTokenAccount",
-            },
-            params,
-        )
-        .map_err(|e| {
-            format!(
-                "Failed to set token account data for {} with mint {}: {}",
-                pubkey, mint, e
-            )
-        })?;
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -191,6 +148,12 @@ impl NetworkBillingConfig {
             NetworkBillingConfig::SolanaMainnet(_) => {
                 "https://api.mainnet-beta.solana.com".parse().unwrap()
             }
+        }
+    }
+    pub fn surfnet_config(&self) -> Option<&SolanaSurfnetBillingConfig> {
+        match self {
+            NetworkBillingConfig::SolanaSurfnet(cfg) => Some(cfg),
+            _ => None,
         }
     }
 }

@@ -190,20 +190,6 @@ impl RunCommand {
         // Initialize tracing
         tracing_subscriber::fmt::init();
 
-        // Only start local facilitator server in sandbox mode
-        let handles = if self.sandbox {
-            start_facilitator_networks(&ctx.manifest.providers)
-                .await
-                .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?
-        } else {
-            None
-        };
-
-        // Build facilitator config for provider server
-        let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {
-            panic!("Facilitator must be started in sandbox mode");
-        };
-
         let billing_networks = ctx
             .manifest
             .providers
@@ -233,13 +219,28 @@ impl RunCommand {
             })
             .collect::<IndexMap<_, _>>();
 
+        let billing_manager = BillingManager::initialize(billing_networks)
+            .await
+            .map_err(RunCommandError::BillingManagerInitializationError)?;
+
+        // Only start local facilitator server in sandbox mode
+        let handles = if self.sandbox {
+            start_facilitator_networks(&ctx.manifest.providers, &billing_manager)
+                .await
+                .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?
+        } else {
+            None
+        };
+
+        // Build facilitator config for provider server
+        let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {
+            panic!("Facilitator must be started in sandbox mode");
+        };
+
         let local_validator_rpc_urls = local_validator_ctx
             .iter()
             .map(|(network, (_handle, url))| (network.clone(), url.clone()))
             .collect::<IndexMap<_, _>>();
-        let billing_manager = BillingManager::initialize(billing_networks)
-            .await
-            .map_err(RunCommandError::BillingManagerInitializationError)?;
         billing_manager
             .fund_accounts(&local_validator_rpc_urls)
             .await
@@ -300,6 +301,7 @@ type ValidatorData = IndexMap<Network, (std::process::Child, url::Url)>;
 
 async fn start_facilitator_networks(
     providers: &HashMap<String, ProviderConfig>,
+    billing_manager: &BillingManager,
 ) -> Result<Option<(FacilitatorHandle, ValidatorData, url::Url)>, String> {
     // Build facilitator config for starting the facilitator
     let facilitator_config = build_facilitator_config(providers).await?;
@@ -308,18 +310,26 @@ async fn start_facilitator_networks(
     for (network_name, network_config) in facilitator_config.networks.iter() {
         match network_config {
             FacilitatorNetworkConfig::SolanaSurfnet(surfnet_config) => {
+                let billing_config = billing_manager
+                    .configs
+                    .get(network_name)
+                    .and_then(|c| c.surfnet_config());
+
                 let validator_config = SolanaValidatorConfig {
                     rpc_api_url: surfnet_config.rpc_url.clone(),
-                    facilitator_pubkey: surfnet_config.payer_keypair.pubkey().to_string(),
+                    facilitator_pubkey: surfnet_config.payer_keypair.pubkey(),
                 };
-                let Some(handle) =
-                    moneymq_core::validator::start_local_solana_validator(validator_config)
-                        .map_err(|e| {
-                            format!(
-                                "Failed to start Solana Surfnet validator for network '{}': {}",
-                                network_name, e
-                            )
-                        })?
+
+                let Some(handle) = moneymq_core::validator::start_local_solana_validator(
+                    validator_config,
+                    billing_config,
+                )
+                .map_err(|e| {
+                    format!(
+                        "Failed to start Solana Surfnet validator for network '{}': {}",
+                        network_name, e
+                    )
+                })?
                 else {
                     continue;
                 };

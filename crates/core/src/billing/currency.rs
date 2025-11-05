@@ -1,8 +1,10 @@
 use moneymq_types::x402::MixedAddress;
 use solana_keypair::Pubkey;
 
+/// Represents a currency used for billing across different blockchains
 #[derive(Debug, Clone)]
 pub enum Currency {
+    /// Represents a currency on the Solana blockchain
     Solana(SolanaCurrency),
 }
 
@@ -22,6 +24,12 @@ impl Currency {
     pub fn address(&self) -> MixedAddress {
         match self {
             Currency::Solana(solana_currency) => solana_currency.mixed_address(),
+        }
+    }
+
+    pub fn solana_currency(&self) -> Option<&SolanaCurrency> {
+        match self {
+            Currency::Solana(solana_currency) => Some(solana_currency),
         }
     }
 }
