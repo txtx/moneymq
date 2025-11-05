@@ -1,12 +1,17 @@
 use std::collections::HashMap;
 use std::fs;
+use std::path::PathBuf;
 
 use console::style;
+use indexmap::IndexMap;
+use moneymq_core::billing::BillingManager;
+use moneymq_core::billing::BillingManagerError;
 use moneymq_core::validator::SolanaValidatorConfig;
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::Meter;
 use moneymq_types::Product;
+use moneymq_types::x402::Network;
 use moneymq_types::x402::config::facilitator::FacilitatorConfig;
 use moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig;
 use solana_keypair::Signer;
@@ -26,8 +31,30 @@ pub struct RunCommand {
     pub sandbox: bool,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum RunCommandError {
+    #[error("Catalog directory not found: {0}\nRun 'moneymq init' or 'moneymq catalog sync' first")]
+    CatalogDirNotFound(String),
+    #[error("Failed to read {} directory: {}", .0.display(), 1)]
+    DirectoryReadError(PathBuf, std::io::Error),
+    #[error("Failed to read directory entry: {0}")]
+    DirectoryEntryReadError(std::io::Error),
+    #[error("Failed to read file {}: {}", .0.display(), 1)]
+    ReadFileError(PathBuf, std::io::Error),
+    #[error("No products found in catalog directory")]
+    NoProductsFound,
+    #[error("Failed to start local facilitator networks: {0}")]
+    StartFacilitatorNetworks(String),
+    #[error("Failed configure billing settings: {0}")]
+    BillingManagerInitializationError(BillingManagerError),
+    #[error("Failed to fund local accounts: {0}")]
+    FundLocalAccountsError(String),
+    #[error("Failed to start provider server: {0}")]
+    ProviderStartError(Box<dyn std::error::Error>),
+}
+
 impl RunCommand {
-    pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
+    pub async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
         println!();
         println!("{}{}", style("Money").white(), style("MQ").green());
         println!("{}", style("Starting provider server").dim());
@@ -46,9 +73,8 @@ impl RunCommand {
         let catalog_dir = ctx.manifest_path.join(catalog_path);
 
         if !catalog_dir.exists() {
-            return Err(format!(
-                "Catalog directory not found: {}\nRun 'moneymq init' or 'moneymq catalog sync' first",
-                catalog_dir.display()
+            return Err(RunCommandError::CatalogDirNotFound(
+                catalog_dir.display().to_string(),
             ));
         }
 
@@ -56,15 +82,15 @@ impl RunCommand {
 
         let mut products = Vec::new();
         let entries = fs::read_dir(&catalog_dir)
-            .map_err(|e| format!("Failed to read catalog directory: {}", e))?;
+            .map_err(|e| RunCommandError::DirectoryReadError(catalog_dir, e))?;
 
         for entry in entries {
-            let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+            let entry = entry.map_err(RunCommandError::DirectoryEntryReadError)?;
             let path = entry.path();
 
             if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
                 let content = fs::read_to_string(&path)
-                    .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+                    .map_err(|e| RunCommandError::ReadFileError(path.clone(), e))?;
 
                 match serde_yml::from_str::<Product>(&content) {
                     Ok(product) => {
@@ -84,7 +110,7 @@ impl RunCommand {
         }
 
         if products.is_empty() {
-            return Err("No products found in catalog directory".to_string());
+            return Err(RunCommandError::NoProductsFound);
         }
 
         println!(
@@ -101,15 +127,15 @@ impl RunCommand {
             print!("{} ", style("Loading meters").dim());
 
             let meter_entries = fs::read_dir(&metering_dir)
-                .map_err(|e| format!("Failed to read metering directory: {}", e))?;
+                .map_err(|e| RunCommandError::DirectoryReadError(metering_dir, e))?;
 
             for entry in meter_entries {
-                let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+                let entry = entry.map_err(RunCommandError::DirectoryEntryReadError)?;
                 let path = entry.path();
 
                 if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
                     let content = fs::read_to_string(&path)
-                        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+                        .map_err(|e| RunCommandError::ReadFileError(path.clone(), e))?;
 
                     match serde_yml::from_str::<Meter>(&content) {
                         Ok(meter) => {
@@ -164,17 +190,61 @@ impl RunCommand {
         // Initialize tracing
         tracing_subscriber::fmt::init();
 
+        let billing_networks = ctx
+            .manifest
+            .providers
+            .iter()
+            .filter_map(|(_name, provider)| {
+                provider.x402_config().and_then(|config| {
+                    if self.sandbox {
+                        config
+                            .sandboxes
+                            .get("default")
+                            .map(|config| config.billing_networks.clone())
+                    } else {
+                        Some(config.billing_networks.clone())
+                    }
+                })
+            })
+            .flatten()
+            .map(|(name, config)| {
+                (
+                    name.clone(),
+                    (
+                        config.network().clone(),
+                        config.payment_recipient().clone(),
+                        config.currencies().clone(),
+                    ),
+                )
+            })
+            .collect::<IndexMap<_, _>>();
+
+        let billing_manager = BillingManager::initialize(billing_networks)
+            .await
+            .map_err(RunCommandError::BillingManagerInitializationError)?;
+
         // Only start local facilitator server in sandbox mode
         let handles = if self.sandbox {
-            start_facilitator_networks(&ctx.manifest.providers).await?
+            start_facilitator_networks(&ctx.manifest.providers, &billing_manager)
+                .await
+                .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?
         } else {
             None
         };
 
         // Build facilitator config for provider server
-        let Some((_handles, facilitator_url)) = handles else {
+        let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {
             panic!("Facilitator must be started in sandbox mode");
         };
+
+        let local_validator_rpc_urls = local_validator_ctx
+            .iter()
+            .map(|(network, (_handle, url))| (network.clone(), url.clone()))
+            .collect::<IndexMap<_, _>>();
+        billing_manager
+            .fund_accounts(&local_validator_rpc_urls)
+            .await
+            .map_err(RunCommandError::FundLocalAccountsError)?;
 
         // Start the server
         moneymq_core::provider::start_provider(
@@ -183,18 +253,14 @@ impl RunCommand {
             facilitator_url,
             self.port,
             self.sandbox,
+            billing_manager,
         )
         .await
-        .map_err(|e| format!("Failed to start server: {}", e))?;
+        .map_err(RunCommandError::ProviderStartError)?;
 
         Ok(())
     }
 }
-
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
-type ValidatorHandles = Vec<std::process::Child>;
-type LocalNetworkHandles = (FacilitatorHandle, ValidatorHandles);
 
 async fn build_facilitator_config(
     providers: &HashMap<String, ProviderConfig>,
@@ -229,32 +295,46 @@ async fn build_facilitator_config(
     Ok(facilitator_config)
 }
 
+type Error = Box<dyn std::error::Error + Send + Sync>;
+type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
+type ValidatorData = IndexMap<Network, (std::process::Child, url::Url)>;
+
 async fn start_facilitator_networks(
     providers: &HashMap<String, ProviderConfig>,
-) -> Result<Option<(LocalNetworkHandles, url::Url)>, String> {
+    billing_manager: &BillingManager,
+) -> Result<Option<(FacilitatorHandle, ValidatorData, url::Url)>, String> {
     // Build facilitator config for starting the facilitator
     let facilitator_config = build_facilitator_config(providers).await?;
 
-    let mut local_validator_handles = vec![];
+    let mut local_validator_handles = IndexMap::new();
     for (network_name, network_config) in facilitator_config.networks.iter() {
         match network_config {
             FacilitatorNetworkConfig::SolanaSurfnet(surfnet_config) => {
+                let billing_config = billing_manager
+                    .configs
+                    .get(network_name)
+                    .and_then(|c| c.surfnet_config());
+
                 let validator_config = SolanaValidatorConfig {
                     rpc_api_url: surfnet_config.rpc_url.clone(),
-                    facilitator_pubkey: surfnet_config.payer_keypair.pubkey().to_string(),
+                    facilitator_pubkey: surfnet_config.payer_keypair.pubkey(),
                 };
-                let Some(handle) =
-                    moneymq_core::validator::start_local_solana_validator(validator_config)
-                        .map_err(|e| {
-                            format!(
-                                "Failed to start Solana Surfnet validator for network '{}': {}",
-                                network_name, e
-                            )
-                        })?
+
+                let Some(handle) = moneymq_core::validator::start_local_solana_validator(
+                    validator_config,
+                    billing_config,
+                )
+                .map_err(|e| {
+                    format!(
+                        "Failed to start Solana Surfnet validator for network '{}': {}",
+                        network_name, e
+                    )
+                })?
                 else {
                     continue;
                 };
-                local_validator_handles.push(handle);
+                local_validator_handles
+                    .insert(Network::Solana, (handle, surfnet_config.rpc_url.clone()));
             }
             FacilitatorNetworkConfig::SolanaMainnet(_) => {
                 // No local validator for mainnet
@@ -267,5 +347,5 @@ async fn start_facilitator_networks(
         .await
         .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 
-    Ok(Some(((handle, local_validator_handles), url)))
+    Ok(Some((handle, local_validator_handles, url)))
 }

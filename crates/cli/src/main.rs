@@ -173,7 +173,7 @@ async fn handle_command(opts: Opts, ctx: &Context) -> Result<(), String> {
     match opts.command {
         Command::Init(cmd) => cmd.execute(ctx).await,
         Command::Catalog { command } => handle_catalog_commands(command, ctx).await,
-        Command::Run(cmd) => cmd.execute(ctx).await,
+        Command::Run(cmd) => cmd.execute(ctx).await.map_err(|e| e.to_string()),
     }
 }
 

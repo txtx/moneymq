@@ -274,8 +274,7 @@ pub async fn payment_middleware(
     mut req: Request<Body>,
     next: Next,
 ) -> Response {
-    use moneymq_types::x402::{MixedAddress, Network, Scheme, TokenAmount};
-    use solana_keypair::Pubkey;
+    use moneymq_types::x402::{Network, Scheme, TokenAmount};
 
     let supported = match fetch_supported(&state).await {
         Ok(supported) => supported,
@@ -285,38 +284,49 @@ pub async fn payment_middleware(
         }
     };
 
+    let network = Network::Solana; // TODO: Determine network based on request / product
+    let Some(billing_config) = state.billing_manager.get_config_for_network(&network) else {
+        panic!("No billing config for network {:?}", network); // TODO: Handle this error properly
+    };
+    debug!(
+        "Using billing config for network {:?}: {:?}",
+        network, billing_config
+    );
+
+    // TODO: probably need some sort of filtering here based on product being accessed
+    let assets = billing_config
+        .currencies()
+        .iter()
+        .map(|currency| currency.address())
+        .collect::<Vec<_>>();
+
+    let recipient = billing_config.recipient();
+
+    // TODO: allow pay to to be overridden by product
+    // TODO: consider allowing the assets allowed to be overridden by product
+
     // TODO: Get payment requirements from state/config
     // For now, create a mock payment requirement for testing
-    let payment_requirements: Vec<PaymentRequirements> = vec![PaymentRequirements {
-        scheme: Scheme::Exact,
-        network: Network::Solana,
-        max_amount_required: TokenAmount("1000000".to_string()), // 1 USDC (6 decimals)
-        resource: state.facilitator_url.clone(), // TODO: I think this should actually be the resource being accessed
-        description: "Payment for meter event".to_string(),
-        mime_type: "application/json".to_string(),
-        output_schema: None,
-        pay_to: MixedAddress::Solana(Pubkey::from_str_const(
-            "CGRsTkDKysipPZMcvM4BxVEXvp7Wa3v6MPTitVy2Dwa6",
-        )),
-        max_timeout_seconds: 300,
-        asset: MixedAddress::Solana(Pubkey::from_str_const(
-            "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        )),
-        extra: None,
-    }];
-
-    let payment_requirements = payment_requirements
+    let payment_requirements = assets
         .into_iter()
-        .map(|mut req| {
-            if let Some(extra) = supported
-                .kinds
-                .iter()
-                .find(|kind| kind.network == req.network)
-                .and_then(|kind| kind.extra.clone())
-            {
-                req.extra = Some(serde_json::to_value(&extra).unwrap());
+        .map(|asset| {
+            PaymentRequirements {
+                scheme: Scheme::Exact,
+                network: network.clone(),
+                max_amount_required: TokenAmount("1000000".to_string()), // 1 USDC (6 decimals)
+                resource: state.facilitator_url.clone(), // TODO: I think this should actually be the resource being accessed
+                description: "Payment for meter event".to_string(),
+                mime_type: "application/json".to_string(),
+                output_schema: None,
+                pay_to: recipient.address(),
+                max_timeout_seconds: 300,
+                asset,
+                extra: supported
+                    .kinds
+                    .iter()
+                    .find(|kind| kind.network == network)
+                    .and_then(|kind| Some(serde_json::to_value(&kind.extra).unwrap())),
             }
-            req
         })
         .collect::<Vec<_>>();
 

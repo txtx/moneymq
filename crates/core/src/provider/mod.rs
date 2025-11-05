@@ -2,7 +2,7 @@ pub mod stripe;
 
 use std::sync::Arc;
 
-use crate::facilitator::endpoints::middleware::x402_post;
+use crate::{billing::BillingManager, facilitator::endpoints::middleware::x402_post};
 use axum::{
     Router,
     http::StatusCode,
@@ -24,6 +24,7 @@ pub struct ProviderState {
     pub meters: Arc<Vec<Meter>>,
     pub use_sandbox: bool,
     pub facilitator_url: Url,
+    pub billing_manager: BillingManager,
 }
 
 /// Application state
@@ -40,12 +41,14 @@ impl ProviderState {
         meters: Vec<Meter>,
         use_sandbox: bool,
         facilitator_url: Url,
+        billing_manager: BillingManager,
     ) -> Self {
         Self {
             products: Arc::new(products),
             meters: Arc::new(meters),
             use_sandbox,
             facilitator_url,
+            billing_manager,
         }
     }
 }
@@ -62,8 +65,15 @@ pub async fn start_provider(
     facilitator_url: Url,
     port: u16,
     use_sandbox: bool,
+    billing_manager: BillingManager,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let state = ProviderState::new(products, meters, use_sandbox, facilitator_url);
+    let state = ProviderState::new(
+        products,
+        meters,
+        use_sandbox,
+        facilitator_url,
+        billing_manager,
+    );
 
     let cors_layer = CorsLayer::new()
         .allow_origin(Any)

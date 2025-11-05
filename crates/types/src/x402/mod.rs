@@ -70,10 +70,18 @@ pub enum Scheme {
 }
 
 /// Network identifier
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "kebab-case")]
 pub enum Network {
     Solana,
+}
+
+impl Display for Network {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Network::Solana => write!(f, "solana"),
+        }
+    }
 }
 
 /// Token amount (U256 as string)
@@ -85,6 +93,15 @@ pub struct TokenAmount(pub String);
 pub enum MixedAddress {
     Solana(Pubkey),   // Base58-encoded
     Offchain(String), // Custom format
+}
+
+impl MixedAddress {
+    pub fn pubkey(&self) -> Option<&Pubkey> {
+        match self {
+            MixedAddress::Solana(pk) => Some(pk),
+            _ => None,
+        }
+    }
 }
 
 impl Display for MixedAddress {

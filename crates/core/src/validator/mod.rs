@@ -1,15 +1,22 @@
 use std::process::{Child, Stdio};
 
-use serde_json::json;
-use solana_client::{rpc_client::RpcClient, rpc_request::RpcRequest};
+use solana_client::rpc_client::RpcClient;
+use solana_keypair::Pubkey;
 use tracing::info;
 use url::Url;
+
+use crate::{
+    billing::{SolanaSurfnetBillingConfig, currency::SolanaCurrency},
+    validator::surfnet_utils::surfnet_set_token_account,
+};
+
+pub mod surfnet_utils;
 
 pub struct SolanaValidatorConfig {
     /// RPC API URL for the local Solana validator
     pub rpc_api_url: Url,
-
-    pub facilitator_pubkey: String,
+    /// Public key of the facilitator account used for funding and transactions
+    pub facilitator_pubkey: Pubkey,
 }
 
 fn check_if_validator_running(rpc_client: &RpcClient) -> bool {
@@ -21,6 +28,7 @@ fn check_if_validator_running(rpc_client: &RpcClient) -> bool {
 
 pub fn start_local_solana_validator(
     config: SolanaValidatorConfig,
+    billing_config: Option<&SolanaSurfnetBillingConfig>,
 ) -> Result<Option<Child>, Box<dyn std::error::Error>> {
     let rpc_url = config.rpc_api_url.clone();
 
@@ -84,21 +92,26 @@ pub fn start_local_solana_validator(
 
     info!("Local Solana validator started at {}", config.rpc_api_url);
 
-    // Todo: Set up token account for facilitator
-    let _: serde_json::Value = rpc_client
-        .send(
-            RpcRequest::Custom {
-                method: "surfnet_setTokenAccount",
-            },
-            json!([
-                config.facilitator_pubkey,
-                "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-                {
-                    "amount": 100_000_000
-                }
-            ]),
-        )
-        .unwrap_or_default();
+    for currency in billing_config
+        .map(|c| c.currencies.iter())
+        .unwrap_or_default()
+    {
+        let Some(SolanaCurrency {
+            symbol,
+            mint,
+            token_program,
+            ..
+        }) = currency.solana_currency()
+        else {
+            continue;
+        };
+        info!(
+            "Setting up token account for currency {} with mint {}",
+            symbol, mint
+        );
+        let _ =
+            surfnet_set_token_account(&rpc_client, &config.facilitator_pubkey, mint, token_program);
+    }
 
     info!(
         "Set up token account for facilitator {} on local Solana validator",
