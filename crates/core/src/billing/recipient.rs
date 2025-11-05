@@ -3,22 +3,32 @@ use std::str::FromStr;
 use moneymq_types::x402::{MixedAddress, Network};
 use solana_keypair::Pubkey;
 
+/// Represents a billing recipient, which can be either user-managed or MoneyMQ-managed
 #[derive(Debug, Clone)]
 pub enum Recipient {
+    /// Represents a user-managed recipient address, where the user has provided the address
     UserManaged(MixedAddress),
-    MoneyMqManaged(MixedAddress),
+    /// Represents a MoneyMQ-managed recipient address, where MoneyMQ generates and manages the address
+    MoneyMqManaged(MoneyMqManagedRecipient),
 }
 
 impl Recipient {
+    /// Returns the [MixedAddress] associated with the [Recipient]
     pub fn address(&self) -> MixedAddress {
         match self {
             Recipient::UserManaged(addr) => addr.clone(),
-            Recipient::MoneyMqManaged(addr) => addr.clone(),
+            Recipient::MoneyMqManaged(managed) => managed.recipient_address.clone(),
         }
+    }
+    pub fn is_managed(&self) -> bool {
+        matches!(self, Recipient::MoneyMqManaged(_))
     }
 }
 
 impl Recipient {
+    /// Instantiates a [Recipient] based on the provided network and optional recipient string
+    /// If `recipient_str` is provided, it creates a `UserManaged` recipient.
+    /// If not provided, it generates a `MoneyMqManaged` recipient.
     pub async fn instantiate(
         network: &Network,
         recipient_str: Option<&String>,
@@ -50,16 +60,21 @@ impl Recipient {
     }
 }
 
+/// Represents a MoneyMQ-managed recipient address
 #[derive(Debug, Clone)]
 pub struct MoneyMqManagedRecipient {
+    /// The [MixedAddress] being managed by MoneyMQ
     pub recipient_address: MixedAddress,
     // Todo: additional fields as needed
 }
 
 impl MoneyMqManagedRecipient {
-    pub async fn generate() -> Result<MixedAddress, String> {
+    /// Generates a new MoneyMQ-managed recipient address
+    pub async fn generate() -> Result<Self, String> {
         // Placeholder implementation - in real code, this would generate or fetch a managed address
-        Ok(MixedAddress::Solana(Pubkey::new_unique()))
+        Ok(Self {
+            recipient_address: MixedAddress::Solana(Pubkey::new_unique()),
+        })
     }
 }
 
@@ -67,7 +82,6 @@ impl MoneyMqManagedRecipient {
 pub enum RecipientError {
     #[error("Failed to parse provided recipient address ({0}): {1}")]
     InvalidProvidedAddress(String, String),
-
     #[error("Failed to generate managed address: {0}")]
     ManagedAddressGenerationError(String),
 }
