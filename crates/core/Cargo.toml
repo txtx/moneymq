@@ -30,7 +30,7 @@ async-stripe = { version = "0.41", default-features = false, features = [
     "runtime-tokio-hyper",
 ] }
 surfpool-core = { git = "https://github.com/txtx/surfpool.git", branch = "main" }
-thiserror = "2.0"
+thiserror = { workspace = true }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.6.6", features = ["cors"] }
 tracing = "0.1"
