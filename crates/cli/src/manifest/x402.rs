@@ -2,12 +2,9 @@ use std::collections::HashMap;
 
 use crate::manifest::default_test_mode;
 use indexmap::IndexMap;
-use moneymq_types::x402::config::{
-    facilitator::{
-        FacilitatorConfig, FacilitatorNetworkConfig, SolanaMainnetFacilitatorConfig,
-        SolanaSurfnetFacilitatorConfig,
-    },
-    server::{SolanaMainnetServerConfig, SolanaSurfnetServerConfig},
+use moneymq_types::x402::config::facilitator::{
+    FacilitatorConfig, FacilitatorNetworkConfig, SolanaMainnetFacilitatorConfig,
+    SolanaSurfnetFacilitatorConfig,
 };
 use serde::{Deserialize, Serialize};
 use solana_keypair::{EncodableKey, Keypair};
@@ -29,7 +26,7 @@ pub struct X402Config {
 
     /// Configuration of the networks supported by this provider
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub networks: IndexMap<String, ServerConfigFile>,
+    pub billing_networks: IndexMap<String, BillingNetworkConfigFile>,
 
     /// Facilitator config
     pub facilitator: FacilitatorConfigFile,
@@ -43,54 +40,43 @@ pub struct X402Config {
 
 /// Configurations for different network types
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "network_type", rename_all = "snake_case")]
-pub enum ServerConfigFile {
-    SolanaSurfnet(SolanaSurfnetServerConfigFile),
-    SolanaMainnet(SolanaMainnetServerConfigFile),
+#[serde(tag = "network_type", rename_all = "kebab-case")]
+pub enum BillingNetworkConfigFile {
+    SolanaSurfnet(SolanaSurfnetBillingConfigFile),
+    SolanaMainnet(SolanaMainnetBillingConfigFile),
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaSurfnetServerConfigFile {
-    pub payment_recipient: String,
-}
-
-impl TryInto<SolanaSurfnetServerConfig> for &SolanaSurfnetServerConfigFile {
-    type Error = String;
-    fn try_into(self) -> Result<SolanaSurfnetServerConfig, Self::Error> {
-        let payment_recipient = self
-            .payment_recipient
-            .parse::<solana_keypair::Pubkey>()
-            .map_err(|e| {
-                format!(
-                    "Failed to parse Solana Surfnet payment recipient {}: {}",
-                    self.payment_recipient, e
-                )
-            })?;
-
-        Ok(SolanaSurfnetServerConfig { payment_recipient })
+impl BillingNetworkConfigFile {
+    pub fn network(&self) -> moneymq_types::x402::Network {
+        match self {
+            BillingNetworkConfigFile::SolanaSurfnet(_) => moneymq_types::x402::Network::Solana,
+            BillingNetworkConfigFile::SolanaMainnet(_) => moneymq_types::x402::Network::Solana,
+        }
+    }
+    pub fn payment_recipient(&self) -> Option<String> {
+        match self {
+            BillingNetworkConfigFile::SolanaSurfnet(cfg) => cfg.payment_recipient.clone(),
+            BillingNetworkConfigFile::SolanaMainnet(cfg) => cfg.payment_recipient.clone(),
+        }
+    }
+    pub fn currencies(&self) -> &Vec<String> {
+        match self {
+            BillingNetworkConfigFile::SolanaSurfnet(cfg) => &cfg.currencies,
+            BillingNetworkConfigFile::SolanaMainnet(cfg) => &cfg.currencies,
+        }
     }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaMainnetServerConfigFile {
-    pub payment_recipient: String,
+pub struct SolanaSurfnetBillingConfigFile {
+    pub payment_recipient: Option<String>,
+    pub currencies: Vec<String>,
 }
 
-impl TryInto<SolanaMainnetServerConfig> for &SolanaMainnetServerConfigFile {
-    type Error = String;
-    fn try_into(self) -> Result<SolanaMainnetServerConfig, Self::Error> {
-        let payment_recipient = self
-            .payment_recipient
-            .parse::<solana_keypair::Pubkey>()
-            .map_err(|e| {
-                format!(
-                    "Failed to parse Solana Mainnet payment recipient {}: {}",
-                    self.payment_recipient, e
-                )
-            })?;
-
-        Ok(SolanaMainnetServerConfig { payment_recipient })
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SolanaMainnetBillingConfigFile {
+    pub payment_recipient: Option<String>,
+    pub currencies: Vec<String>,
 }
 
 /// x402 Facilitator configuration
@@ -248,7 +234,7 @@ pub struct X402SandboxConfig {
 
     /// Configuration of the networks supported by this provider
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub networks: IndexMap<String, ServerConfigFile>,
+    pub billing_networks: IndexMap<String, BillingNetworkConfigFile>,
 
     /// Facilitator config
     pub facilitator: FacilitatorConfigFile,

@@ -27,6 +27,11 @@ providers:
 
     sandboxes:
       default:
+        billing_networks:
+          solana:
+            network_type: solana-surfnet
+            currencies:
+              - USDC
         facilitator:
           networks:
             solana:
