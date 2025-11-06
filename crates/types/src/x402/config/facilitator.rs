@@ -1,5 +1,7 @@
-use std::collections::HashMap;
-use std::fmt::{self, Display};
+use std::{
+    collections::HashMap,
+    fmt::{self, Display},
+};
 
 use solana_keypair::{Keypair, Signer};
 use url::Url;

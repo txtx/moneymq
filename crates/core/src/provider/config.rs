@@ -1,8 +1,9 @@
-use axum::{extract::State, response::IntoResponse, Json};
+use std::fs;
+
+use axum::{Json, extract::State, response::IntoResponse};
+use moneymq_types::x402::MixedAddress;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fs;
-use moneymq_types::x402::MixedAddress;
 use solana_keypair::Pubkey;
 
 use super::ProviderState;
@@ -50,14 +51,14 @@ pub struct AccountConfig {
 pub struct TokenAccountConfig {
     pub currency: String,
     pub decimals: u8,
-    pub address: String,        // ATA address
-    pub token_address: String,  // Mint address
+    pub address: String,       // ATA address
+    pub token_address: String, // Mint address
 }
 
 /// Operator account configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorAccountConfig {
-    pub out: String,  // Payer pubkey
+    pub out: String, // Payer pubkey
     #[serde(rename = "in")]
     pub in_account: TokenAccountConfig,
 }
@@ -92,18 +93,14 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
 
     // Load branding assets if provider name is available
     if let Some(name) = &state.provider_name {
-        let assets_path = state
-            .manifest_path
-            .join(format!("billing/assets/{}", name));
+        let assets_path = state.manifest_path.join(format!("billing/assets/{}", name));
 
         // Load logo as base64
         let logo_path = assets_path.join("logo.png");
         if logo_path.exists() {
             if let Ok(logo_bytes) = fs::read(&logo_path) {
-                let logo_base64 = base64::Engine::encode(
-                    &base64::engine::general_purpose::STANDARD,
-                    &logo_bytes,
-                );
+                let logo_base64 =
+                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &logo_bytes);
                 account.logo = Some(format!("data:image/png;base64,{}", logo_base64));
             }
         }
@@ -129,56 +126,20 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
     }
 
     // Build payout account configuration
-    let payout_account = state
-        .billing_manager
-        .configs
-        .iter()
-        .next()
-        .and_then(|(_, network_config)| {
-            let recipient_address = network_config.recipient().address();
-            let currency = network_config.currencies().first()?;
-
-            match (recipient_address, currency.address()) {
-                (MixedAddress::Solana(owner), MixedAddress::Solana(mint)) => {
-                    let ata = spl_associated_token_account::get_associated_token_address(
-                        &owner,
-                        &mint,
-                    );
-
-                    // Get currency details
-                    let solana_currency = currency.solana_currency()?;
-
-                    Some(TokenAccountConfig {
-                        currency: solana_currency.symbol.to_lowercase(),
-                        decimals: solana_currency.decimals,
-                        address: ata.to_string(),           // ATA address
-                        token_address: mint.to_string(),    // Mint address
-                    })
-                }
-                _ => None,
-            }
-        });
-
-    // Build facilitator configuration
-    let facilitator = if let Some(payer_pubkey_str) = state.facilitator_pubkey.as_ref() {
-        // Parse the payer pubkey and compute its ATA
-        let in_account = state
+    let payout_account =
+        state
             .billing_manager
             .configs
             .iter()
             .next()
             .and_then(|(_, network_config)| {
+                let recipient_address = network_config.recipient().address();
                 let currency = network_config.currencies().first()?;
 
-                // Parse the facilitator's pubkey (the payer)
-                let payer_pubkey = payer_pubkey_str.parse::<Pubkey>().ok()?;
-
-                match currency.address() {
-                    MixedAddress::Solana(mint) => {
-                        // Compute ATA for the PAYER (facilitator), not the recipient
+                match (recipient_address, currency.address()) {
+                    (MixedAddress::Solana(owner), MixedAddress::Solana(mint)) => {
                         let ata = spl_associated_token_account::get_associated_token_address(
-                            &payer_pubkey,
-                            &mint,
+                            &owner, &mint,
                         );
 
                         // Get currency details
@@ -187,13 +148,50 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
                         Some(TokenAccountConfig {
                             currency: solana_currency.symbol.to_lowercase(),
                             decimals: solana_currency.decimals,
-                            address: ata.to_string(),
-                            token_address: mint.to_string(),
+                            address: ata.to_string(),        // ATA address
+                            token_address: mint.to_string(), // Mint address
                         })
                     }
                     _ => None,
                 }
             });
+
+    // Build facilitator configuration
+    let facilitator = if let Some(payer_pubkey_str) = state.facilitator_pubkey.as_ref() {
+        // Parse the payer pubkey and compute its ATA
+        let in_account =
+            state
+                .billing_manager
+                .configs
+                .iter()
+                .next()
+                .and_then(|(_, network_config)| {
+                    let currency = network_config.currencies().first()?;
+
+                    // Parse the facilitator's pubkey (the payer)
+                    let payer_pubkey = payer_pubkey_str.parse::<Pubkey>().ok()?;
+
+                    match currency.address() {
+                        MixedAddress::Solana(mint) => {
+                            // Compute ATA for the PAYER (facilitator), not the recipient
+                            let ata = spl_associated_token_account::get_associated_token_address(
+                                &payer_pubkey,
+                                &mint,
+                            );
+
+                            // Get currency details
+                            let solana_currency = currency.solana_currency()?;
+
+                            Some(TokenAccountConfig {
+                                currency: solana_currency.symbol.to_lowercase(),
+                                decimals: solana_currency.decimals,
+                                address: ata.to_string(),
+                                token_address: mint.to_string(),
+                            })
+                        }
+                        _ => None,
+                    }
+                });
 
         in_account.map(|in_acc| FacilitatorConfig {
             operator_account: OperatorAccountConfig {
@@ -215,9 +213,15 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
             .map(|(network_name, _)| {
                 // Convert HTTP RPC URL to WebSocket URL with hardcoded port 8900
                 let mut ws_url = rpc_url.clone();
-                ws_url.set_scheme(if rpc_url.scheme() == "https" { "wss" } else { "ws" })
+                ws_url
+                    .set_scheme(if rpc_url.scheme() == "https" {
+                        "wss"
+                    } else {
+                        "ws"
+                    })
                     .expect("Failed to set websocket scheme");
-                ws_url.set_port(Some(8900))
+                ws_url
+                    .set_port(Some(8900))
                     .expect("Failed to set websocket port");
 
                 ValidatorConfig {

@@ -1,19 +1,21 @@
-use std::collections::HashMap;
-use std::fs;
-use std::path::PathBuf;
+use std::{collections::HashMap, fs, path::PathBuf};
 
 use console::style;
 use indexmap::IndexMap;
-use moneymq_core::billing::BillingManager;
-use moneymq_core::billing::BillingManagerError;
-use moneymq_core::validator::SolanaValidatorConfig;
+use moneymq_core::{
+    billing::{BillingManager, BillingManagerError},
+    validator::SolanaValidatorConfig,
+};
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::Meter;
-use moneymq_types::Product;
-use moneymq_types::x402::config::facilitator::FacilitatorConfig;
-use moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig;
-use moneymq_types::x402::{MoneyMqNetwork, Network};
+use moneymq_types::{
+    Product,
+    x402::{
+        MoneyMqNetwork, Network,
+        config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig},
+    },
+};
 use solana_keypair::Signer;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};

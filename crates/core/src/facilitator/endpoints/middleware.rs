@@ -9,12 +9,17 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use moneymq_types::x402::{
-    FacilitatorErrorReason, PaymentPayload, PaymentRequirements, SupportedResponse,
+    ExactPaymentPayload, FacilitatorErrorReason, PaymentPayload, PaymentRequirements,
+    SupportedResponse,
+    transactions::{FacilitatedTransaction, TransactionStatus},
 };
 use serde_json::json;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
-use crate::provider::ProviderState;
+use crate::{
+    facilitator::networks::solana::extract_customer_from_transaction,
+    provider::{ProviderState, stripe::utils::generate_stripe_id},
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum X402FacilitatorRequestError {
@@ -222,7 +227,7 @@ async fn settle_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<(), X402FacilitatorRequestError> {
+) -> Result<moneymq_types::x402::SettleResponse, X402FacilitatorRequestError> {
     use moneymq_types::x402::{SettleRequest, SettleResponse, X402Version};
 
     // Construct the settle request (identical structure to verify request)
@@ -258,10 +263,10 @@ async fn settle_payment_with_facilitator(
 
     // Check if settlement was successful
     if settle_response.success {
-        if let Some(tx_hash) = settle_response.transaction {
+        if let Some(ref tx_hash) = settle_response.transaction {
             debug!("  Transaction hash: {}", tx_hash);
         }
-        Ok(())
+        Ok(settle_response)
     } else {
         Err(X402FacilitatorRequestError::PaymentSettlementFailed(
             settle_response.error_reason,
@@ -350,7 +355,24 @@ pub async fn payment_middleware(
                     info!("Verified - Payment verified by facilitator");
                     debug!("  Payer: {:?}", payer);
 
-                    // Store payer in request extensions for use by handler
+                    // Extract customer pubkey from the transaction
+                    let customer_pubkey = match &payment_payload.payload {
+                        ExactPaymentPayload::Solana(solana_payload) => {
+                            match extract_customer_from_transaction(&solana_payload.transaction) {
+                                Ok(pubkey) => {
+                                    info!("Extracted customer pubkey: {}", pubkey);
+                                    Some(pubkey)
+                                }
+                                Err(e) => {
+                                    warn!("Failed to extract customer pubkey: {}", e);
+                                    None
+                                }
+                            }
+                        }
+                    };
+                    debug!("  Customer: {:?}", customer_pubkey);
+
+                    // Store payer and customer in request extensions for use by handler
                     req.extensions_mut().insert(payer.clone());
 
                     // Continue to the handler
@@ -359,7 +381,6 @@ pub async fn payment_middleware(
                     // Post-process the response
                     if response.status().is_success() {
                         println!("\x1b[32m$ Success\x1b[0m - Request completed successfully");
-                        println!("  Response status: {}", response.status());
 
                         // Call facilitator /settle endpoint to finalize payment
                         match settle_payment_with_facilitator(
@@ -369,8 +390,58 @@ pub async fn payment_middleware(
                         )
                         .await
                         {
-                            Ok(()) => {
+                            Ok(settle_response) => {
                                 info!("Settled - Payment settled on-chain");
+                                // Find the customer label by matching the customer pubkey with user accounts
+                                let customer_label = customer_pubkey.and_then(|customer| {
+                                    billing_config
+                                        .user_accounts()
+                                        .iter()
+                                        .find(|account| {
+                                            if let moneymq_types::x402::MixedAddress::Solana(addr) =
+                                                account.address()
+                                            {
+                                                addr == customer
+                                            } else {
+                                                false
+                                            }
+                                        })
+                                        .and_then(|account| account.label())
+                                });
+
+                                // Extract currency from asset
+                                let currency = billing_config
+                                    .currencies()
+                                    .iter()
+                                    .find(|c| c.address() == payment_requirements[0].asset)
+                                    .and_then(|c| c.solana_currency())
+                                    .map(|sc| sc.symbol.clone())
+                                    .unwrap_or_else(|| "USDC".to_string());
+
+                                // Convert amount from raw token amount to decimal string
+                                let amount = &payment_requirements[0].max_amount_required.0;
+
+                                let transaction = FacilitatedTransaction::new(
+                                    generate_stripe_id("txn"),
+                                    chrono::Utc::now().timestamp(),
+                                    payment_requirements[0].description.clone(),
+                                    customer_label,
+                                    customer_pubkey
+                                        .map(|c| c.to_string())
+                                        .unwrap_or_else(|| payer.to_string()),
+                                    amount.clone(),
+                                    currency,
+                                    TransactionStatus::Completed,
+                                    settle_response.transaction.map(|tx| match tx {
+                                        moneymq_types::x402::TransactionHash::Solana(bytes) => {
+                                            bs58::encode(bytes).into_string()
+                                        }
+                                    }),
+                                );
+
+                                if let Ok(mut transactions) = state.transactions.lock() {
+                                    transactions.insert(0, transaction); // Insert at beginning for latest-first ordering
+                                }
                             }
                             Err(error_message) => {
                                 error!("Settlement Failed - {}", error_message);
@@ -388,7 +459,7 @@ pub async fn payment_middleware(
             }
         }
         Err(error) => {
-            error!("Payment extraction failed: {}", error);
+            warn!("Payment extraction failed: {}", error);
             // No payment or invalid payment
             error.into()
         }
