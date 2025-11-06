@@ -1,4 +1,5 @@
 pub mod stripe;
+pub mod x402;
 
 use std::sync::Arc;
 
@@ -83,6 +84,7 @@ pub async fn start_provider(
     let app = Router::new()
         // Health check
         .route("/health", get(health_check))
+        .route("/v1/accounts", get(x402::list_accounts))
         // Product endpoints
         .route("/v1/products", get(stripe::list_products))
         .route("/v1/prices", get(stripe::list_prices))

@@ -43,6 +43,7 @@ pub enum X402MiddlewareError {
     #[error("Invalid X-Payment header: {0}")]
     InvalidPaymentHeader(String),
 }
+
 impl Into<Response> for X402MiddlewareError {
     fn into(self) -> Response {
         let (status, code, err_type) = match &self {
@@ -288,10 +289,6 @@ pub async fn payment_middleware(
     let Some(billing_config) = state.billing_manager.get_config_for_network(&network) else {
         panic!("No billing config for network {:?}", network); // TODO: Handle this error properly
     };
-    debug!(
-        "Using billing config for network {:?}: {:?}",
-        network, billing_config
-    );
 
     // TODO: probably need some sort of filtering here based on product being accessed
     let assets = billing_config
