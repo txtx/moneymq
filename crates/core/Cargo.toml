@@ -41,6 +41,7 @@ base64 = "0.22.1"
 
 # Solana deps
 solana-client = { workspace = true }
+solana-commitment-config = { workspace = true }
 solana-keypair = { workspace = true }
 solana-transaction = "3.0.1"
 spl-token-2022-interface = { workspace = true }

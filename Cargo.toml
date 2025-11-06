@@ -30,6 +30,7 @@ url = { version = "2.5", features = ["serde"] }
 
 # Solana deps
 solana-client = "3.0.8"
+solana-commitment-config = { version = "3.0.0", default-features = false }
 solana-keypair = "3.0.1"
 spl-token-2022-interface = { version = "2.0.0", default-features = false }
 spl-token-interface = { version = "2.0.0", default-features = false }
