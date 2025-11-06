@@ -61,6 +61,8 @@ pub fn start_local_solana_validator(
         host.to_string(),
         "--airdrop".to_string(),
         config.facilitator_pubkey.to_string(),
+        "--log-level".to_string(),
+        "debug".to_string(),
     ];
 
     let mut validator_handle = std::process::Command::new("surfpool")

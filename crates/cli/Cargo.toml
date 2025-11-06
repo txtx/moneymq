@@ -23,15 +23,16 @@ dotenvy = "0.15"
 indexmap = { version = "2.12.0", features = ["serde"] }
 indicatif = "0.18.2"
 moneymq-core = { path = "../core" }
+moneymq-mcp = { path = "../mcp" }
 moneymq-types = { path = "../types" }
 pretty_yaml = "0.5.1"
 reqwest = { version = "0.12.24", features = ["json"] }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 serde_yml = "0.0.12"
 solana-keypair = { workspace = true }
 thiserror = { workspace = true }
-tokio = { version = "1", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
 toml = "0.9"
 tracing-subscriber = "0.3"
 url = { workspace = true }
