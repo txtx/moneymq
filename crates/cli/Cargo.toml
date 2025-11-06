@@ -25,6 +25,7 @@ indicatif = "0.18.2"
 moneymq-core = { path = "../core" }
 moneymq-types = { path = "../types" }
 pretty_yaml = "0.5.1"
+reqwest = { version = "0.12.24", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yml = "0.0.12"

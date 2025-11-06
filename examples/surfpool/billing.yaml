@@ -6,7 +6,7 @@
 providers:
   txtx_inc_stripe:
     provider_type: stripe
-    description: "Stripe account - Txtx, Inc."
+    description: "Txtx, Inc."
     # api_key: sk_live_...  # Optional - overridden by STRIPE_SECRET_KEY env var
     # api_version: "2023-10-16"  # Optional - defaults to Stripe's latest
     # catalog_path: billing/catalog/v1  # Optional - catalog path (default: billing/catalog/v1)
@@ -17,24 +17,3 @@ providers:
         description: "Stripe sandbox - Sandbox"
         # api_key: sk_test_...  # Optional - overridden by STRIPE_SANDBOX_SECRET_KEY env var
         # api_version: "2023-10-16"  # Optional - defaults to Stripe's latest
-
-  my_own_x402_provider:
-    provider_type: x402
-    # Using an existing facilitator
-    facilitator:
-      url: "https://coinbase.com/facilitator"
-      api_token: "<api_token>"
-
-    sandboxes:
-      default:
-        billing_networks:
-          solana:
-            network_type: solana-surfnet
-            currencies:
-              - USDC
-        facilitator:
-          networks:
-            solana:
-              network_type: solana-surfnet
-              rpc_url: "http://127.0.0.1:8899"
-              # payer_keypair_path: "./keypair.json"  # Optional - if not provided, a new keypair is generated

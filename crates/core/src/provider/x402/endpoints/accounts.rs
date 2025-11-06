@@ -34,10 +34,12 @@ pub async fn list_accounts(State(state): State<ProviderState>) -> impl IntoRespo
                     LocalManagedRecipient {
                         address,
                         keypair_bytes,
+                        label,
                     },
                 )) => json!({
                     "address": address,
-                    "keypairBytes": bs58::encode(keypair_bytes).into_string(),
+                    "secretKeyHex": bs58::encode(keypair_bytes).into_string(),
+                    "label": label,
                 }),
             })
             .collect::<Vec<_>>();

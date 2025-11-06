@@ -1,7 +1,9 @@
+pub mod config;
 pub mod stripe;
 pub mod x402;
 
 use std::sync::Arc;
+use std::path::PathBuf;
 
 use crate::{billing::BillingManager, facilitator::endpoints::middleware::x402_post};
 use axum::{
@@ -26,6 +28,11 @@ pub struct ProviderState {
     pub use_sandbox: bool,
     pub facilitator_url: Url,
     pub billing_manager: BillingManager,
+    pub manifest_path: PathBuf,
+    pub provider_name: Option<String>,
+    pub provider_description: Option<String>,
+    pub facilitator_pubkey: Option<String>,
+    pub validator_rpc_url: Option<Url>,
 }
 
 /// Application state
@@ -43,6 +50,11 @@ impl ProviderState {
         use_sandbox: bool,
         facilitator_url: Url,
         billing_manager: BillingManager,
+        manifest_path: PathBuf,
+        provider_name: Option<String>,
+        provider_description: Option<String>,
+        facilitator_pubkey: Option<String>,
+        validator_rpc_url: Option<Url>,
     ) -> Self {
         Self {
             products: Arc::new(products),
@@ -50,6 +62,11 @@ impl ProviderState {
             use_sandbox,
             facilitator_url,
             billing_manager,
+            manifest_path,
+            provider_name,
+            provider_description,
+            facilitator_pubkey,
+            validator_rpc_url,
         }
     }
 }
@@ -67,6 +84,11 @@ pub async fn start_provider(
     port: u16,
     use_sandbox: bool,
     billing_manager: BillingManager,
+    manifest_path: PathBuf,
+    provider_name: Option<String>,
+    provider_description: Option<String>,
+    facilitator_pubkey: Option<String>,
+    validator_rpc_url: Option<Url>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let state = ProviderState::new(
         products,
@@ -74,6 +96,11 @@ pub async fn start_provider(
         use_sandbox,
         facilitator_url,
         billing_manager,
+        manifest_path,
+        provider_name,
+        provider_description,
+        facilitator_pubkey,
+        validator_rpc_url,
     );
 
     let cors_layer = CorsLayer::new()
@@ -85,6 +112,8 @@ pub async fn start_provider(
         // Health check
         .route("/health", get(health_check))
         .route("/v1/accounts", get(x402::list_accounts))
+        // Config endpoint
+        .route("/config", get(config::get_config))
         // Product endpoints
         .route("/v1/products", get(stripe::list_products))
         .route("/v1/prices", get(stripe::list_prices))

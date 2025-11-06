@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::x402::X402Config;
-mod x402;
+pub mod x402;
 // TODO: Re-enable x402_rs imports when refactoring X402 facilitator
 // use x402_rs::{
 //     chain::{NetworkProvider, solana::SolanaProvider},

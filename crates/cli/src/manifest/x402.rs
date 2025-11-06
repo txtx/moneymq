@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use crate::manifest::default_test_mode;
 use indexmap::IndexMap;
 use moneymq_types::x402::config::facilitator::{
     FacilitatorConfig, FacilitatorNetworkConfig, SolanaMainnetFacilitatorConfig,
@@ -19,10 +18,6 @@ pub struct X402Config {
     /// Optional description of this provider
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-
-    /// Whether to use test mode (default: true)
-    #[serde(default = "default_test_mode")]
-    pub test_mode: bool,
 
     /// Configuration of the networks supported by this provider
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
