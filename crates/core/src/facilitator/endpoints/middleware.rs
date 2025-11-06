@@ -179,7 +179,7 @@ async fn verify_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<moneymq_types::x402::MixedAddress, X402FacilitatorRequestError> {
+) -> Result<(moneymq_types::x402::MixedAddress, String, String), X402FacilitatorRequestError> {
     use moneymq_types::x402::{VerifyRequest, VerifyResponse, X402Version};
 
     // Construct the verify request
@@ -188,6 +188,11 @@ async fn verify_payment_with_facilitator(
         payment_payload: payment_payload.clone(),
         payment_requirements: payment_requirements.clone(),
     };
+
+    // Serialize request for debug data
+    let verify_request_json =
+        serde_json::to_string(&verify_request).unwrap_or_else(|_| "{}".to_string());
+    let verify_request_base64 = BASE64.encode(&verify_request_json);
 
     // Build the facilitator verify URL
     let verify_url = format!("{}verify", state.facilitator_url);
@@ -207,15 +212,22 @@ async fn verify_payment_with_facilitator(
         return Err(X402FacilitatorRequestError::FacilitatorError(error));
     }
 
-    // Parse response
-    let verify_response: VerifyResponse = response
-        .json()
+    // Get response text for debug data
+    let response_text = response
+        .text()
         .await
         .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
+    let verify_response_base64 = BASE64.encode(&response_text);
+
+    // Parse response
+    let verify_response: VerifyResponse =
+        serde_json::from_str(&response_text).expect("Failed to parse verify response");
 
     // Check if payment is valid
     match verify_response {
-        VerifyResponse::Valid { payer } => Ok(payer),
+        VerifyResponse::Valid { payer } => {
+            Ok((payer, verify_request_base64, verify_response_base64))
+        }
         VerifyResponse::Invalid { reason, .. } => Err(
             X402FacilitatorRequestError::PaymentVerificationFailed(reason),
         ),
@@ -227,7 +239,7 @@ async fn settle_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<moneymq_types::x402::SettleResponse, X402FacilitatorRequestError> {
+) -> Result<(moneymq_types::x402::SettleResponse, String, String), X402FacilitatorRequestError> {
     use moneymq_types::x402::{SettleRequest, SettleResponse, X402Version};
 
     // Construct the settle request (identical structure to verify request)
@@ -236,6 +248,11 @@ async fn settle_payment_with_facilitator(
         payment_payload: payment_payload.clone(),
         payment_requirements: payment_requirements.clone(),
     };
+
+    // Serialize settle request for debug purposes
+    let settle_request_json =
+        serde_json::to_string(&settle_request).unwrap_or_else(|_| "{}".to_string());
+    let settle_request_base64 = BASE64.encode(&settle_request_json);
 
     // Build the facilitator settle URL
     let settle_url = format!("{}settle", state.facilitator_url);
@@ -255,18 +272,27 @@ async fn settle_payment_with_facilitator(
         return Err(X402FacilitatorRequestError::FacilitatorError(error));
     }
 
-    // Parse response
-    let settle_response: SettleResponse = response
-        .json()
+    // Get response as text for debug purposes
+    let response_text = response
+        .text()
         .await
         .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
+    let settle_response_base64 = BASE64.encode(&response_text);
+
+    // Parse response
+    let settle_response: SettleResponse =
+        serde_json::from_str(&response_text).expect("Failed to parse settle response");
 
     // Check if settlement was successful
     if settle_response.success {
         if let Some(ref tx_hash) = settle_response.transaction {
             debug!("  Transaction hash: {}", tx_hash);
         }
-        Ok(settle_response)
+        Ok((
+            settle_response,
+            settle_request_base64,
+            settle_response_base64,
+        ))
     } else {
         Err(X402FacilitatorRequestError::PaymentSettlementFailed(
             settle_response.error_reason,
@@ -351,7 +377,7 @@ pub async fn payment_middleware(
             )
             .await
             {
-                Ok(payer) => {
+                Ok((payer, verify_req_b64, verify_resp_b64)) => {
                     info!("Verified - Payment verified by facilitator");
                     debug!("  Payer: {:?}", payer);
 
@@ -372,6 +398,20 @@ pub async fn payment_middleware(
                     };
                     debug!("  Customer: {:?}", customer_pubkey);
 
+                    // Reconstruct the 402 Payment Required response that would have been sent
+                    // when no X-Payment header was present
+                    let payment_required_body = json!({
+                        "error": {
+                            "code": "payment_required",
+                            "message": "Payment required to access this resource. Please include X-Payment header.",
+                            "type": "invalid_request_error",
+                            "payment_requirements": payment_requirements,
+                        }
+                    });
+                    let payment_required_json = serde_json::to_string(&payment_required_body)
+                        .unwrap_or_else(|_| "{}".to_string());
+                    let payment_required_b64 = BASE64.encode(&payment_required_json);
+
                     // Store payer and customer in request extensions for use by handler
                     req.extensions_mut().insert(payer.clone());
 
@@ -390,7 +430,7 @@ pub async fn payment_middleware(
                         )
                         .await
                         {
-                            Ok(settle_response) => {
+                            Ok((settle_response, settle_req_b64, settle_resp_b64)) => {
                                 info!("Settled - Payment settled on-chain");
                                 // Find the customer label by matching the customer pubkey with user accounts
                                 let customer_label = customer_pubkey.and_then(|customer| {
@@ -437,6 +477,13 @@ pub async fn payment_middleware(
                                             bs58::encode(bytes).into_string()
                                         }
                                     }),
+                                )
+                                .with_x402_data(
+                                    Some(payment_required_b64),
+                                    Some(verify_req_b64.clone()),
+                                    Some(verify_resp_b64.clone()),
+                                    Some(settle_req_b64),
+                                    Some(settle_resp_b64),
                                 );
 
                                 if let Ok(mut transactions) = state.transactions.lock() {
