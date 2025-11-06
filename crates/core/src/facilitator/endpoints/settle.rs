@@ -7,6 +7,7 @@ use axum::{
 };
 use moneymq_types::x402::{FacilitatorErrorReason, Network, SettleRequest, SettleResponse};
 use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use tracing::{error, info};
 
 use crate::facilitator::{FacilitatorState, networks};
@@ -62,7 +63,10 @@ pub async fn handler(
     // Delegate to network-specific settlement
     match network_config.network() {
         Network::Solana => {
-            let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
+            let rpc_client = Arc::new(RpcClient::new_with_commitment(
+                network_config.rpc_url().to_string(),
+                CommitmentConfig::confirmed(),
+            ));
             match networks::solana::settle_solana_payment(&request, &network_config, &rpc_client)
                 .await
             {

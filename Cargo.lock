@@ -4582,6 +4582,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "solana-client",
+ "solana-commitment-config",
  "solana-keypair",
  "spl-associated-token-account",
  "spl-token-2022-interface",
