@@ -146,7 +146,7 @@ impl InitCommand {
                     sandbox_key.as_deref(),
                 )?;
 
-                let manifest_yaml_path = ctx.manifest_path.join("billing.yaml");
+                let manifest_yaml_path = ctx.manifest_path.join("moneymq.yaml");
                 if !manifest_yaml_path.exists() {
                     save_manifest_file(
                         &manifest_yaml_path,
@@ -563,7 +563,7 @@ providers:
         provider_name, description, sandbox_section
     );
 
-    fs::write(path, content).map_err(|e| format!("Failed to write billing.yaml: {}", e))?;
+    fs::write(path, content).map_err(|e| format!("Failed to write moneymq.yaml: {}", e))?;
 
     Ok(())
 }

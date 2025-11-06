@@ -40,17 +40,17 @@ impl Context {
 #[derive(Parser, Debug)]
 #[clap(author, version, about = "MoneyMQ - Payment gateway management CLI", long_about = None)]
 struct Opts {
-    /// Path to the billing.yaml manifest file (default: ./billing.yaml)
+    /// Path to the moneymq.yaml manifest file (default: ./moneymq.yaml)
     #[arg(
         long = "manifest-path",
         short = 'm',
         global = true,
-        default_value = "./billing.yaml"
+        default_value = "./moneymq.yaml"
     )]
     manifest_path: PathBuf,
 
     /// Provider configuration to use (e.g., "stripe", "stripe_sandbox")
-    /// If not specified, uses the first provider found in billing.yaml
+    /// If not specified, uses the first provider found in moneymq.yaml
     #[arg(long = "provider", short = 'p', global = true)]
     provider: Option<String>,
 
@@ -108,7 +108,7 @@ async fn main() {
         load_env_file(&manifest_dir);
     }
 
-    // Load manifest from billing.yaml file (skip for init command)
+    // Load manifest from moneymq.yaml file (skip for init command)
     let manifest = if is_init_command {
         Manifest::default()
     } else {
