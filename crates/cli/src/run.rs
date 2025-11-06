@@ -11,9 +11,9 @@ use moneymq_core::validator::SolanaValidatorConfig;
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::Meter;
 use moneymq_types::Product;
-use moneymq_types::x402::Network;
 use moneymq_types::x402::config::facilitator::FacilitatorConfig;
 use moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig;
+use moneymq_types::x402::{MoneyMqNetwork, Network};
 use solana_keypair::Signer;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
@@ -169,6 +169,7 @@ impl RunCommand {
         println!();
 
         println!("{}", style("Endpoints").dim());
+        println!("  GET http://localhost:{}/config", self.port);
         println!("  GET http://localhost:{}/v1/products", self.port);
         println!("  GET http://localhost:{}/v1/prices", self.port);
         println!("  GET http://localhost:{}/v1/billing/meters", self.port);
@@ -190,7 +191,7 @@ impl RunCommand {
         // Initialize tracing
         tracing_subscriber::fmt::init();
 
-        let billing_networks = ctx
+        let mut billing_networks = ctx
             .manifest
             .providers
             .iter()
@@ -220,13 +221,53 @@ impl RunCommand {
             })
             .collect::<IndexMap<_, _>>();
 
+        // If no billing networks configured in sandbox mode, create default
+        if self.sandbox && billing_networks.is_empty() {
+            billing_networks.insert(
+                "solana".to_string(),
+                (
+                    MoneyMqNetwork::SolanaSurfnet,
+                    None,                     // No payment recipient for default config
+                    vec!["USDC".to_string()], // Default currency
+                    vec![],                   // No user accounts for default config
+                ),
+            );
+        }
+
         let billing_manager = BillingManager::initialize(billing_networks, self.sandbox)
             .await
             .map_err(RunCommandError::BillingManagerInitializationError)?;
 
+        // Build facilitator config once for sandbox mode
+        let facilitator_config = if self.sandbox {
+            Some(
+                build_facilitator_config(&ctx.manifest.providers)
+                    .await
+                    .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?,
+            )
+        } else {
+            None
+        };
+
+        // Extract facilitator pubkey before consuming the config
+        let facilitator_pubkey = if self.sandbox {
+            facilitator_config.as_ref().and_then(|config| {
+                config.networks.values().next().and_then(|net| {
+                    match net {
+                        moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
+                            Some(cfg.payer_keypair.pubkey().to_string())
+                        }
+                        _ => None,
+                    }
+                })
+            })
+        } else {
+            None
+        };
+
         // Only start local facilitator server in sandbox mode
         let handles = if self.sandbox {
-            start_facilitator_networks(&ctx.manifest.providers, &billing_manager)
+            start_facilitator_networks(facilitator_config.unwrap(), &billing_manager)
                 .await
                 .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?
         } else {
@@ -246,6 +287,28 @@ impl RunCommand {
             .await
             .map_err(RunCommandError::FundLocalAccountsError)?;
 
+        // Get the first provider name and description (for branding assets)
+        let (provider_name, provider_description) = ctx
+            .manifest
+            .providers
+            .iter()
+            .next()
+            .map(|(name, config)| {
+                let description = match config {
+                    ProviderConfig::Stripe(stripe_config) => stripe_config.description.clone(),
+                    ProviderConfig::X402(x402_config) => x402_config.description.clone(),
+                };
+                (Some(name.clone()), description)
+            })
+            .unwrap_or((None, None));
+
+        // Use the actual local validator RPC URL from the running validator
+        let validator_rpc_url = if self.sandbox {
+            local_validator_rpc_urls.values().next().cloned()
+        } else {
+            None
+        };
+
         // Start the server
         moneymq_core::provider::start_provider(
             products,
@@ -254,6 +317,11 @@ impl RunCommand {
             self.port,
             self.sandbox,
             billing_manager,
+            ctx.manifest_path.clone(),
+            provider_name,
+            provider_description,
+            facilitator_pubkey,
+            validator_rpc_url,
         )
         .await
         .map_err(RunCommandError::ProviderStartError)?;
@@ -279,7 +347,29 @@ async fn build_facilitator_config(
         .collect::<Vec<_>>();
 
     if sandbox_x402_config.is_empty() {
-        return Err("No X402 sandbox configuration found in manifest".to_string());
+        // Create default in-memory configuration using data from first provider
+        use moneymq_types::x402::config::facilitator::SolanaSurfnetFacilitatorConfig;
+        use solana_keypair::Keypair;
+        use url::Url;
+
+        let mut networks = std::collections::HashMap::new();
+        networks.insert(
+            "solana".to_string(),
+            FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
+                rpc_url: "http://127.0.0.1:8899"
+                    .parse::<Url>()
+                    .expect("Failed to parse default RPC URL"),
+                payer_keypair: Keypair::new(),
+            }),
+        );
+
+        return Ok(FacilitatorConfig {
+            url: crate::manifest::x402::DEFAULT_LOCAL_FACILITATOR_URL
+                .parse::<Url>()
+                .expect("Failed to parse default facilitator URL"),
+            networks,
+            api_token: None,
+        });
     }
 
     if sandbox_x402_config.len() > 1 {
@@ -300,12 +390,9 @@ type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
 type ValidatorData = IndexMap<Network, (std::process::Child, url::Url)>;
 
 async fn start_facilitator_networks(
-    providers: &HashMap<String, ProviderConfig>,
+    facilitator_config: FacilitatorConfig,
     billing_manager: &BillingManager,
 ) -> Result<Option<(FacilitatorHandle, ValidatorData, url::Url)>, String> {
-    // Build facilitator config for starting the facilitator
-    let facilitator_config = build_facilitator_config(providers).await?;
-
     let mut local_validator_handles = IndexMap::new();
     for (network_name, network_config) in facilitator_config.networks.iter() {
         match network_config {

@@ -50,7 +50,7 @@ impl BillingManager {
             }
 
             let payment_recipient =
-                Recipient::instantiate(&network, payment_recipient_opt.as_ref(), is_sandbox)
+                Recipient::instantiate_payment_recipient(&network, payment_recipient_opt.as_ref(), is_sandbox)
                     .await
                     .map_err(|e| {
                         BillingManagerError::InitializationError(network.clone(), e.to_string())
@@ -64,7 +64,7 @@ impl BillingManager {
                     for i in 0..cap {
                         let some_provided_account = user_accounts_strs.get(i);
                         let recipient =
-                            Recipient::instantiate(&network, some_provided_account, is_sandbox)
+                            Recipient::instantiate_with_index(&network, some_provided_account, is_sandbox, Some(i))
                                 .await
                                 .map_err(|e| {
                                     BillingManagerError::InitializationError(

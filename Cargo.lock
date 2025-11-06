@@ -4551,6 +4551,7 @@ dependencies = [
  "moneymq-core",
  "moneymq-types",
  "pretty_yaml",
+ "reqwest 0.12.24",
  "serde",
  "serde_json",
  "serde_yml",
@@ -4582,6 +4583,7 @@ dependencies = [
  "sha2 0.10.9",
  "solana-client",
  "solana-keypair",
+ "spl-associated-token-account",
  "spl-token-2022-interface",
  "spl-token-interface",
  "surfpool-core",
@@ -10385,6 +10387,32 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "spl-associated-token-account"
+version = "8.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0242277e290c023de8826f504abcf9206b3cd4e18d9ace4ec59a698b2828e88b"
+dependencies = [
+ "borsh 1.5.7",
+ "num-derive",
+ "num-traits",
+ "solana-account-info 3.0.0",
+ "solana-cpi 3.0.0",
+ "solana-instruction 3.0.0",
+ "solana-msg 3.0.0",
+ "solana-program-entrypoint 3.1.0",
+ "solana-program-error 3.0.0",
+ "solana-pubkey 3.0.0",
+ "solana-rent 3.0.0",
+ "solana-sdk-ids 3.0.0",
+ "solana-system-interface 2.0.0",
+ "solana-sysvar 3.0.0",
+ "spl-associated-token-account-interface",
+ "spl-token-2022-interface",
+ "spl-token-interface",
+ "thiserror 2.0.17",
 ]
 
 [[package]]

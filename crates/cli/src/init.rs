@@ -160,6 +160,9 @@ impl InitCommand {
                 // Create directories
                 let catalog_path = ctx.manifest_path.join("billing/catalog/v1");
                 let metering_path = ctx.manifest_path.join("billing/metering/v1");
+                let provider_assets_path = ctx
+                    .manifest_path
+                    .join(format!("billing/assets/{}", provider_name));
 
                 if !catalog_path.exists() {
                     fs::create_dir_all(&catalog_path)
@@ -168,6 +171,51 @@ impl InitCommand {
                 if !metering_path.exists() {
                     fs::create_dir_all(&metering_path)
                         .map_err(|e| format!("Failed to create metering directory: {}", e))?;
+                }
+                if !provider_assets_path.exists() {
+                    fs::create_dir_all(&provider_assets_path).map_err(|e| {
+                        format!("Failed to create provider assets directory: {}", e)
+                    })?;
+                }
+
+                // Download and save logo/icon
+                let logo_url = account_info
+                    .logo_url
+                    .as_ref()
+                    .or(account_info.image_url.as_ref());
+                if let Some(url) = logo_url {
+                    let logo_path = provider_assets_path.join("logo.png");
+                    match download_image(url, &logo_path).await {
+                        Ok(_) => {
+                            println!(
+                                "{} {} ./billing/assets/{}/logo.png",
+                                style("✔").green(),
+                                style("Logo saved to").dim(),
+                                provider_name
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("{} Failed to download logo: {}", style("⚠").yellow(), e);
+                        }
+                    }
+                }
+
+                // Save style.json with colors
+                if account_info.primary_color.is_some() || account_info.secondary_color.is_some() {
+                    let style_path = provider_assets_path.join("style.json");
+                    match save_style_json(&style_path, &account_info) {
+                        Ok(_) => {
+                            println!(
+                                "{} {} ./billing/assets/{}/style.json",
+                                style("✔").green(),
+                                style("Style saved to").dim(),
+                                provider_name
+                            );
+                        }
+                        Err(e) => {
+                            eprintln!("{} Failed to save style: {}", style("⚠").yellow(), e);
+                        }
+                    }
                 }
 
                 // Fetch catalog
@@ -463,7 +511,7 @@ fn save_manifest_file(
         .or(account_info.business_name.as_deref())
         .unwrap_or("(no name)");
 
-    let description = format!("Stripe account - {}", account_name);
+    let description = format!("{}", account_name);
 
     let sandbox_section = if has_sandbox {
         let sandbox_description = if let Some(sandbox_info) = sandbox_account_info {
@@ -516,6 +564,58 @@ providers:
     );
 
     fs::write(path, content).map_err(|e| format!("Failed to write billing.yaml: {}", e))?;
+
+    Ok(())
+}
+
+/// Download an image from a URL and save it to a file
+async fn download_image(url: &str, path: &Path) -> Result<(), String> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(|e| format!("Failed to download image: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to download image: HTTP {}",
+            response.status()
+        ));
+    }
+
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read image bytes: {}", e))?;
+
+    fs::write(path, bytes).map_err(|e| format!("Failed to write image file: {}", e))?;
+
+    Ok(())
+}
+
+/// Save style information (colors) to a JSON file
+fn save_style_json(
+    path: &Path,
+    account_info: &moneymq_core::provider::stripe::iac::AccountInfo,
+) -> Result<(), String> {
+    let mut style = serde_json::Map::new();
+
+    if let Some(ref primary_color) = account_info.primary_color {
+        style.insert(
+            "primary_color".to_string(),
+            serde_json::Value::String(primary_color.clone()),
+        );
+    }
+
+    if let Some(ref secondary_color) = account_info.secondary_color {
+        style.insert(
+            "secondary_color".to_string(),
+            serde_json::Value::String(secondary_color.clone()),
+        );
+    }
+
+    let json = serde_json::to_string_pretty(&style)
+        .map_err(|e| format!("Failed to serialize style JSON: {}", e))?;
+
+    fs::write(path, json).map_err(|e| format!("Failed to write style.json: {}", e))?;
 
     Ok(())
 }
