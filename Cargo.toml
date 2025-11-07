@@ -25,7 +25,10 @@ categories = ["payments"]
 axum-core = { version = "0.5.5" }
 clap = { version = "4.5.51", default-features = false }
 clap_complete = { version = "4.5.60", default-features = false }
+serde = "1.0"
+serde_json = "1.0"
 thiserror = "2.0"
+tokio = "1"
 url = { version = "2.5", features = ["serde"] }
 
 # Solana deps

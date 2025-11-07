@@ -142,6 +142,41 @@ pub struct Price {
 }
 
 impl Price {
+    pub fn new(currency: String, pricing_type: String) -> Self {
+        Self {
+            id: random_id(),
+            deployed_id: None,
+            sandboxes: IndexMap::new(),
+            active: true,
+            currency,
+            unit_amount: None,
+            pricing_type,
+            recurring_interval: None,
+            recurring_interval_count: None,
+            nickname: None,
+            metadata: IndexMap::new(),
+            created_at: Utc::now(),
+        }
+    }
+
+    /// Set the unit amount
+    pub fn with_some_amount(mut self, amount: Option<i64>) -> Self {
+        self.unit_amount = amount;
+        self
+    }
+
+    /// Set the recurring interval
+    pub fn with_some_interval(mut self, interval: Option<String>) -> Self {
+        self.recurring_interval = interval;
+        self
+    }
+
+    /// Set the recurring interval count
+    pub fn with_some_interval_count(mut self, interval_count: Option<i64>) -> Self {
+        self.recurring_interval_count = interval_count;
+        self
+    }
+
     /// Get the provider ID for a given sandbox name ("default" for primary sandbox)
     pub fn get_sandbox_id(&self, sandbox_name: &str) -> Option<&String> {
         self.sandboxes.get(sandbox_name)
@@ -215,7 +250,72 @@ pub struct Product {
     pub prices: Vec<Price>,
 }
 
+fn random_id() -> String {
+    use rand::Rng;
+    use rand::distr::Alphanumeric;
+    let id: String = rand::rng()
+        .sample_iter(&Alphanumeric)
+        .take(12)
+        .map(char::from)
+        .collect();
+    id
+}
+
 impl Product {
+    pub fn new() -> Self {
+        Self {
+            id: random_id(),
+            deployed_id: None,
+            sandboxes: IndexMap::new(),
+            name: None,
+            description: None,
+            active: true,
+            metadata: IndexMap::new(),
+            created_at: Utc::now(),
+            updated_at: None,
+            product_type: None,
+            images: vec![],
+            statement_descriptor: None,
+            unit_label: None,
+            prices: vec![],
+        }
+    }
+
+    /// Set the product name
+    pub fn with_some_name(mut self, name: Option<String>) -> Self {
+        self.name = name;
+        self
+    }
+
+    /// Set the product description
+    pub fn with_some_description(mut self, description: Option<String>) -> Self {
+        self.description = description;
+        self
+    }
+
+    /// Set the product type
+    pub fn with_some_product_type(mut self, product_type: Option<String>) -> Self {
+        self.product_type = product_type;
+        self
+    }
+
+    /// Set the statement descriptor
+    pub fn with_some_statement_descriptor(mut self, statement_descriptor: Option<String>) -> Self {
+        self.statement_descriptor = statement_descriptor;
+        self
+    }
+
+    /// Set the unit label
+    pub fn with_some_unit_label(mut self, unit_label: Option<String>) -> Self {
+        self.unit_label = unit_label;
+        self
+    }
+
+    pub fn add_price(mut self, price: Price) -> Self {
+        self.prices.push(price);
+        self
+    }
+
     /// Get the provider ID for a given sandbox name ("default" for primary sandbox)
     pub fn get_sandbox_id(&self, sandbox_name: &str) -> Option<&String> {
         self.sandboxes.get(sandbox_name)

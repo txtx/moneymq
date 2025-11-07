@@ -4,6 +4,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
+use moneymq_mcp::{McpOptions, run_server};
 
 mod catalog;
 mod init;
@@ -73,6 +74,7 @@ enum Command {
     },
     /// Start the local provider server
     Run(run::RunCommand),
+    Mcp,
 }
 
 #[derive(Subcommand, PartialEq, Clone, Debug)]
@@ -174,6 +176,10 @@ async fn handle_command(opts: Opts, ctx: &Context) -> Result<(), String> {
         Command::Init(cmd) => cmd.execute(ctx).await,
         Command::Catalog { command } => handle_catalog_commands(command, ctx).await,
         Command::Run(cmd) => cmd.execute(ctx).await.map_err(|e| e.to_string()),
+        Command::Mcp => {
+            let mcp_opts = McpOptions::default();
+            run_server(&mcp_opts).await
+        }
     }
 }
 

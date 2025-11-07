@@ -1,14 +1,33 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+use rmcp::{ServiceExt, transport::stdio};
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+use crate::moneymq::MoneyMqMcp;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+mod moneymq;
+pub mod yaml_util;
+
+#[derive(PartialEq, Clone, Debug, Default)]
+pub struct McpOptions {}
+
+pub async fn run_server(_opts: &McpOptions) -> Result<(), String> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive(tracing::Level::DEBUG.into()),
+        )
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .init();
+
+    tracing::info!("Starting MCP server");
+
+    let service = MoneyMqMcp::new()
+        .serve(stdio())
+        .await
+        .inspect_err(|e| {
+            tracing::error!("serving error: {:?}", e);
+        })
+        .map_err(|e| e.to_string())?;
+
+    service.waiting().await.map_err(|e| e.to_string())?;
+    Ok(())
 }
