@@ -7,7 +7,7 @@ use url::Url;
 
 use crate::{
     billing::{SolanaSurfnetBillingConfig, currency::SolanaCurrency},
-    validator::surfnet_utils::surfnet_set_token_account,
+    validator::surfnet_utils::{SetTokenAccountRequest, surfnet_set_token_account},
 };
 
 pub mod surfnet_utils;
@@ -61,6 +61,8 @@ pub fn start_local_solana_validator(
         host.to_string(),
         "--airdrop".to_string(),
         config.facilitator_pubkey.to_string(),
+        "--airdrop-amount".to_string(),
+        "1000000000".to_string(),
         "--log-level".to_string(),
         "debug".to_string(),
     ];
@@ -111,8 +113,10 @@ pub fn start_local_solana_validator(
             "Setting up token account for currency {} with mint {}",
             symbol, mint
         );
-        let _ =
-            surfnet_set_token_account(&rpc_client, &config.facilitator_pubkey, mint, token_program);
+        let _ = surfnet_set_token_account(
+            &rpc_client,
+            SetTokenAccountRequest::new(config.facilitator_pubkey, *mint, *token_program),
+        );
     }
 
     info!(

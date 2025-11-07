@@ -6,7 +6,9 @@ use url::Url;
 
 use crate::{
     billing::{currency::Currency, recipient::Recipient},
-    validator::surfnet_utils::{surfnet_set_account, surfnet_set_token_account},
+    validator::surfnet_utils::{
+        SetAccountRequest, SetTokenAccountRequest, surfnet_set_account, surfnet_set_token_account,
+    },
 };
 
 pub mod currency;
@@ -149,6 +151,13 @@ impl BillingManager {
                     let all_addresses = std::iter::once(pubkey).chain(user_addresses.iter());
 
                     for address in all_addresses {
+                        let is_pay_to = address.eq(pubkey);
+                        let token_amount = if is_pay_to { 0 } else { 500_000_000 };
+
+                        surfnet_set_account(
+                            &rpc_client,
+                            SetAccountRequest::new(*address).lamports(1_000_000_000),
+                        )?;
                         for currency in billing_config.currencies() {
                             #[allow(irrefutable_let_patterns)]
                             if let Currency::Solana(solana_currency) = currency {
@@ -158,11 +167,13 @@ impl BillingManager {
                                 );
                                 surfnet_set_token_account(
                                     &rpc_client,
-                                    address,
-                                    &solana_currency.mint,
-                                    &solana_currency.token_program,
+                                    SetTokenAccountRequest::new(
+                                        *address,
+                                        solana_currency.mint,
+                                        solana_currency.token_program,
+                                    )
+                                    .amount(token_amount),
                                 )?;
-                                surfnet_set_account(&rpc_client, &address)?;
                             }
                         }
                     }
