@@ -11,7 +11,7 @@ pub mod x402;
 //     provider_cache::ProviderCache,
 // };
 
-/// MoneyMQ manifest file (billing.yaml)
+/// MoneyMQ manifest file (moneymq.yaml)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Manifest {
     /// Multiple provider configurations
@@ -21,11 +21,11 @@ pub struct Manifest {
 }
 
 impl Manifest {
-    /// Load manifest from the specified billing.yaml file path
+    /// Load manifest from the specified moneymq.yaml file path
     pub fn load(manifest_file_path: &Path) -> Result<Self, String> {
         if !manifest_file_path.exists() {
             return Err(format!(
-                "billing.yaml not found at {}. Please create a billing.yaml file in your project root.",
+                "moneymq.yaml not found at {}. Please create a moneymq.yaml file in your project root.",
                 manifest_file_path.display()
             ));
         }

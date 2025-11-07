@@ -2,23 +2,26 @@ pub mod config;
 pub mod stripe;
 pub mod x402;
 
-use std::sync::Arc;
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
-use crate::{billing::BillingManager, facilitator::endpoints::middleware::x402_post};
 use axum::{
     Router,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
 };
-use moneymq_types::{Meter, Product};
+use moneymq_types::{Meter, Product, x402::transactions::FacilitatedTransaction};
 use reqwest::{
     Method,
     header::{AUTHORIZATION, CONTENT_TYPE},
 };
 use tower_http::cors::{Any, CorsLayer};
 use url::Url;
+
+use crate::{billing::BillingManager, facilitator::endpoints::middleware::x402_post};
 
 /// Application state
 #[derive(Clone)]
@@ -33,6 +36,7 @@ pub struct ProviderState {
     pub provider_description: Option<String>,
     pub facilitator_pubkey: Option<String>,
     pub validator_rpc_url: Option<Url>,
+    pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
 }
 
 /// Application state
@@ -67,6 +71,7 @@ impl ProviderState {
             provider_description,
             facilitator_pubkey,
             validator_rpc_url,
+            transactions: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -111,9 +116,11 @@ pub async fn start_provider(
     let app = Router::new()
         // Health check
         .route("/health", get(health_check))
-        .route("/v1/accounts", get(x402::list_accounts))
+        // x402 dev endpoints
+        .route("/x402/transactions", get(x402::list_transactions))
+        .route("/x402/accounts", get(x402::list_accounts))
         // Config endpoint
-        .route("/config", get(config::get_config))
+        .route("/x402/config", get(config::get_config))
         // Product endpoints
         .route("/v1/products", get(stripe::list_products))
         .route("/v1/prices", get(stripe::list_prices))

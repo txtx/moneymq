@@ -20,6 +20,15 @@ impl Recipient {
             Recipient::MoneyMqManaged(managed) => managed.recipient_address().clone(),
         }
     }
+
+    /// Returns the label associated with the [Recipient], if any
+    pub fn label(&self) -> Option<String> {
+        match self {
+            Recipient::UserManaged(_) => None,
+            Recipient::MoneyMqManaged(managed) => managed.label(),
+        }
+    }
+
     pub fn is_managed(&self) -> bool {
         matches!(self, Recipient::MoneyMqManaged(_))
     }
@@ -52,9 +61,10 @@ impl Recipient {
             }
             None => match network {
                 Network::Solana => {
-                    let managed_address = MoneyMqManagedRecipient::generate_with_index(is_sandbox, index)
-                        .await
-                        .map_err(|e| RecipientError::ManagedAddressGenerationError(e))?;
+                    let managed_address =
+                        MoneyMqManagedRecipient::generate_with_index(is_sandbox, index)
+                            .await
+                            .map_err(|e| RecipientError::ManagedAddressGenerationError(e))?;
                     Ok(Recipient::MoneyMqManaged(managed_address))
                 }
             },
@@ -91,9 +101,10 @@ impl Recipient {
             }
             None => match network {
                 Network::Solana => {
-                    let managed_address = MoneyMqManagedRecipient::generate_payment_recipient(is_sandbox)
-                        .await
-                        .map_err(|e| RecipientError::ManagedAddressGenerationError(e))?;
+                    let managed_address =
+                        MoneyMqManagedRecipient::generate_payment_recipient(is_sandbox)
+                            .await
+                            .map_err(|e| RecipientError::ManagedAddressGenerationError(e))?;
                     Ok(Recipient::MoneyMqManaged(managed_address))
                 }
             },
@@ -109,7 +120,10 @@ pub enum MoneyMqManagedRecipient {
 }
 
 impl MoneyMqManagedRecipient {
-    pub async fn generate_with_index(is_sandbox: bool, index: Option<usize>) -> Result<Self, String> {
+    pub async fn generate_with_index(
+        is_sandbox: bool,
+        index: Option<usize>,
+    ) -> Result<Self, String> {
         match is_sandbox {
             true => {
                 let local = LocalManagedRecipient::generate_with_index(index).await?;
@@ -138,11 +152,20 @@ impl MoneyMqManagedRecipient {
             }
         }
     }
+
     /// Returns the [MixedAddress] associated with the [MoneyMqManagedRecipient]
     pub fn recipient_address(&self) -> MixedAddress {
         match self {
             MoneyMqManagedRecipient::Local(local) => local.address.clone(),
             MoneyMqManagedRecipient::Remote(remote) => remote.recipient_address.clone(),
+        }
+    }
+
+    /// Returns the label associated with the [MoneyMqManagedRecipient], if any
+    pub fn label(&self) -> Option<String> {
+        match self {
+            MoneyMqManagedRecipient::Local(local) => local.label.clone(),
+            MoneyMqManagedRecipient::Remote(_) => None,
         }
     }
 }
@@ -215,7 +238,7 @@ impl LocalManagedRecipient {
 
     /// Generate a deterministic seed with a custom prefix
     fn generate_seed_with_prefix(prefix: &[u8], index: usize) -> [u8; 32] {
-        use sha2::{Sha256, Digest};
+        use sha2::{Digest, Sha256};
         let mut hasher = Sha256::new();
         hasher.update(prefix);
         hasher.update(index.to_le_bytes());
@@ -228,10 +251,9 @@ impl LocalManagedRecipient {
     /// Get a label for a given index (alice, bob, charlie, etc.)
     fn label_for_index(index: usize) -> String {
         const LABELS: &[&str] = &[
-            "alice", "bob", "charlie", "david", "eve", "frank", "grace", "heidi",
-            "ivan", "judy", "kevin", "laura", "michael", "nancy", "oscar", "peggy",
-            "quinn", "rachel", "steve", "trent", "ursula", "victor", "wendy", "xavier",
-            "yvonne", "zach"
+            "alice", "bob", "charlie", "david", "eve", "frank", "grace", "heidi", "ivan", "judy",
+            "kevin", "laura", "michael", "nancy", "oscar", "peggy", "quinn", "rachel", "steve",
+            "trent", "ursula", "victor", "wendy", "xavier", "yvonne", "zach",
         ];
 
         if index < LABELS.len() {

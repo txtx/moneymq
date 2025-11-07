@@ -75,9 +75,7 @@ pub async fn get_account_info(api_key: &str) -> Result<AccountInfo> {
         .unwrap_or("unknown")
         .to_string();
 
-    let branding = account_json
-        .get("settings")
-        .and_then(|s| s.get("branding"));
+    let branding = account_json.get("settings").and_then(|s| s.get("branding"));
 
     // Get icon URL from file ID
     let image_url = if let Some(icon_id) = branding

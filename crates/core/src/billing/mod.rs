@@ -49,12 +49,15 @@ impl BillingManager {
                 currencies.push(currency);
             }
 
-            let payment_recipient =
-                Recipient::instantiate_payment_recipient(&network, payment_recipient_opt.as_ref(), is_sandbox)
-                    .await
-                    .map_err(|e| {
-                        BillingManagerError::InitializationError(network.clone(), e.to_string())
-                    })?;
+            let payment_recipient = Recipient::instantiate_payment_recipient(
+                &network,
+                payment_recipient_opt.as_ref(),
+                is_sandbox,
+            )
+            .await
+            .map_err(|e| {
+                BillingManagerError::InitializationError(network.clone(), e.to_string())
+            })?;
 
             let billing_config = match moneymq_network {
                 MoneyMqNetwork::SolanaSurfnet => {
@@ -63,15 +66,16 @@ impl BillingManager {
                     debug!("Initializing {} user accounts", user_accounts_strs.len());
                     for i in 0..cap {
                         let some_provided_account = user_accounts_strs.get(i);
-                        let recipient =
-                            Recipient::instantiate_with_index(&network, some_provided_account, is_sandbox, Some(i))
-                                .await
-                                .map_err(|e| {
-                                    BillingManagerError::InitializationError(
-                                        network.clone(),
-                                        e.to_string(),
-                                    )
-                                })?;
+                        let recipient = Recipient::instantiate_with_index(
+                            &network,
+                            some_provided_account,
+                            is_sandbox,
+                            Some(i),
+                        )
+                        .await
+                        .map_err(|e| {
+                            BillingManagerError::InitializationError(network.clone(), e.to_string())
+                        })?;
                         debug!("User account {}: {:?}", i, some_provided_account);
 
                         user_accounts.push(recipient);

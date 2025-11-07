@@ -8,6 +8,7 @@ use solana_keypair::Pubkey;
 use url::Url;
 
 pub mod config;
+pub mod transactions;
 
 /// X402 protocol version
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -448,8 +449,9 @@ mod tests {
 
 #[test]
 fn test_supported_payment_kind_extra_serialization() {
-    use solana_keypair::Pubkey;
     use std::str::FromStr;
+
+    use solana_keypair::Pubkey;
 
     let pubkey = Pubkey::from_str("11111111111111111111111111111112").unwrap();
     let extra = SupportedPaymentKindExtra {

@@ -7,7 +7,7 @@ use crate::Context;
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct FetchCommand {
-    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or billing.yaml
+    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or moneymq.yaml
     #[arg(long = "api-key", short = 'k')]
     pub api_key: Option<String>,
 
@@ -43,7 +43,7 @@ impl FetchCommand {
         let provider_name = ctx.provider.clone();
         let provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
             format!(
-                "Provider '{}' not found in billing.yaml. Available providers: {}",
+                "Provider '{}' not found in moneymq.yaml. Available providers: {}",
                 provider_name,
                 if ctx.manifest.providers.is_empty() {
                     "none".to_string()
@@ -88,7 +88,7 @@ impl FetchCommand {
                                 sandbox_config.api_key()
                                     .ok_or_else(|| {
                                         format!(
-                                            "Stripe sandbox API key not found for provider '{}'. Please provide --api-key, set STRIPE_SANDBOX_SECRET_KEY environment variable, or configure api_key in billing.yaml",
+                                            "Stripe sandbox API key not found for provider '{}'. Please provide --api-key, set STRIPE_SANDBOX_SECRET_KEY environment variable, or configure api_key in moneymq.yaml",
                                             provider_name
                                         )
                                     })?
@@ -100,7 +100,7 @@ impl FetchCommand {
                 (key, "STRIPE_SANDBOX_SECRET_KEY")
             } else {
                 return Err(format!(
-                    "Sandbox mode requested but provider '{}' does not have a 'default' sandbox configuration. Add a 'sandboxes.default' section to the provider config in billing.yaml",
+                    "Sandbox mode requested but provider '{}' does not have a 'default' sandbox configuration. Add a 'sandboxes.default' section to the provider config in moneymq.yaml",
                     ctx.provider
                 ));
             }
@@ -120,7 +120,7 @@ impl FetchCommand {
                                 .as_ref()
                                 .ok_or_else(|| {
                                     format!(
-                                        "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in billing.yaml",
+                                        "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in moneymq.yaml",
                                         provider_name
                                     )
                                 })?
