@@ -23,9 +23,9 @@ prices:
     active: true
     currency: usd
     unit_amount: 607
-    pricing_type: recurring
-    recurring_interval: month
-    recurring_interval_count: 1
+    pricing_type: one_time
+    recurring_interval: null
+    recurring_interval_count: null
     nickname: null
     metadata: {}
     created_at: 1762291850
