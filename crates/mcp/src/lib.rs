@@ -18,10 +18,6 @@ pub async fn run_server(_opts: &McpOptions) -> Result<(), String> {
         .with_ansi(false)
         .init();
 
-    let schema = rmcp::schemars::schema_for!(moneymq::CatalogRequest);
-    let schema_json = serde_json::to_string_pretty(&schema).unwrap();
-    println!("Catalog request schema: {}", schema_json);
-
     tracing::info!("Starting MCP server");
 
     let service = MoneyMqMcp::new()

@@ -26,15 +26,37 @@ pub struct MoneyMqMcp {
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
 #[schemars(example = r#"{
-    "directory": "/path/to/user/project/catalogs",
+    "project_root_dir": "/path/to/user/project",
     "products": [
         {
             "name": "Premium Subscription",
             "description": "Access to premium features",
-            "feature_mapping": {
-                "number_of_networks": "5 networks",
-                "number_of_requests": "100 requests"
-            },
+            "features": [
+                {
+                    "name": "Number of Networks",
+                    "description": "The number of networks you can run in the cloud",
+                    "feature_group": "Network Features",
+                    "value": "5 networks",
+                },
+                {
+                    "name": "Number of Requests",
+                    "description": "The number of requests that can be made",
+                    "feature_group": "Network Features",
+                    "value": "100 requests",
+                },
+                {
+                    "name": "Email Support",
+                    "description": "Email support available",
+                    "feature_group": "Support Features",
+                    "value": "Yes",
+                },
+                {
+                    "name": "Community Support",
+                    "description": "Community support available on Discord",
+                    "feature_group": "Support Features",
+                    "value": "Yes",
+                }   
+            ],
             "product_type": "service",
             "statement_descriptor": "Moneymq Premium",
             "unit_label": "per month",
@@ -44,28 +66,14 @@ pub struct MoneyMqMcp {
             "interval_count": 1,
             "pricing_type": "recurring"
         }
-    ],
-    "features": [
-        {
-            "name": "Number of Networks",
-            "description": "The number of networks you can run in the cloud",
-            "key": "number_of_networks",
-            "feature_group": "Network Features"
-        },
-        {
-            "name": "Number of Requests",
-            "description": "The number of requests that can be made",
-            "key": "number_of_requests",
-            "feature_group": "Network Features"
-        }
     ]
 }"#)]
 pub struct CatalogRequest {
     #[schemars(
-        description = "Directory to store the catalog files. (By default, provide the root of the user's project directory)",
-        example = "./catalogs"
+        description = "The root directory of the user's project where the catalogs directory will be created",
+        example = "/path/to/user/project"
     )]
-    pub directory: String,
+    pub project_root_dir: String,
     #[schemars(
         description = "List of products to create in the catalog",
         example = r#"[{
@@ -82,16 +90,6 @@ pub struct CatalogRequest {
         }]"#
     )]
     pub products: Vec<ProductRequest>,
-    #[schemars(
-        description = "List of features that can be associated with products",
-        example = r#"[{
-            "name": "Number of Networks",
-            "description": "The number of networks you can run in the cloud",
-            "key": "number_of_networks",
-            "feature_group": "Network Features"
-        }]"#
-    )]
-    pub features: Vec<ProductFeature>,
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
@@ -101,13 +99,35 @@ pub struct ProductRequest {
     #[schemars(description = "The description of the product")]
     pub description: Option<String>,
     #[schemars(
-        description = "Maps a feature key to a value for the feature. For example, if there is a feature with key `number_of_networks`, the mapping could be `{\"number_of_networks\": \"5 networks\"}`",
-        example = r#"{
-            "number_of_networks": "5 networks",
-            "storage_limit": "100 GB"
-        }"#
+        description = "List of features that is associated with the product.",
+        example = r#"[
+            {
+                "name": "Number of Networks",
+                "description": "The number of networks you can run in the cloud",
+                "feature_group": "Network Features",
+                "value": "5 networks",
+            },
+            {
+                "name": "Number of Requests",
+                "description": "The number of requests that can be made",
+                "feature_group": "Network Features",
+                "value": "100 requests",
+            },
+            {
+                "name": "Email Support",
+                "description": "Email support available",
+                "feature_group": "Support Features",
+                "value": "Yes",
+            },
+            {
+                "name": "Community Support",
+                "description": "Community support available on Discord",
+                "feature_group": "Support Features",
+                "value": "Yes",
+            }        
+        ]"#
     )]
-    pub feature_mapping: HashMap<String, String>,
+    pub features: Vec<ProductFeature>,
     #[schemars(description = "The type of the product")]
     pub product_type: Option<String>,
     #[schemars(
@@ -133,12 +153,12 @@ pub struct ProductRequest {
     pub pricing_type: String,
 }
 
-impl ProductRequest {
-    pub fn into_product(self, features: &Vec<ProductFeature>) -> Product {
+impl Into<Product> for ProductRequest {
+    fn into(self) -> Product {
         let ProductRequest {
             name,
             description,
-            feature_mapping,
+            features,
             product_type,
             statement_descriptor,
             unit_label,
@@ -162,19 +182,17 @@ impl ProductRequest {
             );
 
         let mut feature_map = HashMap::new();
-        for (feature_key, feature_value) in feature_mapping {
-            if let Some(feature) = features.iter().find(|f| f.key == feature_key) {
-                let features_in_group = feature_map
-                    .entry(feature.feature_group.to_case(Case::Snake))
-                    .or_insert(Vec::new());
+        for feature in features {
+            let features_in_group = feature_map
+                .entry(feature.feature_group.to_case(Case::Snake))
+                .or_insert(Vec::new());
 
-                features_in_group.push(json!({
-                    "name": feature.name,
-                    "description": feature.description,
-                    "value": feature_value,
-                    "key": feature.key,
-                }));
-            }
+            features_in_group.push(json!({
+                "name": feature.name,
+                "description": feature.description,
+                "value": feature.value,
+                "key": feature.name.to_case(Case::Snake),
+            }));
         }
         if !feature_map.is_empty() {
             feature_map.insert(
@@ -194,15 +212,21 @@ impl ProductRequest {
 }
 
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
+#[schemars(example = r#"{
+    "name": "Number of Networks",
+    "description": "The number of networks you can run in the cloud",
+    "feature_group": "Network Features",
+    "value": "5 networks",
+}"#)]
 pub struct ProductFeature {
     #[schemars(description = "The name of the feature", example = &"Number of Networks")]
     pub name: String,
     #[schemars(description = "The description of the feature", example = &"The number of networks you can run in the cloud")]
     pub description: Option<String>,
-    #[schemars(description = "A key used to identify the feature", example = &"number_of_networks")]
-    pub key: String,
     #[schemars(description = "The feature group this feature belongs to", example = &"Network Features")]
     pub feature_group: String,
+    #[schemars(description = "The value of the feature", example = &"5 networks")]
+    pub value: String,
 }
 
 #[tool_router]
@@ -214,23 +238,45 @@ impl MoneyMqMcp {
         }
     }
     #[tool(description = r#"
-        Creates product catalog YAML files. 
-        
-        Unless the user provides the directory, the directory MUST be `./catalogs` relative to the user's project root.
-        
+        Creates product catalog YAML files.
+
+        Unless the user provides the project_root_dir, the directory MUST be the project's root directory.
+
         The features field MUST be provided.
         Product feature_mapping keys MUST correspond to feature key values.
 
         Good Example 1: {
-            "directory": "/path/to/user/project/catalogs",
+            "project_root_dir": "/path/to/user/project",
             "products": [
                 {
                     "name": "Premium Subscription",
                     "description": "Access to premium features",
-                    "feature_mapping": {
-                        "number_of_networks": "5 networks",
-                        "number_of_requests": "100 requests"
-                    },
+                    "features": [
+                        {
+                            "name": "Number of Networks",
+                            "description": "The number of networks you can run in the cloud",
+                            "feature_group": "Network Features",
+                            "value": "5 networks",
+                        },
+                        {
+                            "name": "Number of Requests",
+                            "description": "The number of requests that can be made",
+                            "feature_group": "Network Features",
+                            "value": "100 requests",
+                        },
+                        {
+                            "name": "Email Support",
+                            "description": "Email support available",
+                            "feature_group": "Support Features",
+                            "value": "Yes",
+                        },
+                        {
+                            "name": "Community Support",
+                            "description": "Community support available on Discord",
+                            "feature_group": "Support Features",
+                            "value": "Yes",
+                        }   
+                    ],
                     "product_type": "service",
                     "statement_descriptor": "Moneymq Premium",
                     "unit_label": "per month",
@@ -239,34 +285,16 @@ impl MoneyMqMcp {
                     "interval": "month",
                     "interval_count": 1,
                     "pricing_type": "recurring"
-                }
-            ],
-            "features": [
-                {
-                    "name": "Number of Networks",
-                    "description": "The number of networks you can run in the cloud",
-                    "key": "number_of_networks",
-                    "feature_group": "Network Features"
-                },
-                {
-                    "name": "Number of Requests",
-                    "description": "The number of requests that can be made",
-                    "key": "number_of_requests",
-                    "feature_group": "Network Features"
                 }
             ]
         }
 
         Bad Example 1 (missing features): {
-            "directory": "/path/to/user/project/catalogs",
+            "project_root_dir": "/path/to/user/project",
             "products": [
                 {
                     "name": "Premium Subscription",
                     "description": "Access to premium features",
-                    "feature_mapping": {
-                        "number_of_networks": "5 networks",
-                        "number_of_requests": "100 requests"
-                    },
                     "product_type": "service",
                     "statement_descriptor": "Moneymq Premium",
                     "unit_label": "per month",
@@ -275,35 +303,6 @@ impl MoneyMqMcp {
                     "interval": "month",
                     "interval_count": 1,
                     "pricing_type": "recurring"
-                }
-            ]
-        }
-
-        Bad Example 2 (invalid feature key): {
-            "directory": "/path/to/user/project/catalogs",
-            "products": [
-                {
-                    "name": "Premium Subscription",
-                    "description": "Access to premium features",
-                    "feature_mapping": {
-                        "invalid_feature_key": "5 networks"
-                    },
-                    "product_type": "service",
-                    "statement_descriptor": "Moneymq Premium",
-                    "unit_label": "per month",
-                    "amount": 999,
-                    "currency": "usd",
-                    "interval": "month",
-                    "interval_count": 1,
-                    "pricing_type": "recurring"
-                }
-            ],
-            "features": [
-                {
-                    "name": "Number of Networks",
-                    "description": "The number of networks you can run in the cloud",
-                    "key": "number_of_networks",
-                    "feature_group": "Network Features"
                 }
             ]
         }
@@ -313,12 +312,11 @@ impl MoneyMqMcp {
     async fn create_catalog(
         &self,
         Parameters(CatalogRequest {
-            directory,
+            project_root_dir,
             products,
-            features,
         }): Parameters<CatalogRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let root_path = PathBuf::from(&directory);
+        let root_path = PathBuf::from(&project_root_dir).join("catalogs");
         fs::create_dir_all(&root_path).map_err(|e| {
             tracing::error!(?e, "Failed to create catalogs directory");
             McpError::internal_error(
@@ -330,7 +328,7 @@ impl MoneyMqMcp {
         })?;
 
         for product in products {
-            let product: Product = product.into_product(&features);
+            let product: Product = product.into();
 
             let yaml_content = to_pretty_yaml_with_header(&product, Some("Product"), Some("v1"))
                 .map_err(|e| {
@@ -372,10 +370,32 @@ impl MoneyMqMcp {
                 {
                     "name": "Premium Subscription",
                     "description": "Access to premium features",
-                    "feature_mapping": {
-                        "number_of_networks": "5 networks",
-                        "number_of_requests": "100 requests"
-                    },
+                    "features": [
+                        {
+                            "name": "Number of Networks",
+                            "description": "The number of networks you can run in the cloud",
+                            "feature_group": "Network Features",
+                            "value": "5 networks",
+                        },
+                        {
+                            "name": "Number of Requests",
+                            "description": "The number of requests that can be made",
+                            "feature_group": "Network Features",
+                            "value": "100 requests",
+                        },
+                        {
+                            "name": "Email Support",
+                            "description": "Email support available",
+                            "feature_group": "Support Features",
+                            "value": "Yes",
+                        },
+                        {
+                            "name": "Community Support",
+                            "description": "Community support available on Discord",
+                            "feature_group": "Support Features",
+                            "value": "Yes",
+                        }   
+                    ],
                     "product_type": "service",
                     "statement_descriptor": "Moneymq Premium",
                     "unit_label": "per month",
@@ -385,41 +405,26 @@ impl MoneyMqMcp {
                     "interval_count": 1,
                     "pricing_type": "recurring"
                 }
-            ],
-            "features": [
-                {
-                    "name": "Number of Networks",
-                    "description": "The number of networks you can run in the cloud",
-                    "key": "number_of_networks",
-                    "feature_group": "Network Features"
-                },
-                {
-                    "name": "Number of Requests",
-                    "description": "The number of requests that can be made",
-                    "key": "number_of_requests",
-                    "feature_group": "Network Features"
-                }
             ]
         }
     "#)]
     async fn validate_create_catalog_request(
         &self,
         Parameters(CatalogRequest {
-            directory,
+            project_root_dir,
             products,
-            features,
         }): Parameters<CatalogRequest>,
     ) -> Result<CallToolResult, McpError> {
         for product in products {
-            let _: Product = product.into_product(&features);
+            let _: Product = product.into();
         }
 
-        let root_path = PathBuf::from(&directory);
+        let root_path = PathBuf::from(&project_root_dir).join("catalogs");
         root_path.is_dir().then(|| ()).ok_or_else(|| {
             McpError::internal_error(
                 "Invalid directory for catalog",
                 Some(json!({
-                    "error": format!("The provided directory '{}' is not valid", directory)
+                    "error": format!("The provided directory '{}' is not valid", root_path.display())
                 })),
             )
         })?;
