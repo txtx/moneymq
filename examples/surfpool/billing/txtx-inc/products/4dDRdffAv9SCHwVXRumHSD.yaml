@@ -1,0 +1,55 @@
+---
+# MoneyMQ Product - API version v1
+id: "4dDRdffAv9SCHwVXRumHSD"
+deployed_id: null
+sandboxes:
+  default: prod_TORtiydgIltjMC
+name: x402 Facilitator
+description: Fully fledged facilitator with advanced features.
+active: true
+metadata:
+  analytics_features:
+    - description: Analyze and monitor all transactions processed by your facilitator.
+      key: transactions_analytics
+      name: Transactions Analytics
+      value: Included
+  control_features:
+    - description: Configure and control facilitator settings with fine granularity.
+      key: fine_grain_control
+      name: Fine Grain Control
+      value: Included
+  dashboard_features:
+    - description: Access and manage your facilitator via a cloud-based dashboard.
+      key: cloud_dashboard
+      name: Cloud Dashboard
+      value: Included
+  development_features:
+    - description: Test and experiment in a safe, isolated sandbox environment.
+      key: sandbox_environment
+      name: Sandbox Environment
+      value: Included
+  features:
+    - dashboard_features
+    - control_features
+    - development_features
+    - analytics_features
+created_at: 1762719219
+updated_at: 1762719219
+product_type: Service
+images: []
+statement_descriptor: null
+unit_label: null
+prices:
+  - id: Cud9S5K4Jg7q1UNAKciKxd
+    deployed_id: null
+    sandboxes:
+      default: price_1SRezXISlaF29E0RBiThbQ0q
+    active: true
+    currency: usd
+    unit_amount: 3900
+    pricing_type: recurring
+    recurring_interval: month
+    recurring_interval_count: 1
+    nickname: null
+    metadata: {}
+    created_at: 1762719219

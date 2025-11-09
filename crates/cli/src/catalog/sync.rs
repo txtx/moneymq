@@ -320,24 +320,24 @@ fn display_diff(local: &Product, remote: &Product) {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct SyncCommand {
-    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or moneymq.yaml
+    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or manifest
     #[arg(long = "api-key", short = 'k')]
     pub api_key: Option<String>,
 }
 
 impl SyncCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
-        // Always fetch from production provider (ignore --sandbox flag for sync)
+        // Always fetch from production catalog (ignore --sandbox flag for sync)
         let provider_name = ctx.provider.clone();
-        let provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
+        let provider_config = ctx.manifest.get_catalog(&provider_name).ok_or_else(|| {
             format!(
-                "Provider '{}' not found in moneymq.yaml. Available providers: {}",
+                "Catalog '{}' not found in manifest. Available catalogs: {}",
                 provider_name,
-                if ctx.manifest.providers.is_empty() {
+                if ctx.manifest.catalogs.is_empty() {
                     "none".to_string()
                 } else {
                     ctx.manifest
-                        .providers
+                        .catalogs
                         .keys()
                         .map(|k| k.as_str())
                         .collect::<Vec<_>>()
@@ -346,20 +346,19 @@ impl SyncCommand {
             )
         })?;
 
-        // Verify it's a Stripe provider and get the catalog path
+        // Verify it's a Stripe catalog
         let stripe_config = provider_config.stripe_config().ok_or_else(|| {
             format!(
-                "Provider '{}' is type {}, but this command requires a Stripe provider",
-                provider_name, provider_config
+                "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
+                provider_name
             )
         })?;
 
-        let catalog_path = &stripe_config.catalog_path;
+        let catalog_base_path = &provider_config.catalog_path;
 
-        // Get the catalog and metering directories
-        let catalog_dir = ctx.manifest_path.join(catalog_path);
-        let metering_path = catalog_path.replace("/catalog/", "/metering/");
-        let metering_dir = ctx.manifest_path.join(&metering_path);
+        // Get the products and meters directories from base catalog path
+        let catalog_dir = ctx.manifest_path.join(catalog_base_path).join("products");
+        let meters_dir = ctx.manifest_path.join(catalog_base_path).join("meters");
 
         // Load existing products from YAML files
         let mut local_products: HashMap<String, Product> = HashMap::new();
@@ -423,7 +422,7 @@ impl SyncCommand {
                             .as_ref()
                             .ok_or_else(|| {
                                 format!(
-                                    "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in moneymq.yaml",
+                                    "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in manifest",
                                     provider_name
                                 )
                             })?
@@ -434,7 +433,7 @@ impl SyncCommand {
         };
 
         // Always sync from production (is_production = true)
-        let is_production = !stripe_config.test_mode;
+        let is_production = true;
 
         // Download the production catalog with spinner
         let spinner = ProgressBar::new_spinner();
@@ -548,7 +547,7 @@ impl SyncCommand {
 
                         // Save sandbox-only products to disk
                         for sandbox_product in sandbox_only {
-                            let filename = format!("{}.yaml", sandbox_product.id);
+                            let filename = sandbox_product.filename();
                             let file_path = catalog_dir.join(&filename);
 
                             let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
@@ -651,7 +650,7 @@ impl SyncCommand {
                         }
                     }
 
-                    let filename = format!("{}.yaml", product_to_save.id);
+                    let filename = product_to_save.filename();
                     let file_path = catalog_dir.join(&filename);
 
                     let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
@@ -675,7 +674,7 @@ impl SyncCommand {
                 }
                 SyncAction::Create => {
                     // New product from remote
-                    let filename = format!("{}.yaml", remote_product.id);
+                    let filename = remote_product.filename();
                     let file_path = catalog_dir.join(&filename);
 
                     let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
@@ -771,7 +770,7 @@ impl SyncCommand {
                             }
                         }
 
-                        let filename = format!("{}.yaml", product_to_save.id);
+                        let filename = product_to_save.filename();
                         let file_path = catalog_dir.join(&filename);
 
                         let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
@@ -822,6 +821,95 @@ impl SyncCommand {
                 .await?;
         }
 
+        // Check for local-only products (created via MCP or manually) that don't exist remotely
+        // These are products that exist in local files but have no deployed_id or sandbox ID
+        let remote_product_ids: std::collections::HashSet<_> =
+            catalog.products.iter().map(|p| p.id.as_str()).collect();
+
+        let local_only_products: Vec<&Product> = local_products
+            .values()
+            .filter(|p| {
+                // Product is local-only if:
+                // 1. It's not in the remote catalog
+                // 2. It doesn't have a deployed_id (production)
+                // 3. It doesn't have a sandbox ID
+                !remote_product_ids.contains(p.id.as_str())
+                    && p.deployed_id.is_none()
+                    && !p.has_sandbox("default")
+            })
+            .collect();
+
+        // Handle local-only products by offering to create them in sandbox first
+        if !local_only_products.is_empty() {
+            let stripe_config = provider_config.stripe_config().ok_or_else(|| {
+                format!(
+                    "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
+                    provider_name
+                )
+            })?;
+
+            let has_sandbox_config = stripe_config.sandboxes.contains_key("default");
+            let has_sandbox_key = env::var("STRIPE_SANDBOX_SECRET_KEY").is_ok();
+
+            if has_sandbox_config && has_sandbox_key {
+                println!();
+                println!(
+                    "{} Found {} local-only products (created via MCP or manually)",
+                    style("Note:").yellow(),
+                    local_only_products.len()
+                );
+
+                self.handle_create_sandbox_workflow(
+                    local_only_products,
+                    &provider_config,
+                    &catalog_dir,
+                )
+                .await?;
+
+                // Reload local products after creating in sandbox
+                // This is necessary so the next check can find the newly created sandbox products
+                local_products.clear();
+                let entries = fs::read_dir(&catalog_dir)
+                    .map_err(|e| format!("Failed to read catalog directory: {}", e))?;
+
+                for entry in entries {
+                    let entry =
+                        entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+                    let path = entry.path();
+
+                    if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                        let content = fs::read_to_string(&path)
+                            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+
+                        match serde_yml::from_str::<Product>(&content) {
+                            Ok(product) => {
+                                local_products.insert(product.id.clone(), product);
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "{} Failed to parse {}: {}",
+                                    style("Warning:").yellow(),
+                                    path.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
+            } else {
+                println!();
+                println!(
+                    "{} Found {} local-only products, but no sandbox is configured",
+                    style("Note:").yellow(),
+                    local_only_products.len()
+                );
+                println!(
+                    "  {} Configure a sandbox or manually create these products in Stripe",
+                    style("Tip:").dim()
+                );
+            }
+        }
+
         // Check for sandbox-only products that need to be created in production
         let sandbox_only_products: Vec<&Product> = local_products
             .values()
@@ -847,7 +935,7 @@ impl SyncCommand {
 
         // Sync meters
         println!("{} Syncing meters", style("»").dim());
-        self.sync_meters(&api_key, &provider_name, &metering_dir)
+        self.sync_meters(&api_key, &provider_name, &meters_dir)
             .await?;
 
         Ok(())
@@ -858,7 +946,7 @@ impl SyncCommand {
         &self,
         api_key: &str,
         provider_name: &str,
-        metering_dir: &std::path::Path,
+        meters_dir: &std::path::Path,
     ) -> Result<(), String> {
         // Download production meters from Stripe with spinner
         let spinner = ProgressBar::new_spinner();
@@ -955,10 +1043,10 @@ impl SyncCommand {
             }
         }
 
-        // Create metering directory if it doesn't exist
-        if !metering_dir.exists() {
-            fs::create_dir_all(metering_dir)
-                .map_err(|e| format!("Failed to create metering directory: {}", e))?;
+        // Create meters directory if it doesn't exist
+        if !meters_dir.exists() {
+            fs::create_dir_all(meters_dir)
+                .map_err(|e| format!("Failed to create meters directory: {}", e))?;
         }
 
         // Save each meter as a YAML file
@@ -967,7 +1055,7 @@ impl SyncCommand {
                 crate::yaml_util::to_pretty_yaml_with_header(&meter, Some("Meter"), Some("v1"))?;
 
             let filename = format!("{}.yaml", meter.id);
-            let file_path = metering_dir.join(&filename);
+            let file_path = meters_dir.join(&filename);
 
             fs::write(&file_path, yaml_content)
                 .map_err(|e| format!("Failed to write file {}: {}", file_path.display(), e))?;
@@ -996,14 +1084,14 @@ impl SyncCommand {
     async fn handle_push_workflow(
         &self,
         products_to_push: Vec<(&Product, &Product)>,
-        provider_config: &crate::manifest::ProviderConfig,
+        provider_config: &crate::manifest::CatalogConfig,
         ctx: &Context,
         catalog_dir: &std::path::Path,
     ) -> Result<(), String> {
         let stripe_config = provider_config.stripe_config().ok_or_else(|| {
             format!(
-                "Provider '{}' is type {}, but this command requires a Stripe provider",
-                ctx.provider, provider_config
+                "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
+                ctx.provider
             )
         })?;
 
@@ -1400,7 +1488,7 @@ impl SyncCommand {
                             }
                         }
 
-                        let filename = format!("{}.yaml", local.id);
+                        let filename = local.filename();
                         let file_path = catalog_dir.join(&filename);
 
                         let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
@@ -1434,7 +1522,7 @@ impl SyncCommand {
     async fn handle_create_workflow(
         &self,
         products: Vec<&Product>,
-        _provider_config: &crate::manifest::ProviderConfig,
+        _provider_config: &crate::manifest::CatalogConfig,
         production_api_key: &str,
         catalog_dir: &std::path::Path,
     ) -> Result<(), String> {
@@ -1509,7 +1597,7 @@ impl SyncCommand {
             let mut updated_product = product.clone();
             updated_product.deployed_id = Some(production_id);
 
-            let filename = format!("{}.yaml", updated_product.id);
+            let filename = updated_product.filename();
             let file_path = catalog_dir.join(&filename);
 
             let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
@@ -1522,6 +1610,165 @@ impl SyncCommand {
                 .map_err(|e| format!("Failed to write updated file: {}", e))?;
 
             println!("{} Local file updated", style("✓").green());
+            println!();
+        }
+
+        Ok(())
+    }
+
+    /// Handle the creation workflow for local-only products (created via MCP)
+    /// Prompts user to create them in sandbox
+    async fn handle_create_sandbox_workflow(
+        &self,
+        products: Vec<&Product>,
+        provider_config: &crate::manifest::CatalogConfig,
+        catalog_dir: &std::path::Path,
+    ) -> Result<(), String> {
+        println!();
+        println!("{} Reviewing local-only products", style("»").dim());
+        println!();
+
+        // Verify provider is Stripe
+        let _stripe_config = provider_config
+            .stripe_config()
+            .ok_or_else(|| "Provider is not a Stripe provider".to_string())?;
+
+        // Get sandbox API key
+        let sandbox_api_key = env::var("STRIPE_SANDBOX_SECRET_KEY")
+            .map_err(|_| "STRIPE_SANDBOX_SECRET_KEY not found in environment".to_string())?;
+
+        for product in products {
+            println!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+            println!(
+                "  {} {}",
+                style("Product:").bold(),
+                style(product.name.as_deref().unwrap_or("(unnamed)"))
+                    .cyan()
+                    .bold()
+            );
+
+            if let Some(description) = &product.description {
+                println!("  {} {}", style("Description:").dim(), description);
+            }
+
+            println!("  {} {}", style("Active:").dim(), product.active);
+            println!("  {} {}", style("Local ID:").dim(), &product.id);
+
+            println!();
+
+            // Ask if user wants to create this product in sandbox
+            let create = Confirm::new()
+                .with_prompt("Create this product in sandbox?")
+                .default(true)
+                .interact()
+                .map_err(|e| format!("Failed to get confirmation: {}", e))?;
+
+            if !create {
+                println!("{} Skipped", style("✓").green());
+                println!();
+                continue;
+            }
+
+            // Create the product in sandbox
+            let spinner = ProgressBar::new_spinner();
+            spinner.set_style(
+                ProgressStyle::default_spinner()
+                    .template("{spinner:.green} {msg}")
+                    .unwrap(),
+            );
+            spinner.set_message("Creating product in sandbox...");
+            spinner.enable_steady_tick(std::time::Duration::from_millis(80));
+
+            let sandbox_id = stripe::iac::create_product(&sandbox_api_key, product)
+                .await
+                .map_err(|e| format!("Failed to create product in sandbox: {}", e))?;
+
+            spinner.finish_and_clear();
+
+            println!(
+                "{} Product created in sandbox: {}",
+                style("✓").green(),
+                &sandbox_id
+            );
+
+            // Use test mode URL for sandbox (sandbox uses test mode keys)
+            println!(
+                "  {} https://dashboard.stripe.com/test/products/{}",
+                style("View at:").dim(),
+                sandbox_id
+            );
+
+            // Create prices for this product in sandbox
+            let price_count = product.prices.len();
+            if price_count > 0 {
+                println!();
+                println!(
+                    "{} Creating {} prices in sandbox",
+                    style("»").dim(),
+                    price_count
+                );
+
+                let price_spinner = ProgressBar::new(price_count as u64);
+                price_spinner.set_style(
+                    ProgressStyle::default_bar()
+                        .template("{spinner:.green} [{bar:40.green/dim}] {pos}/{len} {msg}")
+                        .unwrap()
+                        .progress_chars("=> "),
+                );
+
+                let mut created_price_ids = Vec::new();
+
+                for price in &product.prices {
+                    let amount = price
+                        .unit_amount
+                        .map(|a| format!("${}.{:02}", a / 100, a % 100))
+                        .unwrap_or_else(|| "custom".to_string());
+
+                    price_spinner.set_message(format!("Creating price {}", amount));
+
+                    match stripe::iac::create_price(&sandbox_api_key, &sandbox_id, price).await {
+                        Ok(price_id) => {
+                            created_price_ids.push(price_id);
+                            price_spinner.inc(1);
+                        }
+                        Err(e) => {
+                            price_spinner.finish_and_clear();
+                            eprintln!(
+                                "{} Failed to create price: {}",
+                                style("Warning:").yellow(),
+                                e
+                            );
+                        }
+                    }
+                }
+
+                price_spinner.finish_and_clear();
+                println!(
+                    "{} {} prices created in sandbox",
+                    style("✓").green(),
+                    created_price_ids.len()
+                );
+            }
+
+            // Update local file with sandbox ID
+            let mut updated_product = product.clone();
+            updated_product
+                .sandboxes
+                .insert("default".to_string(), sandbox_id.clone());
+
+            let filename = updated_product.filename();
+            let file_path = catalog_dir.join(&filename);
+
+            let yaml_content = crate::yaml_util::to_pretty_yaml_with_header(
+                &updated_product,
+                Some("Product"),
+                Some("v1"),
+            )?;
+
+            fs::write(&file_path, yaml_content)
+                .map_err(|e| format!("Failed to write updated file: {}", e))?;
+
+            println!("{} Local file updated with sandbox ID", style("✓").green());
             println!();
         }
 

@@ -4565,10 +4565,13 @@ dependencies = [
  "clap",
  "clap_complete",
  "console",
+ "convert_case 0.9.0",
  "dialoguer",
+ "dirs 5.0.1",
  "dotenvy",
  "indexmap 2.12.0",
  "indicatif",
+ "json5",
  "moneymq-core",
  "moneymq-mcp",
  "moneymq-types",
@@ -4648,6 +4651,7 @@ name = "moneymq-mcp"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "bs58",
  "convert_case 0.9.0",
  "moneymq-core",
  "moneymq-types",

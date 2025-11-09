@@ -31,9 +31,9 @@ pub struct ProviderState {
     pub use_sandbox: bool,
     pub facilitator_url: Url,
     pub billing_manager: BillingManager,
-    pub manifest_path: PathBuf,
-    pub provider_name: Option<String>,
-    pub provider_description: Option<String>,
+    pub catalog_path: PathBuf,
+    pub catalog_name: Option<String>,
+    pub catalog_description: Option<String>,
     pub facilitator_pubkey: Option<String>,
     pub validator_rpc_url: Option<Url>,
     pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
@@ -48,15 +48,16 @@ pub struct Facilitator {
 }
 
 impl ProviderState {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         products: Vec<Product>,
         meters: Vec<Meter>,
         use_sandbox: bool,
         facilitator_url: Url,
         billing_manager: BillingManager,
-        manifest_path: PathBuf,
-        provider_name: Option<String>,
-        provider_description: Option<String>,
+        catalog_path: PathBuf,
+        catalog_name: Option<String>,
+        catalog_description: Option<String>,
         facilitator_pubkey: Option<String>,
         validator_rpc_url: Option<Url>,
     ) -> Self {
@@ -66,9 +67,9 @@ impl ProviderState {
             use_sandbox,
             facilitator_url,
             billing_manager,
-            manifest_path,
-            provider_name,
-            provider_description,
+            catalog_path,
+            catalog_name,
+            catalog_description,
             facilitator_pubkey,
             validator_rpc_url,
             transactions: Arc::new(Mutex::new(Vec::new())),
@@ -82,6 +83,7 @@ async fn health_check() -> impl IntoResponse {
 }
 
 /// Start the provider server
+#[allow(clippy::too_many_arguments)]
 pub async fn start_provider(
     products: Vec<Product>,
     meters: Vec<Meter>,
@@ -89,9 +91,9 @@ pub async fn start_provider(
     port: u16,
     use_sandbox: bool,
     billing_manager: BillingManager,
-    manifest_path: PathBuf,
-    provider_name: Option<String>,
-    provider_description: Option<String>,
+    catalog_path: PathBuf,
+    catalog_name: Option<String>,
+    catalog_description: Option<String>,
     facilitator_pubkey: Option<String>,
     validator_rpc_url: Option<Url>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -101,9 +103,9 @@ pub async fn start_provider(
         use_sandbox,
         facilitator_url,
         billing_manager,
-        manifest_path,
-        provider_name,
-        provider_description,
+        catalog_path,
+        catalog_name,
+        catalog_description,
         facilitator_pubkey,
         validator_rpc_url,
     );

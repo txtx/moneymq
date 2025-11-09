@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::Path};
+use std::{fs, path::Path};
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
@@ -11,22 +11,26 @@ pub mod x402;
 //     provider_cache::ProviderCache,
 // };
 
-/// MoneyMQ manifest file (moneymq.yaml)
+/// MoneyMQ manifest file
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Manifest {
-    /// Multiple provider configurations
-    /// Key is the provider name (e.g., "stripe", "stripe_sandbox")
+    /// Multiple catalog configurations
+    /// Key is the catalog name (e.g., "stripe", "stripe_sandbox")
     #[serde(default)]
-    pub providers: HashMap<String, ProviderConfig>,
+    pub catalogs: IndexMap<String, CatalogConfig>,
+    #[serde(default)]
+    pub networks: IndexMap<String, X402Config>,
 }
 
 impl Manifest {
-    /// Load manifest from the specified moneymq.yaml file path
+    /// Load manifest from the specified file path
     pub fn load(manifest_file_path: &Path) -> Result<Self, String> {
         if !manifest_file_path.exists() {
             return Err(format!(
-                "moneymq.yaml not found at {}. Please create a moneymq.yaml file in your project root.",
-                manifest_file_path.display()
+                "{} not found at {}. Please create a {} file in your project root.",
+                moneymq_types::MANIFEST_FILE_NAME,
+                manifest_file_path.display(),
+                moneymq_types::MANIFEST_FILE_NAME
             ));
         }
 
@@ -44,44 +48,53 @@ impl Manifest {
         Self::load(manifest_file_path).unwrap_or_default()
     }
 
-    /// Get a provider configuration by name
-    pub fn get_provider(&self, name: &str) -> Option<&ProviderConfig> {
-        self.providers.get(name)
+    /// Get a catalog configuration by name
+    pub fn get_catalog(&self, name: &str) -> Option<&CatalogConfig> {
+        self.catalogs.get(name)
+    }
+
+    /// Get a network configuration by name
+    pub fn get_network(&self, name: &str) -> Option<&X402Config> {
+        self.networks.get(name)
     }
 }
 
+/// Catalog configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "provider_type", rename_all = "snake_case")]
-pub enum ProviderConfig {
-    Stripe(StripeConfig),
-    #[serde(rename = "x402")]
-    X402(X402Config),
+pub struct CatalogConfig {
+    /// Optional description of this catalog (e.g., "Stripe account - Acme Corp")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Catalog path - base path for billing data (e.g., "billing/v1") - defaults to "billing/v1"
+    /// Products are in {catalog_path}/products, meters in {catalog_path}/meters, etc.
+    #[serde(default = "default_catalog_path")]
+    pub catalog_path: String,
+
+    /// The source/provider for this catalog (defaults to Stripe if not specified)
+    #[serde(flatten, default = "default_catalog_source")]
+    pub source: CatalogSourceType,
 }
 
-impl std::fmt::Display for ProviderConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProviderConfig::Stripe(_) => write!(f, "Stripe"),
-            ProviderConfig::X402(_) => write!(f, "X402"),
-        }
-    }
-}
-
-impl ProviderConfig {
-    /// Get Stripe configuration if this is a Stripe provider
+impl CatalogConfig {
+    /// Get Stripe configuration if this catalog uses Stripe as source
     pub fn stripe_config(&self) -> Option<&StripeConfig> {
-        match self {
-            ProviderConfig::Stripe(config) => Some(config),
-            ProviderConfig::X402(_) => None,
+        match &self.source {
+            CatalogSourceType::Stripe(config) => Some(config),
         }
     }
-    /// Get X402 configuration if this is an X402 provider
-    pub fn x402_config(&self) -> Option<&X402Config> {
-        match self {
-            ProviderConfig::X402(config) => Some(config),
-            ProviderConfig::Stripe(_) => None,
-        }
-    }
+}
+
+#[allow(dead_code)]
+fn default_catalog_source() -> CatalogSourceType {
+    CatalogSourceType::Stripe(StripeConfig::default())
+}
+
+/// Catalog source type (Stripe, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "source_type", rename_all = "snake_case")]
+pub enum CatalogSourceType {
+    Stripe(StripeConfig),
 }
 
 /// Stripe sandbox/test configuration
@@ -100,10 +113,6 @@ pub struct StripeSandboxConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_version: Option<String>,
 
-    /// Catalog path (e.g., "billing/catalog/v1") - defaults to "billing/catalog/v1"
-    #[serde(default = "default_catalog_path")]
-    pub catalog_path: String,
-
     /// Webhook endpoint URL (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_endpoint: Option<String>,
@@ -119,7 +128,6 @@ impl Default for StripeSandboxConfig {
             description: None,
             api_key: None,
             api_version: None,
-            catalog_path: default_catalog_path(),
             webhook_endpoint: None,
             webhook_secret_env: None,
         }
@@ -136,13 +144,9 @@ impl StripeSandboxConfig {
     }
 }
 
-/// Stripe provider configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Stripe catalog source configuration
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StripeConfig {
-    /// Optional description of this provider (e.g., "Stripe account - Acme Corp")
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-
     /// Stripe API secret key (optional)
     /// WARNING: It's recommended to use STRIPE_SECRET_KEY environment variable instead
     /// to avoid committing secrets to version control
@@ -152,14 +156,6 @@ pub struct StripeConfig {
     /// API version to use (optional, defaults to Stripe's latest)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_version: Option<String>,
-
-    /// Catalog path (e.g., "billing/catalog/v1") - defaults to "billing/catalog/v1"
-    #[serde(default = "default_catalog_path")]
-    pub catalog_path: String,
-
-    /// Whether to use test mode (default: true)
-    #[serde(default = "default_test_mode")]
-    pub test_mode: bool,
 
     /// Webhook endpoint URL (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -176,25 +172,6 @@ pub struct StripeConfig {
     pub sandboxes: IndexMap<String, StripeSandboxConfig>,
 }
 
-impl Default for StripeConfig {
-    fn default() -> Self {
-        Self {
-            description: None,
-            api_key: None,
-            api_version: None,
-            catalog_path: default_catalog_path(),
-            test_mode: default_test_mode(),
-            webhook_endpoint: None,
-            webhook_secret_env: None,
-            sandboxes: IndexMap::new(),
-        }
-    }
-}
-
-fn default_test_mode() -> bool {
-    true
-}
-
 fn default_catalog_path() -> String {
-    "billing/catalog/v1".to_string()
+    "billing/v1".to_string()
 }

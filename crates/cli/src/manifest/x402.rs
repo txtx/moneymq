@@ -12,14 +12,14 @@ use url::Url;
 pub const DEFAULT_LOCAL_FACILITATOR_URL: &str = "http://localhost:8080";
 pub const DEFAULT_PROD_FACILITATOR_URL: &str = "https://facilitator.moneymq.co";
 
-/// x402 provider configuration
+/// x402 catalog configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct X402Config {
-    /// Optional description of this provider
+    /// Optional description of this catalog
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Configuration of the networks supported by this provider
+    /// Configuration of the networks supported by this catalog
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub billing_networks: IndexMap<String, BillingNetworkConfigFile>,
 
@@ -239,7 +239,7 @@ pub struct X402SandboxConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Configuration of the networks supported by this provider
+    /// Configuration of the networks supported by this catalog
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub billing_networks: IndexMap<String, BillingNetworkConfigFile>,
 

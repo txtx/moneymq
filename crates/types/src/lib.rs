@@ -5,6 +5,9 @@ use serde_json::Value as JsonValue;
 
 pub mod x402;
 
+/// Default manifest file name
+pub const MANIFEST_FILE_NAME: &str = "moneymq.yaml";
+
 /// Recursively parse JSON strings in a map
 fn parse_json_values(map: &IndexMap<String, String>) -> IndexMap<String, JsonValue> {
     map.iter()
@@ -251,14 +254,13 @@ pub struct Product {
 }
 
 fn random_id() -> String {
-    use rand::Rng;
-    use rand::distr::Alphanumeric;
-    let id: String = rand::rng()
+    use rand::{Rng, distr::Alphanumeric};
+    let random_part: String = rand::rng()
         .sample_iter(&Alphanumeric)
-        .take(12)
+        .take(14)
         .map(char::from)
         .collect();
-    id
+    format!("prod_{}", random_part)
 }
 
 impl Product {
@@ -329,6 +331,11 @@ impl Product {
     /// Check if product has a sandbox with the given name
     pub fn has_sandbox(&self, sandbox_name: &str) -> bool {
         self.sandboxes.contains_key(sandbox_name)
+    }
+
+    /// Get the base58 encoded filename for this product
+    pub fn filename(&self) -> String {
+        format!("{}.yaml", bs58::encode(&self.id).into_string())
     }
 }
 

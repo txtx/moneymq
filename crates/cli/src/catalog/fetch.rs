@@ -7,7 +7,7 @@ use crate::Context;
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 pub struct FetchCommand {
-    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or moneymq.yaml
+    /// Stripe API secret key. If not provided, will check STRIPE_SECRET_KEY env var or manifest
     #[arg(long = "api-key", short = 'k')]
     pub api_key: Option<String>,
 
@@ -41,15 +41,15 @@ impl FetchCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         // Get the selected provider configuration
         let provider_name = ctx.provider.clone();
-        let provider_config = ctx.manifest.get_provider(&provider_name).ok_or_else(|| {
+        let provider_config = ctx.manifest.get_catalog(&provider_name).ok_or_else(|| {
             format!(
-                "Provider '{}' not found in moneymq.yaml. Available providers: {}",
+                "Catalog '{}' not found in manifest. Available catalogs: {}",
                 provider_name,
-                if ctx.manifest.providers.is_empty() {
+                if ctx.manifest.catalogs.is_empty() {
                     "none".to_string()
                 } else {
                     ctx.manifest
-                        .providers
+                        .catalogs
                         .keys()
                         .map(|k| k.as_str())
                         .collect::<Vec<_>>()
@@ -58,11 +58,11 @@ impl FetchCommand {
             )
         })?;
 
-        // Verify it's a Stripe provider
+        // Verify it's a Stripe catalog
         let stripe_config = provider_config.stripe_config().ok_or_else(|| {
             format!(
-                "Provider '{}' is type {}, but this command requires a Stripe provider",
-                provider_name, provider_config
+                "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
+                provider_name
             )
         })?;
 
@@ -88,7 +88,7 @@ impl FetchCommand {
                                 sandbox_config.api_key()
                                     .ok_or_else(|| {
                                         format!(
-                                            "Stripe sandbox API key not found for provider '{}'. Please provide --api-key, set STRIPE_SANDBOX_SECRET_KEY environment variable, or configure api_key in moneymq.yaml",
+                                            "Stripe sandbox API key not found for provider '{}'. Please provide --api-key, set STRIPE_SANDBOX_SECRET_KEY environment variable, or configure api_key in manifest",
                                             provider_name
                                         )
                                     })?
@@ -100,7 +100,7 @@ impl FetchCommand {
                 (key, "STRIPE_SANDBOX_SECRET_KEY")
             } else {
                 return Err(format!(
-                    "Sandbox mode requested but provider '{}' does not have a 'default' sandbox configuration. Add a 'sandboxes.default' section to the provider config in moneymq.yaml",
+                    "Sandbox mode requested but provider '{}' does not have a 'default' sandbox configuration. Add a 'sandboxes.default' section to the provider config in manifest",
                     ctx.provider
                 ));
             }
@@ -120,7 +120,7 @@ impl FetchCommand {
                                 .as_ref()
                                 .ok_or_else(|| {
                                     format!(
-                                        "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in moneymq.yaml",
+                                        "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in manifest",
                                         provider_name
                                     )
                                 })?
@@ -137,8 +137,8 @@ impl FetchCommand {
             provider_name
         );
 
-        // Determine if this is production (not in sandbox mode and provider is not in test_mode)
-        let is_production = !ctx.use_sandbox && !stripe_config.test_mode;
+        // Determine if this is production (not in sandbox mode)
+        let is_production = !ctx.use_sandbox;
 
         // Download the catalog
         let catalog = download_catalog(&api_key, &provider_name, is_production)

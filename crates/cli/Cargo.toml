@@ -18,10 +18,13 @@ anyhow = "1.0"
 clap = { version = "4.5.51", features = ["derive", "cargo", "env"] }
 clap_complete = { version = "4.5.60" }
 console = "0.16"
+convert_case.workspace = true
 dialoguer = "0.12"
+dirs = "5.0"
 dotenvy = "0.15"
 indexmap = { version = "2.12.0", features = ["serde"] }
 indicatif = "0.18.2"
+json5 = "0.4"
 moneymq-core = { path = "../core" }
 moneymq-mcp = { path = "../mcp" }
 moneymq-types = { path = "../types" }
