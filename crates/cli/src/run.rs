@@ -57,10 +57,6 @@ pub enum RunCommandError {
 
 impl RunCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
-        println!();
-        println!("{}{}", style("Money").white(), style("MQ").green());
-        println!();
-
         // Get catalog path from first catalog (or default to "billing/v1")
         let catalog_base_path = ctx
             .manifest
@@ -246,8 +242,17 @@ impl RunCommand {
             (None, None)
         };
 
+        let moneymq_studio_port = 3000;
+        // let moneymq_studio_port = self.port;
         println!();
-        println!("{}", style("Press Ctrl+C to stop").dim());
+        println!(
+            "{}{} {}: {} - {}",
+            style("Money").white(),
+            style("MQ").green(),
+            style("Studio:").white(),
+            style(format!("http://localhost:{}", moneymq_studio_port)).cyan(),
+            style("Press Ctrl+C to stop").dim()
+        );
         println!();
 
         let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {

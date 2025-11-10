@@ -66,7 +66,8 @@ fn products_differ(local: &Product, remote: &Product) -> bool {
     let local_metadata_normalized = normalize_metadata_for_comparison(&local.metadata);
     let remote_metadata_normalized = normalize_metadata_for_comparison(&remote.metadata);
 
-    local.name != remote.name
+    // Check product-level differences
+    if local.name != remote.name
         || local.description != remote.description
         || local.active != remote.active
         || local_metadata_normalized != remote_metadata_normalized
@@ -74,6 +75,40 @@ fn products_differ(local: &Product, remote: &Product) -> bool {
         || local.images != remote.images
         || local.statement_descriptor != remote.statement_descriptor
         || local.unit_label != remote.unit_label
+    {
+        return true;
+    }
+
+    // Check if prices differ
+    if local.prices.len() != remote.prices.len() {
+        return true;
+    }
+
+    // Compare each price by matching on currency, unit_amount, and interval
+    // (not by price ID since IDs differ between local and remote)
+    for local_price in &local.prices {
+        let matching_remote_price = remote.prices.iter().find(|rp| {
+            rp.currency == local_price.currency
+                && rp.unit_amount == local_price.unit_amount
+                && rp.recurring_interval == local_price.recurring_interval
+                && rp.recurring_interval_count == local_price.recurring_interval_count
+                && rp.pricing_type == local_price.pricing_type
+        });
+
+        match matching_remote_price {
+            None => return true, // Price exists in local but not in remote
+            Some(remote_price) => {
+                // Compare other price fields
+                if local_price.active != remote_price.active
+                    || local_price.nickname != remote_price.nickname
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
 }
 
 /// Display differences between local and remote products with colored diff output
@@ -309,6 +344,137 @@ fn display_diff(local: &Product, remote: &Product) {
                     }
                     if let Some(l) = local_val {
                         println!("      {} {}", style("+").green().bold(), style(l).green());
+                    }
+                }
+            }
+        }
+
+        println!();
+    }
+
+    // Display price differences
+    let local_price_set: std::collections::HashSet<_> = local
+        .prices
+        .iter()
+        .map(|p| {
+            (
+                p.currency.as_str(),
+                p.unit_amount,
+                p.recurring_interval.as_deref(),
+                p.recurring_interval_count,
+                p.pricing_type.as_str(),
+            )
+        })
+        .collect();
+
+    let remote_price_set: std::collections::HashSet<_> = remote
+        .prices
+        .iter()
+        .map(|p| {
+            (
+                p.currency.as_str(),
+                p.unit_amount,
+                p.recurring_interval.as_deref(),
+                p.recurring_interval_count,
+                p.pricing_type.as_str(),
+            )
+        })
+        .collect();
+
+    if local_price_set != remote_price_set || local.prices.len() != remote.prices.len() {
+        println!("  {}", style("Prices:").bold());
+        println!();
+
+        // Show removed prices
+        for remote_price in &remote.prices {
+            let found_in_local = local.prices.iter().any(|lp| {
+                lp.currency == remote_price.currency
+                    && lp.unit_amount == remote_price.unit_amount
+                    && lp.recurring_interval == remote_price.recurring_interval
+                    && lp.recurring_interval_count == remote_price.recurring_interval_count
+                    && lp.pricing_type == remote_price.pricing_type
+            });
+
+            if !found_in_local {
+                let amount = remote_price
+                    .unit_amount
+                    .map(|a| format!("${}.{:02}", a / 100, a % 100))
+                    .unwrap_or_else(|| "custom".to_string());
+                let interval = match (&remote_price.recurring_interval, remote_price.recurring_interval_count) {
+                    (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i),
+                    (Some(i), _) => format!("per {}", i),
+                    _ => "one-time".to_string(),
+                };
+                println!(
+                    "    {} {} {} ({})",
+                    style("-").red().bold(),
+                    style(&amount).red(),
+                    style(&remote_price.currency.to_uppercase()).red(),
+                    style(interval).red().dim()
+                );
+            }
+        }
+
+        // Show added prices
+        for local_price in &local.prices {
+            let found_in_remote = remote.prices.iter().any(|rp| {
+                rp.currency == local_price.currency
+                    && rp.unit_amount == local_price.unit_amount
+                    && rp.recurring_interval == local_price.recurring_interval
+                    && rp.recurring_interval_count == local_price.recurring_interval_count
+                    && rp.pricing_type == local_price.pricing_type
+            });
+
+            if !found_in_remote {
+                let amount = local_price
+                    .unit_amount
+                    .map(|a| format!("${}.{:02}", a / 100, a % 100))
+                    .unwrap_or_else(|| "custom".to_string());
+                let interval = match (&local_price.recurring_interval, local_price.recurring_interval_count) {
+                    (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i),
+                    (Some(i), _) => format!("per {}", i),
+                    _ => "one-time".to_string(),
+                };
+                println!(
+                    "    {} {} {} ({})",
+                    style("+").green().bold(),
+                    style(&amount).green(),
+                    style(&local_price.currency.to_uppercase()).green(),
+                    style(interval).green().dim()
+                );
+            }
+        }
+
+        // Show modified prices (same amount/interval but different attributes)
+        for local_price in &local.prices {
+            if let Some(remote_price) = remote.prices.iter().find(|rp| {
+                rp.currency == local_price.currency
+                    && rp.unit_amount == local_price.unit_amount
+                    && rp.recurring_interval == local_price.recurring_interval
+                    && rp.recurring_interval_count == local_price.recurring_interval_count
+                    && rp.pricing_type == local_price.pricing_type
+            }) {
+                if local_price.active != remote_price.active
+                    || local_price.nickname != remote_price.nickname
+                {
+                    let amount = local_price
+                        .unit_amount
+                        .map(|a| format!("${}.{:02}", a / 100, a % 100))
+                        .unwrap_or_else(|| "custom".to_string());
+                    println!(
+                        "    {} {} {} (modified attributes)",
+                        style("~").yellow().bold(),
+                        style(&amount).yellow(),
+                        style(&local_price.currency.to_uppercase()).yellow()
+                    );
+
+                    if local_price.active != remote_price.active {
+                        println!(
+                            "      {} active: {} -> {}",
+                            style("active:").dim(),
+                            remote_price.active,
+                            local_price.active
+                        );
                     }
                 }
             }
@@ -1126,17 +1292,32 @@ impl SyncCommand {
             if !products_with_sandbox.is_empty() {
                 // Count prices that need to be created/updated in sandbox
                 let mut prices_to_create = 0;
-                let mut prices_to_update = 0;
+                let mut prices_with_amount_changes = 0;
 
-                for (local, _) in &products_with_sandbox {
-                    for price in &local.prices {
-                        if price.has_sandbox("default") {
-                            prices_to_update += 1;
+                for (local, remote) in &products_with_sandbox {
+                    for local_price in &local.prices {
+                        if let Some(sandbox_id) = local_price.sandboxes.get("default") {
+                            // Price has sandbox ID - check if amount changed
+                            // Find the corresponding remote price by sandbox ID
+                            let remote_price = remote.prices.iter().find(|rp| {
+                                rp.sandboxes.get("default") == Some(sandbox_id)
+                            });
+
+                            if let Some(remote_price) = remote_price {
+                                // Compare amounts
+                                if local_price.unit_amount != remote_price.unit_amount {
+                                    // Amount changed - need to create new price
+                                    prices_with_amount_changes += 1;
+                                }
+                            }
                         } else {
+                            // No sandbox ID - brand new price
                             prices_to_create += 1;
                         }
                     }
                 }
+
+                let total_new_prices = prices_to_create + prices_with_amount_changes;
 
                 println!(
                     "{} {} products will be updated in sandbox",
@@ -1144,14 +1325,16 @@ impl SyncCommand {
                     products_with_sandbox.len()
                 );
 
-                if prices_to_create > 0 || prices_to_update > 0 {
-                    println!(
-                        "  {} {} prices ({} new, {} updates)",
-                        style("Prices:").dim(),
-                        prices_to_create + prices_to_update,
-                        prices_to_create,
-                        prices_to_update
-                    );
+                if total_new_prices > 0 {
+                    let mut price_msg = format!("  {} {} prices", style("Prices:").dim(), total_new_prices);
+                    if prices_to_create > 0 && prices_with_amount_changes > 0 {
+                        price_msg.push_str(&format!(" ({} new, {} amount changes)", prices_to_create, prices_with_amount_changes));
+                    } else if prices_with_amount_changes > 0 {
+                        price_msg.push_str(&format!(" ({} amount changes)", prices_with_amount_changes));
+                    } else {
+                        price_msg.push_str(&format!(" ({} new)", prices_to_create));
+                    }
+                    println!("{}", price_msg);
                 }
 
                 println!();
@@ -1196,17 +1379,21 @@ impl SyncCommand {
                         style("✓").green(),
                         products_with_sandbox.len()
                     );
+                    println!(
+                        "  {} https://dashboard.stripe.com/test/products",
+                        style("View:").dim()
+                    );
                     println!();
 
-                    // Handle price creation in sandbox
-                    if prices_to_create > 0 {
+                    // Handle price creation in sandbox (both new prices and amount changes)
+                    if total_new_prices > 0 {
                         println!(
                             "{} Creating {} prices in sandbox",
                             style("»").dim(),
-                            prices_to_create
+                            total_new_prices
                         );
 
-                        let spinner = ProgressBar::new(prices_to_create as u64);
+                        let spinner = ProgressBar::new(total_new_prices as u64);
                         spinner.set_style(
                             ProgressStyle::default_bar()
                                 .template("{spinner:.green} [{bar:40.green/dim}] {pos}/{len} {msg}")
@@ -1214,10 +1401,27 @@ impl SyncCommand {
                                 .progress_chars("=> "),
                         );
 
-                        for (local, _) in &products_with_sandbox {
+                        for (local, remote) in &products_with_sandbox {
                             if let Some(sandbox_product_id) = local.get_sandbox_id("default") {
                                 for price in &local.prices {
-                                    if !price.has_sandbox("default") {
+                                    let should_create = if let Some(sandbox_id) = price.sandboxes.get("default") {
+                                        // Has sandbox ID - check if amount changed
+                                        let remote_price = remote.prices.iter().find(|rp| {
+                                            rp.sandboxes.get("default") == Some(sandbox_id)
+                                        });
+
+                                        if let Some(remote_price) = remote_price {
+                                            // Amount changed?
+                                            price.unit_amount != remote_price.unit_amount
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        // No sandbox ID - brand new price
+                                        true
+                                    };
+
+                                    if should_create {
                                         let amount = price
                                             .unit_amount
                                             .map(|a| format!("${}.{:02}", a / 100, a % 100))
@@ -1255,7 +1459,11 @@ impl SyncCommand {
                         println!(
                             "{} {} prices created in sandbox",
                             style("✓").green(),
-                            prices_to_create
+                            total_new_prices
+                        );
+                        println!(
+                            "  {} https://dashboard.stripe.com/test/products",
+                            style("View:").dim()
                         );
                         println!(
                             "  {} Run 'catalog sync' again to capture new price IDs",
@@ -1294,17 +1502,31 @@ impl SyncCommand {
         if !products_with_deployed_id.is_empty() {
             // Count prices that need to be created/updated in production
             let mut prices_to_create = 0;
-            let mut prices_to_update = 0;
+            let mut prices_with_amount_changes = 0;
 
-            for (local, _) in &products_with_deployed_id {
-                for price in &local.prices {
-                    if price.deployed_id.is_some() {
-                        prices_to_update += 1;
+            for (local, remote) in &products_with_deployed_id {
+                for local_price in &local.prices {
+                    if let Some(deployed_id) = &local_price.deployed_id {
+                        // Price has deployed ID - check if amount changed
+                        let remote_price = remote.prices.iter().find(|rp| {
+                            rp.deployed_id.as_ref() == Some(deployed_id)
+                        });
+
+                        if let Some(remote_price) = remote_price {
+                            // Compare amounts
+                            if local_price.unit_amount != remote_price.unit_amount {
+                                // Amount changed - need to create new price
+                                prices_with_amount_changes += 1;
+                            }
+                        }
                     } else {
+                        // No deployed ID - brand new price
                         prices_to_create += 1;
                     }
                 }
             }
+
+            let total_new_prices = prices_to_create + prices_with_amount_changes;
 
             println!(
                 "{} {} products can be updated in production",
@@ -1312,14 +1534,16 @@ impl SyncCommand {
                 products_with_deployed_id.len()
             );
 
-            if prices_to_create > 0 || prices_to_update > 0 {
-                println!(
-                    "  {} {} prices ({} new, {} updates)",
-                    style("Prices:").dim(),
-                    prices_to_create + prices_to_update,
-                    prices_to_create,
-                    prices_to_update
-                );
+            if total_new_prices > 0 {
+                let mut price_msg = format!("  {} {} prices", style("Prices:").dim(), total_new_prices);
+                if prices_to_create > 0 && prices_with_amount_changes > 0 {
+                    price_msg.push_str(&format!(" ({} new, {} amount changes)", prices_to_create, prices_with_amount_changes));
+                } else if prices_with_amount_changes > 0 {
+                    price_msg.push_str(&format!(" ({} amount changes)", prices_with_amount_changes));
+                } else {
+                    price_msg.push_str(&format!(" ({} new)", prices_to_create));
+                }
+                println!("{}", price_msg);
             }
 
             println!();
@@ -1374,17 +1598,21 @@ impl SyncCommand {
                     style("✓").green(),
                     products_with_deployed_id.len()
                 );
+                println!(
+                    "  {} https://dashboard.stripe.com/products",
+                    style("View:").dim()
+                );
                 println!();
 
-                // Handle price creation in production
-                if prices_to_create > 0 {
+                // Handle price creation in production (both new prices and amount changes)
+                if total_new_prices > 0 {
                     println!(
                         "{} Creating {} prices in production",
                         style("»").dim(),
-                        prices_to_create
+                        total_new_prices
                     );
 
-                    let spinner = ProgressBar::new(prices_to_create as u64);
+                    let spinner = ProgressBar::new(total_new_prices as u64);
                     spinner.set_style(
                         ProgressStyle::default_bar()
                             .template("{spinner:.green} [{bar:40.green/dim}] {pos}/{len} {msg}")
@@ -1392,10 +1620,27 @@ impl SyncCommand {
                             .progress_chars("=> "),
                     );
 
-                    for (local, _) in &products_with_deployed_id {
+                    for (local, remote) in &products_with_deployed_id {
                         if let Some(production_product_id) = &local.deployed_id {
                             for price in &local.prices {
-                                if price.deployed_id.is_none() {
+                                let should_create = if let Some(deployed_id) = &price.deployed_id {
+                                    // Has deployed ID - check if amount changed
+                                    let remote_price = remote.prices.iter().find(|rp| {
+                                        rp.deployed_id.as_ref() == Some(deployed_id)
+                                    });
+
+                                    if let Some(remote_price) = remote_price {
+                                        // Amount changed?
+                                        price.unit_amount != remote_price.unit_amount
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    // No deployed ID - brand new price
+                                    true
+                                };
+
+                                if should_create {
                                     let amount = price
                                         .unit_amount
                                         .map(|a| format!("${}.{:02}", a / 100, a % 100))
@@ -1433,7 +1678,11 @@ impl SyncCommand {
                     println!(
                         "{} {} prices created in production",
                         style("✓").green(),
-                        prices_to_create
+                        total_new_prices
+                    );
+                    println!(
+                        "  {} https://dashboard.stripe.com/products",
+                        style("View:").dim()
                     );
                     println!(
                         "  {} Run 'catalog sync' again to capture new price IDs",

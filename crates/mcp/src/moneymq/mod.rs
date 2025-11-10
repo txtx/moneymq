@@ -1,6 +1,7 @@
 use std::{collections::HashMap, fs, path::PathBuf};
 
 use convert_case::{Case, Casing};
+use indexmap::IndexMap;
 use moneymq_types::{Price, Product};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -13,9 +14,33 @@ use rmcp::{
     service::RequestContext,
     tool, tool_handler, tool_router,
 };
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::yaml_util::to_pretty_yaml_with_header;
+
+// Minimal manifest types for reading catalog path
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Manifest {
+    #[serde(default)]
+    pub catalogs: IndexMap<String, CatalogConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CatalogConfig {
+    #[serde(default = "default_catalog_path")]
+    pub catalog_path: String,
+    #[serde(default = "default_source_type")]
+    pub source_type: String,
+}
+
+fn default_catalog_path() -> String {
+    "billing/v1".to_string()
+}
+
+fn default_source_type() -> String {
+    "none".to_string()
+}
 
 #[derive(Clone)]
 pub struct MoneyMqMcp {
@@ -54,7 +79,7 @@ pub struct MoneyMqMcp {
                     "description": "Community support available on Discord",
                     "feature_group": "Support Features",
                     "value": "Yes",
-                }   
+                }
             ],
             "product_type": "service",
             "statement_descriptor": "Moneymq Premium",
@@ -123,7 +148,7 @@ pub struct ProductRequest {
                 "description": "Community support available on Discord",
                 "feature_group": "Support Features",
                 "value": "Yes",
-            }        
+            }
         ]"#
     )]
     pub features: Vec<ProductFeature>,
@@ -274,7 +299,7 @@ impl MoneyMqMcp {
                             "description": "Community support available on Discord",
                             "feature_group": "Support Features",
                             "value": "Yes",
-                        }   
+                        }
                     ],
                     "product_type": "service",
                     "statement_descriptor": "Moneymq Premium",
@@ -306,37 +331,79 @@ impl MoneyMqMcp {
             ]
         }
 
-        Writes each product as `<id>.yaml` in the provided directory.
+        Writes each product as `<id>.yaml` in the products directory of the first catalog found in moneymq.yaml.
     "#)]
-    async fn create_catalog(
+    async fn add_product_to_catalog(
         &self,
         Parameters(CatalogRequest {
             project_root_dir,
             products,
         }): Parameters<CatalogRequest>,
     ) -> Result<CallToolResult, McpError> {
-        let root_path = PathBuf::from(&project_root_dir).join("catalogs");
-        fs::create_dir_all(&root_path).map_err(|e| {
-            tracing::error!(?e, "Failed to create catalogs directory");
+        let project_path = PathBuf::from(&project_root_dir);
+
+        // Read manifest to get catalog path
+        let manifest_path = project_path.join(moneymq_types::MANIFEST_FILE_NAME);
+        if !manifest_path.exists() {
+            return Err(McpError::invalid_request(
+                format!(
+                    "{} not found. Please run 'moneymq init' first.",
+                    moneymq_types::MANIFEST_FILE_NAME
+                ),
+                None,
+            ));
+        }
+
+        let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
+            tracing::error!(?e, "Failed to read manifest");
             McpError::internal_error(
-                "Failed to create catalogs directory",
-                Some(json!({
-                    "error": e.to_string()
-                })),
+                "Failed to read manifest",
+                Some(json!({"error": e.to_string()})),
             )
         })?;
+
+        let manifest: Manifest = serde_yml::from_str(&manifest_content).map_err(|e| {
+            tracing::error!(?e, "Failed to parse manifest");
+            McpError::internal_error(
+                "Failed to parse manifest",
+                Some(json!({"error": e.to_string()})),
+            )
+        })?;
+
+        // Get first catalog's path
+        let (_catalog_name, catalog_config) = manifest.catalogs.first().ok_or_else(|| {
+            McpError::invalid_request(
+                "No catalogs found in manifest. Please run 'moneymq init' first.".to_string(),
+                None,
+            )
+        })?;
+
+        let is_stripe = catalog_config.source_type == "stripe";
+
+        // Create products directory
+        let products_path = project_path
+            .join(&catalog_config.catalog_path)
+            .join("products");
+
+        fs::create_dir_all(&products_path).map_err(|e| {
+            tracing::error!(?e, "Failed to create products directory");
+            McpError::internal_error(
+                "Failed to create products directory",
+                Some(json!({"error": e.to_string()})),
+            )
+        })?;
+
+        let mut created_files = Vec::new();
 
         for product in products {
             let product: Product = product.into();
 
             let yaml_content = to_pretty_yaml_with_header(&product, Some("Product"), Some("v1"))
                 .map_err(|e| {
-                    tracing::error!(?e, "Failed to create product catalog");
+                    tracing::error!(?e, "Failed to serialize product");
                     McpError::internal_error(
-                        "Failed to create product catalog",
-                        Some(json!({
-                            "error": e.to_string()
-                        })),
+                        "Failed to serialize product",
+                        Some(json!({"error": e.to_string()})),
                     )
                 })?;
 
@@ -344,26 +411,43 @@ impl MoneyMqMcp {
 
             // Generate base58 filename from product ID
             let filename_base58 = bs58::encode(&product.id).into_string();
-            let product_path = root_path.join(format!("{}.yaml", filename_base58));
+            let product_path = products_path.join(format!("{}.yaml", filename_base58));
+
             tracing::info!("Writing product to file: {}", product_path.display());
-            fs::write(&product_path, yaml_content)
-                .map_err(|e| {
-                    tracing::error!(?e, "Failed to write product");
-                    McpError::internal_error(
-                        "Failed to write product",
-                        Some(json!({
-                            "error": format!("Failed to write product to {}: {}", product_path.display(), e)
-                        })),
-                    )
-                })?;
+            fs::write(&product_path, yaml_content).map_err(|e| {
+                tracing::error!(?e, "Failed to write product");
+                McpError::internal_error(
+                    "Failed to write product",
+                    Some(json!({
+                        "error": format!("Failed to write product to {}: {}", product_path.display(), e)
+                    })),
+                )
+            })?;
+
+            created_files.push(product_path.display().to_string());
         }
 
-        Ok(CallToolResult::success(vec![]))
+        // Build success message with next steps
+        let success_msg = if is_stripe {
+            format!(
+                "✓ Created {} product(s) in {}\n\nNext steps:\n\n1. Sync to Stripe:\n   moneymq catalog sync\n\n2. Or run MoneyMQ Studio to test:\n   moneymq start",
+                created_files.len(),
+                products_path.display()
+            )
+        } else {
+            format!(
+                "✓ Created {} product(s) in {}\n\nNext step:\nRun MoneyMQ Studio to test your products:\n   moneymq start --sandbox",
+                created_files.len(),
+                products_path.display()
+            )
+        };
+
+        Ok(CallToolResult::success(vec![Content::text(&success_msg)]))
     }
 
     #[tool(description = r#"
-        Takes the same input as a `create_catalog` request and returns true if the input is valid and returns an error otherwise.
-        This can be used to validate a catalog request before attempting to create the catalog files.
+        Takes the same input as an `add_product_to_catalog` request and returns true if the input is valid and returns an error otherwise.
+        This can be used to validate a product request before attempting to add products to the catalog.
 
         Input: {
             "directory": "/path/to/user/project/catalogs",
@@ -395,7 +479,7 @@ impl MoneyMqMcp {
                             "description": "Community support available on Discord",
                             "feature_group": "Support Features",
                             "value": "Yes",
-                        }   
+                        }
                     ],
                     "product_type": "service",
                     "statement_descriptor": "Moneymq Premium",
@@ -409,7 +493,7 @@ impl MoneyMqMcp {
             ]
         }
     "#)]
-    async fn validate_create_catalog_request(
+    async fn validate_add_product_to_catalog_request(
         &self,
         Parameters(CatalogRequest {
             project_root_dir,
@@ -449,7 +533,7 @@ impl ServerHandler for MoneyMqMcp {
                 .build(),
             server_info: Implementation::from_build_env(),
             instructions: Some("This server provides tools to interact with the MoneyMQ cli tool. This tool is used to create product catalogs (a la stripe), where you can manage YAML files that define your products and prices.
-            Tools: create_catalog(takes a list of products to create in the catalog).".to_string()),
+            Tools: add_product_to_catalog(takes a list of products to add to the catalog).".to_string()),
         }
     }
 
@@ -460,10 +544,10 @@ impl ServerHandler for MoneyMqMcp {
     ) -> Result<ListResourcesResult, McpError> {
         Ok(ListResourcesResult {
             resources: vec![RawResource {
-                title: Some("Create Catalog Schema".to_string()),
-                uri: "str:///create_catalog_schema".to_string(),
-                name: "Schema for all types needed for a `create_catalog` request".to_string(),
-                description: Some("A json file containing the schema for all types needed for a `create_catalog` request".to_string()),
+                title: Some("Add Product to Catalog Schema".to_string()),
+                uri: "str:///add_product_to_catalog_schema".to_string(),
+                name: "Schema for all types needed for an `add_product_to_catalog` request".to_string(),
+                description: Some("A json file containing the schema for all types needed for an `add_product_to_catalog` request".to_string()),
                 mime_type: Some("application/json".to_string()),
                 size: None,
                 icons: None
@@ -479,7 +563,7 @@ impl ServerHandler for MoneyMqMcp {
         _: RequestContext<RoleServer>,
     ) -> Result<ReadResourceResult, McpError> {
         match uri.as_str() {
-            "str:///create_catalog_schema" => {
+            "str:///add_product_to_catalog_schema" => {
                 let schema = schemars::schema_for!(CatalogRequest);
                 let schema_json = serde_json::to_string_pretty(&schema).map_err(|e| {
                     McpError::internal_error(
@@ -489,7 +573,7 @@ impl ServerHandler for MoneyMqMcp {
                         })),
                     )
                 })?;
-                tracing::debug!(?schema_json, "Retrieved create_catalog schema");
+                tracing::debug!(?schema_json, "Retrieved add_product_to_catalog schema");
                 Ok(ReadResourceResult {
                     contents: vec![ResourceContents::TextResourceContents {
                         uri: uri.clone(),

@@ -13,6 +13,7 @@ categories.workspace = true
 axum = { version = "0.8", features = ["macros"] }
 bs58 = "0.5"
 convert_case = { workspace = true }
+indexmap = "2.7"
 moneymq-types = { path = "../types" }
 moneymq-core = { path = "../core" }
 pretty_yaml = "0.5.1"
