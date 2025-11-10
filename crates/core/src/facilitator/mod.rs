@@ -21,10 +21,8 @@ use kora_lib::{
     usage_limit::UsageTracker,
 };
 use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
-use reqwest::Method;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::info;
 
 use crate::facilitator::db::DbManager;
 
@@ -53,9 +51,7 @@ impl FacilitatorState {
 
 /// Create the facilitator router
 pub fn create_router(state: FacilitatorState) -> Router {
-    let cors_layer = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods([Method::GET]);
+    let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any);
     Router::new()
         .route("/health", get(endpoints::health::handler))
         .route("/verify", post(endpoints::verify::handler))
@@ -145,13 +141,6 @@ pub async fn start_facilitator(
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("Failed to bind to facilitator URL {}: {}", url, e))?;
-
-    info!("🚀 Facilitator server starting on {}", url);
-    info!("📍 Endpoints:");
-    info!("  GET  {}health", url);
-    info!("  POST {}verify", url);
-    info!("  POST {}settle", url);
-    info!("  GET  {}supported", url);
 
     let handle =
         tokio::spawn(async move { axum::serve(listener, app).await.map_err(|e| e.into()) });

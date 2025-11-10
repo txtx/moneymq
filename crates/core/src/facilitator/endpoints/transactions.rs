@@ -1,8 +1,8 @@
 use axum::{Json, extract::State, response::IntoResponse};
 
 use crate::{
+    catalog::stripe::types::{ListParams, ListResponse},
     facilitator::FacilitatorState,
-    provider::stripe::types::{ListParams, ListResponse},
 };
 
 /// GET /v1/transactions - List transactions

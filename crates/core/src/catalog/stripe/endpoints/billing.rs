@@ -1,6 +1,6 @@
 use axum::{Json, body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
 
-use crate::provider::{
+use crate::catalog::{
     ProviderState,
     stripe::{
         types::{ListParams, ListResponse, StripeBillingMeter, StripeMeterEvent},

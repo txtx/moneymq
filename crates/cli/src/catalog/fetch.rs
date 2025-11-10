@@ -1,7 +1,7 @@
 use std::env;
 
 use clap::Parser;
-use moneymq_core::provider::stripe::iac::download_catalog;
+use moneymq_core::catalog::stripe::iac::download_catalog;
 
 use crate::Context;
 
@@ -40,11 +40,11 @@ impl std::str::FromStr for OutputFormat {
 impl FetchCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         // Get the selected provider configuration
-        let provider_name = ctx.provider.clone();
-        let provider_config = ctx.manifest.get_catalog(&provider_name).ok_or_else(|| {
+        let catalog_name = ctx.catalog_name.clone();
+        let provider_config = ctx.manifest.get_catalog(&catalog_name).ok_or_else(|| {
             format!(
                 "Catalog '{}' not found in manifest. Available catalogs: {}",
-                provider_name,
+                catalog_name,
                 if ctx.manifest.catalogs.is_empty() {
                     "none".to_string()
                 } else {
@@ -62,7 +62,7 @@ impl FetchCommand {
         let stripe_config = provider_config.stripe_config().ok_or_else(|| {
             format!(
                 "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
-                provider_name
+                catalog_name
             )
         })?;
 
@@ -72,7 +72,7 @@ impl FetchCommand {
             if let Some(sandbox_config) = stripe_config.sandboxes.get("default") {
                 eprintln!(
                     "ℹ️  Sandbox mode: using 'default' sandbox configuration for provider '{}'",
-                    provider_name
+                    catalog_name
                 );
 
                 // Get API key with priority:
@@ -89,7 +89,7 @@ impl FetchCommand {
                                     .ok_or_else(|| {
                                         format!(
                                             "Stripe sandbox API key not found for provider '{}'. Please provide --api-key, set STRIPE_SANDBOX_SECRET_KEY environment variable, or configure api_key in manifest",
-                                            provider_name
+                                            catalog_name
                                         )
                                     })?
                                     .clone()
@@ -101,7 +101,7 @@ impl FetchCommand {
             } else {
                 return Err(format!(
                     "Sandbox mode requested but provider '{}' does not have a 'default' sandbox configuration. Add a 'sandboxes.default' section to the provider config in manifest",
-                    ctx.provider
+                    ctx.catalog_name
                 ));
             }
         } else {
@@ -121,7 +121,7 @@ impl FetchCommand {
                                 .ok_or_else(|| {
                                     format!(
                                         "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in manifest",
-                                        provider_name
+                                        catalog_name
                                     )
                                 })?
                                 .clone()
@@ -134,14 +134,14 @@ impl FetchCommand {
 
         println!(
             "Fetching catalog from Stripe (provider: {})...",
-            provider_name
+            catalog_name
         );
 
         // Determine if this is production (not in sandbox mode)
         let is_production = !ctx.use_sandbox;
 
         // Download the catalog
-        let catalog = download_catalog(&api_key, &provider_name, is_production)
+        let catalog = download_catalog(&api_key, &catalog_name, is_production)
             .await
             .map_err(|e| format!("Failed to download catalog: {}", e))?;
 

@@ -437,6 +437,166 @@ async function combinedBillingExample() {
   }
 }
 
+/**
+ * Batch one-time purchases using Payment Intents
+ */
+async function batchPurchases() {
+  console.log("💳 Batch Payment Intents Example\n");
+  console.log("Demonstrating 10 one-time purchases using Payment Intents\n");
+
+  const stripe = await initializeClient();
+
+  try {
+    // Step 1: Find a product to purchase
+    console.log("1️⃣ Finding product...");
+    const products = await stripe.products.list({ limit: 100 });
+    const product = products.data.find((p) => p.name === "Surfpool Pro");
+
+    if (!product) {
+      throw new Error("Product not found");
+    }
+
+    console.log(`   ✓ Found: ${product.name} (${product.id})\n`);
+
+    // Step 2: Get pricing
+    console.log("2️⃣ Getting pricing...");
+    const prices = await stripe.prices.list({
+      product: product.id,
+      limit: 10,
+    });
+
+    const price = prices.data.find((p) => p.unit_amount === 4900);
+
+    if (!price) {
+      throw new Error("Price not found");
+    }
+
+    console.log(
+      `   ✓ Price: $${(price.unit_amount! / 100).toFixed(2)} one-time\n`,
+    );
+
+    // Step 3: Create customer
+    console.log("3️⃣ Creating customer...");
+    const customer = await stripe.customers.create({
+      email: "bulk.buyer@example.com",
+      name: "Bulk Buyer",
+      metadata: {
+        user_id: "bulk_user_001",
+      },
+    });
+
+    console.log(`   ✓ Customer created: ${customer.id}\n`);
+
+    // Step 4: Create payment method
+    console.log("4️⃣ Setting up payment method...");
+    const paymentMethod = await stripe.paymentMethods.create({
+      type: "card",
+      card: {
+        token: "tok_visa",
+      },
+    });
+
+    await stripe.paymentMethods.attach(paymentMethod.id, {
+      customer: customer.id,
+    });
+
+    console.log(`   ✓ Payment method: ${paymentMethod.id}\n`);
+
+    // Step 5: Create 10 payment intents
+    console.log("5️⃣ Creating 10 payment intents...\n");
+    const paymentIntents = [];
+
+    for (let i = 1; i <= 10; i++) {
+      // Create payment intent
+      const intent = await stripe.paymentIntents.create({
+        amount: price.unit_amount!,
+        currency: price.currency,
+        customer: customer.id,
+        payment_method: paymentMethod.id,
+        description: `Purchase #${i} - ${product.name}`,
+        metadata: {
+          product_id: product.id,
+          price_id: price.id,
+          purchase_number: i.toString(),
+        },
+      });
+
+      console.log(`   ✓ Payment Intent ${i}: ${intent.id}`);
+      console.log(`     Amount: $${(intent.amount / 100).toFixed(2)}`);
+      console.log(`     Status: ${intent.status}`);
+
+      paymentIntents.push(intent);
+
+      // Small delay to simulate real-world pacing
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    console.log(`\n   ✓ Created ${paymentIntents.length} payment intents\n`);
+
+    // Step 6: Confirm all payment intents
+    console.log("6️⃣ Confirming payment intents...\n");
+    const confirmedPayments = [];
+
+    for (let i = 0; i < paymentIntents.length; i++) {
+      const confirmed = await stripe.paymentIntents.confirm(
+        paymentIntents[i].id,
+      );
+
+      console.log(`   ✓ Payment ${i + 1}: ${confirmed.id}`);
+      console.log(`     Status: ${confirmed.status}`);
+      console.log(
+        `     Charge: ${confirmed.latest_charge || "pending"}\n`,
+      );
+
+      confirmedPayments.push(confirmed);
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+
+    // Step 7: Summary
+    console.log("=".repeat(60));
+    console.log("BATCH PURCHASE SUMMARY");
+    console.log("=".repeat(60) + "\n");
+
+    const totalAmount = confirmedPayments.reduce(
+      (sum, p) => sum + p.amount,
+      0,
+    );
+    const successCount = confirmedPayments.filter(
+      (p) => p.status === "succeeded",
+    ).length;
+
+    console.log(`📊 Batch Statistics:`);
+    console.log(`   Total Purchases: ${confirmedPayments.length}`);
+    console.log(`   Successful: ${successCount}`);
+    console.log(
+      `   Failed: ${confirmedPayments.length - successCount}`,
+    );
+    console.log(`   Total Amount: $${(totalAmount / 100).toFixed(2)}`);
+    console.log(`   Average: $${(totalAmount / confirmedPayments.length / 100).toFixed(2)} per purchase\n`);
+
+    console.log(`👤 Customer: ${customer.name} (${customer.email})`);
+    console.log(`🛍️  Product: ${product.name}`);
+    console.log(
+      `💵 Unit Price: $${(price.unit_amount! / 100).toFixed(2)}\n`,
+    );
+
+    console.log("✅ Batch purchase complete!\n");
+
+    return {
+      customer,
+      product,
+      price,
+      paymentIntents: confirmedPayments,
+    };
+  } catch (error) {
+    if (error instanceof Error) {
+      console.error("❌ Error:", error.message);
+    }
+    throw error;
+  }
+}
+
 async function main() {
   // Uncomment to list catalog
   // await listCatalog();
@@ -448,7 +608,10 @@ async function main() {
   // await usageBasedBilling();
 
   // Run the combined example (subscription + usage)
-  await combinedBillingExample();
+  // await combinedBillingExample();
+
+  // Run the batch purchases example (10 one-time payments)
+  await batchPurchases();
 }
 
 main();

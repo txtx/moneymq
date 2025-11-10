@@ -12,7 +12,7 @@ pub mod x402;
 // };
 
 /// MoneyMQ manifest file
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     /// Multiple catalog configurations
     /// Key is the catalog name (e.g., "stripe", "stripe_sandbox")
@@ -56,6 +56,17 @@ impl Manifest {
     /// Get a network configuration by name
     pub fn get_network(&self, name: &str) -> Option<&X402Config> {
         self.networks.get(name)
+    }
+}
+
+impl Default for Manifest {
+    fn default() -> Self {
+        let mut networks = IndexMap::new();
+        networks.insert("localhost".into(), X402Config::default());
+        Manifest {
+            networks,
+            catalogs: IndexMap::new(),
+        }
     }
 }
 

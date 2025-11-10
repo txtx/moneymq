@@ -4,6 +4,7 @@ use std::{
 };
 
 use clap::{Parser, Subcommand};
+use console::style;
 use moneymq_mcp::{McpOptions, run_server};
 
 mod catalog;
@@ -14,11 +15,14 @@ mod yaml_util;
 
 use manifest::Manifest;
 
+use crate::manifest::{CatalogConfig, x402::X402Config};
+
 #[derive(Clone, Debug)]
 pub struct Context {
     pub manifest_path: PathBuf,
     pub manifest: Manifest,
-    pub provider: String,
+    pub catalog_name: String,
+    pub network_name: String,
     pub use_sandbox: bool,
 }
 
@@ -26,15 +30,25 @@ impl Context {
     pub fn new(
         manifest_path: PathBuf,
         manifest: Manifest,
-        provider: String,
+        catalog_name: String,
+        network_name: String,
         use_sandbox: bool,
     ) -> Self {
         Context {
             manifest_path,
             manifest,
-            provider,
+            catalog_name,
+            network_name,
             use_sandbox,
         }
+    }
+
+    pub fn get_catalog(&self) -> Option<&CatalogConfig> {
+        self.manifest.get_catalog(&self.catalog_name)
+    }
+
+    pub fn get_network(&self) -> Option<&X402Config> {
+        self.manifest.get_network(&self.network_name)
     }
 }
 
@@ -50,10 +64,15 @@ struct Opts {
     )]
     manifest_path: PathBuf,
 
-    /// Provider configuration to use (e.g., "stripe", "stripe_sandbox")
-    /// If not specified, uses the first provider found in manifest
-    #[arg(long = "provider", short = 'p', global = true)]
-    provider: Option<String>,
+    /// Catalog configuration to use (e.g., "v1", etc)
+    /// If not specified, uses the first catalog found in manifest
+    #[arg(long = "catalog", short = 'c', global = true)]
+    catalog: Option<String>,
+
+    /// Network configuration to use (e.g., "x402", etc)
+    /// If not specified, uses the first network found in manifest
+    #[arg(long = "network", short = 'n', global = true)]
+    network: Option<String>,
 
     /// Use the sandbox provider configuration referenced in the main provider
     #[arg(long = "sandbox", short = 's', global = true, default_value = "false")]
@@ -115,21 +134,22 @@ async fn main() {
         Manifest::default()
     } else {
         match Manifest::load(&opts.manifest_path) {
-            Ok(manifest) => {
-                eprintln!("✓ Loaded manifest from {}", opts.manifest_path.display());
-                manifest
-            }
+            Ok(manifest) => manifest,
             Err(e) => {
-                eprintln!("Warning: {}", e);
-                eprintln!("Using default configuration...");
+                println!(
+                    "{}: using default configuration ({})",
+                    style("warning:").yellow(),
+                    e
+                );
+                println!();
                 Manifest::default()
             }
         }
     };
 
-    // Determine provider name: use specified provider or auto-detect first catalog from manifest
-    let provider_name = if let Some(ref p) = opts.provider {
-        p.clone()
+    // Determine catalog: use specified catalog or auto-detect first catalog from manifest
+    let catalog_name = if let Some(ref c) = opts.catalog {
+        c.clone()
     } else {
         // Auto-detect first catalog from manifest
         manifest
@@ -137,11 +157,30 @@ async fn main() {
             .keys()
             .next()
             .cloned()
-            .unwrap_or_else(|| "stripe".to_string())
+            .unwrap_or_else(|| "v1".to_string())
+    };
+
+    // Determine network: use specified catalog or auto-detect first catalog from manifest
+    let network_name = if let Some(ref c) = opts.catalog {
+        c.clone()
+    } else {
+        // Auto-detect first catalog from manifest
+        manifest
+            .networks
+            .keys()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| "v1".to_string())
     };
 
     // Create context with manifest directory, loaded manifest, selected provider, and sandbox flag
-    let ctx = Context::new(manifest_dir, manifest, provider_name, opts.sandbox);
+    let ctx = Context::new(
+        manifest_dir,
+        manifest,
+        catalog_name,
+        network_name,
+        opts.sandbox,
+    );
 
     if let Err(e) = handle_command(opts, &ctx).await {
         eprintln!("Error: {}", e);
@@ -155,9 +194,7 @@ fn load_env_file(manifest_path: &Path) {
     let env_file_path = manifest_path.join(".env");
 
     match dotenvy::from_path(&env_file_path) {
-        Ok(_) => {
-            eprintln!("✓ Loaded environment from {}", env_file_path.display());
-        }
+        Ok(_) => {}
         Err(e) if e.not_found() => {
             // .env file not found is fine, just continue silently
         }

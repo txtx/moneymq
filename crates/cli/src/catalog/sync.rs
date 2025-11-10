@@ -4,7 +4,7 @@ use clap::Parser;
 use console::style;
 use dialoguer::Confirm;
 use indicatif::{ProgressBar, ProgressStyle};
-use moneymq_core::provider::stripe;
+use moneymq_core::catalog::stripe;
 use moneymq_types::Product;
 
 use crate::Context;
@@ -328,11 +328,11 @@ pub struct SyncCommand {
 impl SyncCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), String> {
         // Always fetch from production catalog (ignore --sandbox flag for sync)
-        let provider_name = ctx.provider.clone();
-        let provider_config = ctx.manifest.get_catalog(&provider_name).ok_or_else(|| {
+        let catalog_name = ctx.catalog_name.clone();
+        let provider_config = ctx.manifest.get_catalog(&catalog_name).ok_or_else(|| {
             format!(
                 "Catalog '{}' not found in manifest. Available catalogs: {}",
-                provider_name,
+                catalog_name,
                 if ctx.manifest.catalogs.is_empty() {
                     "none".to_string()
                 } else {
@@ -350,7 +350,7 @@ impl SyncCommand {
         let stripe_config = provider_config.stripe_config().ok_or_else(|| {
             format!(
                 "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
-                provider_name
+                catalog_name
             )
         })?;
 
@@ -423,7 +423,7 @@ impl SyncCommand {
                             .ok_or_else(|| {
                                 format!(
                                     "Stripe API key not found for provider '{}'. Please provide --api-key, set STRIPE_SECRET_KEY environment variable, or configure api_key in manifest",
-                                    provider_name
+                                    catalog_name
                                 )
                             })?
                             .clone()
@@ -445,7 +445,7 @@ impl SyncCommand {
         spinner.set_message("Downloading production catalog...");
         spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
-        let mut catalog = stripe::iac::download_catalog(&api_key, &provider_name, is_production)
+        let mut catalog = stripe::iac::download_catalog(&api_key, &catalog_name, is_production)
             .await
             .map_err(|e| format!("Failed to download catalog: {}", e))?;
 
@@ -472,7 +472,7 @@ impl SyncCommand {
 
                 match stripe::iac::download_catalog(
                     &sandbox_key,
-                    &format!("{}_sandbox", provider_name),
+                    &format!("{}_sandbox", catalog_name),
                     false,
                 )
                 .await
@@ -844,7 +844,7 @@ impl SyncCommand {
             let stripe_config = provider_config.stripe_config().ok_or_else(|| {
                 format!(
                     "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
-                    provider_name
+                    catalog_name
                 )
             })?;
 
@@ -935,7 +935,7 @@ impl SyncCommand {
 
         // Sync meters
         println!("{} Syncing meters", style("»").dim());
-        self.sync_meters(&api_key, &provider_name, &meters_dir)
+        self.sync_meters(&api_key, &catalog_name, &meters_dir)
             .await?;
 
         Ok(())
@@ -1091,7 +1091,7 @@ impl SyncCommand {
         let stripe_config = provider_config.stripe_config().ok_or_else(|| {
             format!(
                 "Catalog '{}' is not a Stripe catalog, but this command requires a Stripe catalog",
-                ctx.provider
+                ctx.catalog_name
             )
         })?;
 
@@ -1453,7 +1453,7 @@ impl SyncCommand {
                 spinner.enable_steady_tick(std::time::Duration::from_millis(80));
 
                 let updated_catalog =
-                    stripe::iac::download_catalog(&production_api_key, &ctx.provider, true)
+                    stripe::iac::download_catalog(&production_api_key, &ctx.catalog_name, true)
                         .await
                         .map_err(|e| format!("Failed to fetch updated catalog: {}", e))?;
 

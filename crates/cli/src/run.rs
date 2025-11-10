@@ -59,7 +59,6 @@ impl RunCommand {
     pub async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
         println!();
         println!("{}{}", style("Money").white(), style("MQ").green());
-        println!("{}", style("Starting provider server").dim());
         println!();
 
         // Get catalog path from first catalog (or default to "billing/v1")
@@ -73,7 +72,6 @@ impl RunCommand {
 
         // Load products from {catalog_path}/products directory
         let catalog_dir = ctx.manifest_path.join(catalog_base_path).join("products");
-
         if !catalog_dir.exists() {
             return Err(RunCommandError::CatalogDirNotFound(
                 catalog_dir.display().to_string(),
@@ -160,34 +158,16 @@ impl RunCommand {
 
         println!();
 
-        let mode = if self.sandbox {
-            "sandbox"
-        } else {
-            "production"
-        };
-        println!("{} {}", style("Mode").dim(), mode);
-        println!("{} {}", style("Port").dim(), self.port);
-        println!();
-
-        println!("{}", style("Endpoints").dim());
-        println!("  GET http://localhost:{}/health", self.port);
-        println!("  GET http://localhost:{}/x402/config", self.port);
-        println!("  GET http://localhost:{}/v1/products", self.port);
-        println!("  GET http://localhost:{}/v1/prices", self.port);
-        println!("  GET http://localhost:{}/v1/billing/meters", self.port);
-        println!();
+        let get = style("  GET").yellow();
+        let post = style(" POST").magenta();
 
         println!(
-            "{}",
-            style(format!(
-                "Set STRIPE_API_BASE=http://localhost:{}",
-                self.port
-            ))
-            .dim()
+            "# {}",
+            style("catalog endpoints (compatible with Stripe)").dim()
         );
-        println!();
-        println!("{}", style("Press Ctrl+C to stop").dim());
-        println!();
+        println!(" {} http://localhost:{}/v1/products", get, self.port);
+        println!(" {} http://localhost:{}/v1/billing/meters", post, self.port);
+        println!(" {} http://localhost:{}/v1/billing/meters", post, self.port);
 
         // Initialize tracing
         tracing_subscriber::fmt::init();
@@ -238,40 +218,37 @@ impl RunCommand {
             .map_err(RunCommandError::BillingManagerInitializationError)?;
 
         // Build facilitator config once for sandbox mode
-        let facilitator_config = if self.sandbox {
-            Some(
-                build_facilitator_config(&ctx.manifest.networks)
-                    .await
-                    .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?,
-            )
-        } else {
-            None
-        };
-
-        // Extract facilitator pubkey before consuming the config
-        let facilitator_pubkey = if self.sandbox {
-            facilitator_config.as_ref().and_then(|config| {
-                config.networks.values().next().and_then(|net| {
-                    match net {
-                        moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
-                            Some(cfg.payer_keypair.pubkey().to_string())
-                        }
-                        _ => None,
-                    }
-                })
-            })
-        } else {
-            None
-        };
-
-        // Only start local facilitator server in sandbox mode
-        let handles = if self.sandbox {
-            start_facilitator_networks(facilitator_config.unwrap(), &billing_manager)
+        let (facilitator_pubkey, handles) = if self.sandbox {
+            let config = build_facilitator_config(&ctx.manifest.networks)
                 .await
-                .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?
+                .map_err(RunCommandError::StartFacilitatorNetworks)?;
+            let pubkey = config.networks.values().next().and_then(|net| {
+                match net {
+                    moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
+                        Some(cfg.payer_keypair.pubkey().to_string())
+                    }
+                    _ => None,
+                }
+            });
+
+            println!();
+            println!("# {}", style("x402 endpoints").dim());
+            println!(" {} {}supported", get, config.url);
+            println!(" {} {}verify", post, config.url);
+            println!(" {} {}settle", post, config.url);
+
+            // Only start local facilitator server in sandbox mode
+            let handles = start_facilitator_networks(config, &billing_manager)
+                .await
+                .map_err(RunCommandError::StartFacilitatorNetworks)?;
+            (pubkey, handles)
         } else {
-            None
+            (None, None)
         };
+
+        println!();
+        println!("{}", style("Press Ctrl+C to stop").dim());
+        println!();
 
         let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {
             panic!("Facilitator must be started in sandbox mode");
@@ -309,7 +286,7 @@ impl RunCommand {
         };
 
         // Start the server
-        moneymq_core::provider::start_provider(
+        moneymq_core::catalog::start_provider(
             products,
             meters,
             facilitator_url,

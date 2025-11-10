@@ -1,6 +1,7 @@
 pub mod billing;
 pub mod common;
 pub mod customers;
+pub mod payment_intents;
 pub mod payment_methods;
 pub mod prices;
 pub mod products;
@@ -10,6 +11,10 @@ pub mod subscriptions;
 pub use billing::{StripeBillingMeter, StripeMeterEvent};
 pub use common::{ListParams, ListResponse};
 pub use customers::{CreateCustomerRequest, StripeCustomer};
+pub use payment_intents::{
+    ConfirmPaymentIntentRequest, CreatePaymentIntentRequest, PaymentIntentStatus,
+    StripePaymentIntent,
+};
 pub use payment_methods::{
     AttachPaymentMethodRequest, CreatePaymentMethodRequest, StripeCard, StripePaymentMethod,
 };
