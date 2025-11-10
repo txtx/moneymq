@@ -5,7 +5,7 @@ use crate::{
     billing::recipient::{
         LocalManagedRecipient, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
     },
-    provider::ProviderState,
+    catalog::ProviderState,
 };
 
 /// GET /v1/accounts - List local network accounts

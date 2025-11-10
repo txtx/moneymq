@@ -14,14 +14,12 @@ use axum::{
     routing::{get, post},
 };
 use moneymq_types::{Meter, Product, x402::transactions::FacilitatedTransaction};
-use reqwest::{
-    Method,
-    header::{AUTHORIZATION, CONTENT_TYPE},
-};
+use std::collections::HashMap;
 use tower_http::cors::{Any, CorsLayer};
 use url::Url;
 
 use crate::{billing::BillingManager, facilitator::endpoints::middleware::x402_post};
+use stripe::types::StripePaymentIntent;
 
 /// Application state
 #[derive(Clone)]
@@ -37,6 +35,7 @@ pub struct ProviderState {
     pub facilitator_pubkey: Option<String>,
     pub validator_rpc_url: Option<Url>,
     pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
+    pub payment_intents: Arc<Mutex<HashMap<String, StripePaymentIntent>>>,
 }
 
 /// Application state
@@ -73,6 +72,7 @@ impl ProviderState {
             facilitator_pubkey,
             validator_rpc_url,
             transactions: Arc::new(Mutex::new(Vec::new())),
+            payment_intents: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -112,8 +112,8 @@ pub async fn start_provider(
 
     let cors_layer = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET])
-        .allow_headers([AUTHORIZATION, CONTENT_TYPE]);
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     let app = Router::new()
         // Health check
@@ -140,6 +140,20 @@ pub async fn start_provider(
         .route(
             "/v1/payment_methods/{id}/attach",
             post(stripe::attach_payment_method),
+        )
+        // Payment intent endpoints
+        .route("/v1/payment_intents", post(stripe::create_payment_intent))
+        .route(
+            "/v1/payment_intents/{id}",
+            get(stripe::retrieve_payment_intent),
+        )
+        .route(
+            "/v1/payment_intents/{id}/confirm",
+            x402_post(stripe::confirm_payment_intent, state.clone()),
+        )
+        .route(
+            "/v1/payment_intents/{id}/cancel",
+            post(stripe::cancel_payment_intent),
         )
         // Subscription endpoints
         .route("/v1/subscriptions", post(stripe::create_subscription))

@@ -168,7 +168,6 @@ impl RunCommand {
         println!(" {} http://localhost:{}/v1/products", get, self.port);
         println!(" {} http://localhost:{}/v1/billing/meters", post, self.port);
         println!(" {} http://localhost:{}/v1/billing/meters", post, self.port);
-        println!();
 
         // Initialize tracing
         tracing_subscriber::fmt::init();
@@ -232,11 +231,11 @@ impl RunCommand {
                 }
             });
 
+            println!();
             println!("# {}", style("x402 endpoints").dim());
             println!(" {} {}supported", get, config.url);
             println!(" {} {}verify", post, config.url);
             println!(" {} {}settle", post, config.url);
-            println!();
 
             // Only start local facilitator server in sandbox mode
             let handles = start_facilitator_networks(config, &billing_manager)
@@ -249,6 +248,7 @@ impl RunCommand {
 
         println!();
         println!("{}", style("Press Ctrl+C to stop").dim());
+        println!();
 
         let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {
             panic!("Facilitator must be started in sandbox mode");
@@ -286,7 +286,7 @@ impl RunCommand {
         };
 
         // Start the server
-        moneymq_core::provider::start_provider(
+        moneymq_core::catalog::start_provider(
             products,
             meters,
             facilitator_url,

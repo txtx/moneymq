@@ -17,8 +17,8 @@ use serde_json::json;
 use tracing::{debug, error, info, warn};
 
 use crate::{
+    catalog::{ProviderState, stripe::utils::generate_stripe_id},
     facilitator::networks::solana::extract_customer_from_transaction,
-    provider::{ProviderState, stripe::utils::generate_stripe_id},
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -300,6 +300,60 @@ async fn settle_payment_with_facilitator(
     }
 }
 
+/// Extract payment amount and description from request
+fn extract_payment_details(
+    state: &ProviderState,
+    req_path: &str,
+) -> (String, String) {
+    // Check if this is a payment intent confirm request
+    if req_path.starts_with("/v1/payment_intents/") && req_path.ends_with("/confirm") {
+        // Extract payment intent ID from path: /v1/payment_intents/{id}/confirm
+        let parts: Vec<&str> = req_path.split('/').collect();
+        if parts.len() >= 4 {
+            let payment_intent_id = parts[3];
+
+            // Look up the payment intent from state
+            if let Ok(payment_intents) = state.payment_intents.lock() {
+                if let Some(intent) = payment_intents.get(payment_intent_id) {
+                    // Convert amount from cents to token amount (assuming 6 decimals for USDC)
+                    // Stripe uses cents (100 = $1.00), USDC uses 6 decimals (1000000 = 1 USDC)
+                    // So we multiply by 10000: cents * 10000 = micro-USDC
+                    let token_amount = (intent.amount * 10000).to_string();
+                    let description = intent.description.clone()
+                        .unwrap_or_else(|| format!("Payment intent {}", payment_intent_id));
+
+                    println!(
+                        "DEBUG: Found payment intent {} with amount {} cents -> {} micro-USDC, description: {}",
+                        payment_intent_id,
+                        intent.amount,
+                        token_amount,
+                        description
+                    );
+
+                    return (token_amount, description);
+                } else {
+                    println!("WARN: Payment intent {} not found in state", payment_intent_id);
+                }
+            }
+        }
+    }
+
+    // Check if this is a meter event request
+    if req_path.starts_with("/v1/billing/meter_events") {
+        // For now, try to find a meter and use its pricing
+        // In a real implementation, you'd parse the request body to get the specific meter
+        if let Some(meter) = state.meters.first() {
+            // TODO: Parse meter pricing properly - for now use a default
+            return ("1000000".to_string(), format!("Meter event: {}", meter.event_name));
+        }
+
+        return ("1000000".to_string(), "Payment for meter event".to_string());
+    }
+
+    // Default fallback
+    ("1000000".to_string(), "Payment required".to_string())
+}
+
 /// Middleware to handle payment requirements for meter events
 pub async fn payment_middleware(
     State(state): State<ProviderState>,
@@ -330,20 +384,22 @@ pub async fn payment_middleware(
 
     let recipient = billing_config.recipient();
 
+    // Extract payment amount and description based on the request path
+    let req_path = req.uri().path();
+    let (amount_str, description) = extract_payment_details(&state, req_path);
+
     // TODO: allow pay to to be overridden by product
     // TODO: consider allowing the assets allowed to be overridden by product
 
-    // TODO: Get payment requirements from state/config
-    // For now, create a mock payment requirement for testing
     let payment_requirements = assets
         .into_iter()
         .map(|asset| {
             PaymentRequirements {
                 scheme: Scheme::Exact,
                 network: network.clone(),
-                max_amount_required: TokenAmount("1000000".to_string()), // 1 USDC (6 decimals)
+                max_amount_required: TokenAmount(amount_str.clone()),
                 resource: state.facilitator_url.clone(), // TODO: I think this should actually be the resource being accessed
-                description: "Payment for meter event".to_string(),
+                description: description.clone(),
                 mime_type: "application/json".to_string(),
                 output_schema: None,
                 pay_to: recipient.address(),
@@ -420,7 +476,7 @@ pub async fn payment_middleware(
 
                     // Post-process the response
                     if response.status().is_success() {
-                        println!("\x1b[32m$ Success\x1b[0m - Request completed successfully");
+                        println!("\x1b[32m$ Success\x1b[0m - Payment completed successfully");
 
                         // Call facilitator /settle endpoint to finalize payment
                         match settle_payment_with_facilitator(
