@@ -21,7 +21,6 @@ use kora_lib::{
 };
 use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
 use tokio::task::JoinHandle;
-use tracing::info;
 
 pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 pub const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
@@ -130,13 +129,6 @@ pub async fn start_facilitator(
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
         .map_err(|e| format!("Failed to bind to facilitator URL {}: {}", url, e))?;
-
-    info!("🚀 Facilitator server starting on {}", url);
-    info!("📍 Endpoints:");
-    info!("  GET  {}health", url);
-    info!("  POST {}verify", url);
-    info!("  POST {}settle", url);
-    info!("  GET  {}supported", url);
 
     let handle =
         tokio::spawn(async move { axum::serve(listener, app).await.map_err(|e| e.into()) });
