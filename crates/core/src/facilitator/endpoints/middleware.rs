@@ -11,14 +11,15 @@ use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use moneymq_types::x402::{
     ExactPaymentPayload, FacilitatorErrorReason, PaymentPayload, PaymentRequirements,
     SupportedResponse,
-    transactions::{FacilitatedTransaction, TransactionStatus},
 };
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    facilitator::networks::solana::extract_customer_from_transaction,
-    provider::{ProviderState, stripe::utils::generate_stripe_id},
+    facilitator::{
+        endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
+    },
+    provider::ProviderState,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -179,7 +180,7 @@ async fn verify_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<(moneymq_types::x402::MixedAddress, String, String), X402FacilitatorRequestError> {
+) -> Result<moneymq_types::x402::MixedAddress, X402FacilitatorRequestError> {
     use moneymq_types::x402::{VerifyRequest, VerifyResponse, X402Version};
 
     // Construct the verify request
@@ -188,11 +189,6 @@ async fn verify_payment_with_facilitator(
         payment_payload: payment_payload.clone(),
         payment_requirements: payment_requirements.clone(),
     };
-
-    // Serialize request for debug data
-    let verify_request_json =
-        serde_json::to_string(&verify_request).unwrap_or_else(|_| "{}".to_string());
-    let verify_request_base64 = BASE64.encode(&verify_request_json);
 
     // Build the facilitator verify URL
     let verify_url = format!("{}verify", state.facilitator_url);
@@ -217,7 +213,6 @@ async fn verify_payment_with_facilitator(
         .text()
         .await
         .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
-    let verify_response_base64 = BASE64.encode(&response_text);
 
     // Parse response
     let verify_response: VerifyResponse =
@@ -225,9 +220,7 @@ async fn verify_payment_with_facilitator(
 
     // Check if payment is valid
     match verify_response {
-        VerifyResponse::Valid { payer } => {
-            Ok((payer, verify_request_base64, verify_response_base64))
-        }
+        VerifyResponse::Valid { payer } => Ok(payer),
         VerifyResponse::Invalid { reason, .. } => Err(
             X402FacilitatorRequestError::PaymentVerificationFailed(reason),
         ),
@@ -239,7 +232,7 @@ async fn settle_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<(moneymq_types::x402::SettleResponse, String, String), X402FacilitatorRequestError> {
+) -> Result<(), X402FacilitatorRequestError> {
     use moneymq_types::x402::{SettleRequest, SettleResponse, X402Version};
 
     // Construct the settle request (identical structure to verify request)
@@ -248,11 +241,6 @@ async fn settle_payment_with_facilitator(
         payment_payload: payment_payload.clone(),
         payment_requirements: payment_requirements.clone(),
     };
-
-    // Serialize settle request for debug purposes
-    let settle_request_json =
-        serde_json::to_string(&settle_request).unwrap_or_else(|_| "{}".to_string());
-    let settle_request_base64 = BASE64.encode(&settle_request_json);
 
     // Build the facilitator settle URL
     let settle_url = format!("{}settle", state.facilitator_url);
@@ -277,7 +265,6 @@ async fn settle_payment_with_facilitator(
         .text()
         .await
         .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
-    let settle_response_base64 = BASE64.encode(&response_text);
 
     // Parse response
     let settle_response: SettleResponse =
@@ -288,11 +275,7 @@ async fn settle_payment_with_facilitator(
         if let Some(ref tx_hash) = settle_response.transaction {
             debug!("  Transaction hash: {}", tx_hash);
         }
-        Ok((
-            settle_response,
-            settle_request_base64,
-            settle_response_base64,
-        ))
+        Ok(())
     } else {
         Err(X402FacilitatorRequestError::PaymentSettlementFailed(
             settle_response.error_reason,
@@ -349,14 +332,19 @@ pub async fn payment_middleware(
                 pay_to: recipient.address(),
                 max_timeout_seconds: 300,
                 asset,
-                extra: supported
+                extra: Some(json!({
+                    "feePayer": supported
                     .kinds
                     .iter()
                     .find(|kind| kind.network == network)
-                    .and_then(|kind| Some(serde_json::to_value(&kind.extra).unwrap())),
+                    .and_then(|kind| kind.extra.as_ref().map(|e| e.fee_payer.clone())),
+                    "product": "example_product_id", // TODO: set actual product ID
+                })),
             }
         })
         .collect::<Vec<_>>();
+
+    let mut selected_payment_requirement = payment_requirements[0].clone(); // For now, just use the first one
 
     let headers = req.headers();
 
@@ -369,48 +357,70 @@ pub async fn payment_middleware(
                 payment_payload.scheme, payment_payload.network
             );
 
+            // Extract customer pubkey from the transaction
+            let customer_pubkey = match &payment_payload.payload {
+                ExactPaymentPayload::Solana(solana_payload) => {
+                    match extract_customer_from_transaction(&solana_payload.transaction) {
+                        Ok(pubkey) => {
+                            info!("Extracted customer pubkey: {}", pubkey);
+                            Some(pubkey)
+                        }
+                        Err(e) => {
+                            warn!("Failed to extract customer pubkey: {}", e);
+                            None
+                        }
+                    }
+                }
+            };
+
+            debug!("  Customer: {:?}", customer_pubkey);
+
+            // Find the customer label by matching the customer pubkey with user accounts
+            let customer_label = customer_pubkey.and_then(|customer| {
+                billing_config
+                    .user_accounts()
+                    .iter()
+                    .find(|account| {
+                        if let moneymq_types::x402::MixedAddress::Solana(addr) = account.address() {
+                            addr == customer
+                        } else {
+                            false
+                        }
+                    })
+                    .and_then(|account| account.label())
+            });
+
+            // Extract currency from asset
+            let currency = billing_config
+                .currencies()
+                .iter()
+                .find(|c| c.address() == selected_payment_requirement.asset)
+                .and_then(|c| c.solana_currency())
+                .map(|sc| sc.symbol.clone())
+                .unwrap_or_else(|| "USDC".to_string());
+
+            let current_extra = selected_payment_requirement
+                .extra
+                .take()
+                .unwrap_or_default();
+            let mut new_extra: FacilitatorExtraContext =
+                serde_json::from_value(current_extra).unwrap();
+            new_extra.customer_address = customer_pubkey.as_ref().map(|c| c.to_string());
+            new_extra.customer_label = customer_label.clone();
+            new_extra.currency = Some(currency.clone());
+            selected_payment_requirement.extra = Some(serde_json::to_value(new_extra).unwrap());
+
             // Verify payment with facilitator
             match verify_payment_with_facilitator(
                 &state,
                 &payment_payload,
-                &payment_requirements[0], // Use the first payment requirement
+                &selected_payment_requirement,
             )
             .await
             {
-                Ok((payer, verify_req_b64, verify_resp_b64)) => {
+                Ok(payer) => {
                     info!("Verified - Payment verified by facilitator");
                     debug!("  Payer: {:?}", payer);
-
-                    // Extract customer pubkey from the transaction
-                    let customer_pubkey = match &payment_payload.payload {
-                        ExactPaymentPayload::Solana(solana_payload) => {
-                            match extract_customer_from_transaction(&solana_payload.transaction) {
-                                Ok(pubkey) => {
-                                    info!("Extracted customer pubkey: {}", pubkey);
-                                    Some(pubkey)
-                                }
-                                Err(e) => {
-                                    warn!("Failed to extract customer pubkey: {}", e);
-                                    None
-                                }
-                            }
-                        }
-                    };
-                    debug!("  Customer: {:?}", customer_pubkey);
-
-                    // Reconstruct the 402 Payment Required response that would have been sent
-                    // when no X-Payment header was present
-                    let payment_required_body = json!({
-                        "error": {
-                            "code": "payment_required",
-                            "message": "Payment required to access this resource. Please include X-Payment header.",
-                            "type": "invalid_request_error",
-                            "payment_requirements": payment_requirements,
-                        }
-                    });
-                    let payment_required_json = serde_json::to_string(&payment_required_body)
-                        .unwrap_or_else(|_| "{}".to_string());
-                    let payment_required_b64 = BASE64.encode(&payment_required_json);
 
                     // Store payer and customer in request extensions for use by handler
                     req.extensions_mut().insert(payer.clone());
@@ -426,69 +436,12 @@ pub async fn payment_middleware(
                         match settle_payment_with_facilitator(
                             &state,
                             &payment_payload,
-                            &payment_requirements[0],
+                            &selected_payment_requirement,
                         )
                         .await
                         {
-                            Ok((settle_response, settle_req_b64, settle_resp_b64)) => {
+                            Ok(_) => {
                                 info!("Settled - Payment settled on-chain");
-                                // Find the customer label by matching the customer pubkey with user accounts
-                                let customer_label = customer_pubkey.and_then(|customer| {
-                                    billing_config
-                                        .user_accounts()
-                                        .iter()
-                                        .find(|account| {
-                                            if let moneymq_types::x402::MixedAddress::Solana(addr) =
-                                                account.address()
-                                            {
-                                                addr == customer
-                                            } else {
-                                                false
-                                            }
-                                        })
-                                        .and_then(|account| account.label())
-                                });
-
-                                // Extract currency from asset
-                                let currency = billing_config
-                                    .currencies()
-                                    .iter()
-                                    .find(|c| c.address() == payment_requirements[0].asset)
-                                    .and_then(|c| c.solana_currency())
-                                    .map(|sc| sc.symbol.clone())
-                                    .unwrap_or_else(|| "USDC".to_string());
-
-                                // Convert amount from raw token amount to decimal string
-                                let amount = &payment_requirements[0].max_amount_required.0;
-
-                                let transaction = FacilitatedTransaction::new(
-                                    generate_stripe_id("txn"),
-                                    chrono::Utc::now().timestamp(),
-                                    payment_requirements[0].description.clone(),
-                                    customer_label,
-                                    customer_pubkey
-                                        .map(|c| c.to_string())
-                                        .unwrap_or_else(|| payer.to_string()),
-                                    amount.clone(),
-                                    currency,
-                                    TransactionStatus::Completed,
-                                    settle_response.transaction.map(|tx| match tx {
-                                        moneymq_types::x402::TransactionHash::Solana(bytes) => {
-                                            bs58::encode(bytes).into_string()
-                                        }
-                                    }),
-                                )
-                                .with_x402_data(
-                                    Some(payment_required_b64),
-                                    Some(verify_req_b64.clone()),
-                                    Some(verify_resp_b64.clone()),
-                                    Some(settle_req_b64),
-                                    Some(settle_resp_b64),
-                                );
-
-                                if let Ok(mut transactions) = state.transactions.lock() {
-                                    transactions.insert(0, transaction); // Insert at beginning for latest-first ordering
-                                }
                             }
                             Err(error_message) => {
                                 error!("Settlement Failed - {}", error_message);
