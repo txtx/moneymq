@@ -11,15 +11,12 @@ categories.workspace = true
 
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
-convert_case = "0.9.0"
+bs58 = "0.5"
+convert_case = { workspace = true }
 moneymq-types = { path = "../types" }
 moneymq-core = { path = "../core" }
 pretty_yaml = "0.5.1"
-rmcp = { version = "0.8.0", features = [
-    "server",
-    "macros",
-    "transport-io",
-] }
+rmcp = { version = "0.8.0", features = ["server", "macros", "transport-io"] }
 # rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", rev = "ff71a526156e6c9409c450f71eccd6aced9bc339", package = "rmcp", features = ["transport-io", "transport-sse-server", "server", "schemars"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

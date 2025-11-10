@@ -41,7 +41,7 @@ impl Context {
 #[derive(Parser, Debug)]
 #[clap(author, version, about = "MoneyMQ - Payment gateway management CLI", long_about = None)]
 struct Opts {
-    /// Path to the moneymq.yaml manifest file (default: ./moneymq.yaml)
+    /// Path to the manifest file (default: ./moneymq.yaml)
     #[arg(
         long = "manifest-path",
         short = 'm',
@@ -51,7 +51,7 @@ struct Opts {
     manifest_path: PathBuf,
 
     /// Provider configuration to use (e.g., "stripe", "stripe_sandbox")
-    /// If not specified, uses the first provider found in moneymq.yaml
+    /// If not specified, uses the first provider found in manifest
     #[arg(long = "provider", short = 'p', global = true)]
     provider: Option<String>,
 
@@ -110,7 +110,7 @@ async fn main() {
         load_env_file(&manifest_dir);
     }
 
-    // Load manifest from moneymq.yaml file (skip for init command)
+    // Load manifest from file (skip for init command)
     let manifest = if is_init_command {
         Manifest::default()
     } else {
@@ -127,13 +127,13 @@ async fn main() {
         }
     };
 
-    // Determine provider name: use specified provider or auto-detect first provider from manifest
+    // Determine provider name: use specified provider or auto-detect first catalog from manifest
     let provider_name = if let Some(ref p) = opts.provider {
         p.clone()
     } else {
-        // Auto-detect first provider from manifest
+        // Auto-detect first catalog from manifest
         manifest
-            .providers
+            .catalogs
             .keys()
             .next()
             .cloned()

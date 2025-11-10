@@ -3,6 +3,7 @@ use rmcp::{ServiceExt, transport::stdio};
 use crate::moneymq::MoneyMqMcp;
 
 mod moneymq;
+pub mod scaffold;
 pub mod yaml_util;
 
 #[derive(PartialEq, Clone, Debug, Default)]

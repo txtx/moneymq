@@ -84,42 +84,40 @@ pub struct ValidatorConfig {
 pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse {
     // Build account configuration
     let mut account = AccountConfig {
-        name: state.provider_name.clone(),
-        description: state.provider_description.clone(),
+        name: state.catalog_name.clone(),
+        description: state.catalog_description.clone(),
         logo: None,
         primary_color: None,
         secondary_color: None,
     };
 
     // Load branding assets if provider name is available
-    if let Some(name) = &state.provider_name {
-        let assets_path = state.manifest_path.join(format!("billing/assets/{}", name));
+    let assets_path = state.catalog_path.join("assets");
 
-        // Load logo as base64
-        let logo_path = assets_path.join("logo.png");
-        if logo_path.exists() {
-            if let Ok(logo_bytes) = fs::read(&logo_path) {
-                let logo_base64 =
-                    base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &logo_bytes);
-                account.logo = Some(format!("data:image/png;base64,{}", logo_base64));
-            }
+    // Load logo as base64
+    let logo_path = assets_path.join("logo.png");
+    if logo_path.exists() {
+        if let Ok(logo_bytes) = fs::read(&logo_path) {
+            let logo_base64 =
+                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &logo_bytes);
+            account.logo = Some(format!("data:image/png;base64,{}", logo_base64));
         }
+    }
 
-        // Load style.json
-        let style_path = assets_path.join("style.json");
-        if style_path.exists() {
-            if let Ok(style_content) = fs::read_to_string(&style_path) {
-                if let Ok(style_json) = serde_json::from_str::<Value>(&style_content) {
-                    if let Some(style_obj) = style_json.as_object() {
-                        account.primary_color = style_obj
-                            .get("primary_color")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                        account.secondary_color = style_obj
-                            .get("secondary_color")
-                            .and_then(|v| v.as_str())
-                            .map(|s| s.to_string());
-                    }
+    // Load style.json
+    let style_path = assets_path.join("style.json");
+    if style_path.exists() {
+        if let Ok(style_content) = fs::read_to_string(&style_path) {
+            if let Ok(style_json) = serde_json::from_str::<Value>(&style_content) {
+                if let Some(style_obj) = style_json.as_object() {
+                    account.primary_color = style_obj
+                        .get("primary_color")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    account.secondary_color = style_obj
+                        .get("secondary_color")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
                 }
             }
         }

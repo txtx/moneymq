@@ -32,7 +32,6 @@ pub fn to_pretty_yaml_with_header<T: Serialize>(
         output.push_str(&format!("# MoneyMQ - API version {}\n", version));
     }
 
-    output.push_str("# This file is managed by MoneyMQ - edit carefully\n");
     output.push_str(&formatted);
 
     Ok(output)

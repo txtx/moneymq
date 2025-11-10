@@ -1,15 +1,14 @@
 ---
 # MoneyMQ Product - API version v1
-# This file is managed by MoneyMQ - edit carefully
-id: GQhhWzRzLpTSGgzCrbwLb2
-deployed_id: prod_SZo1gr70PyFhP0
+id: MZ3JK43A23siajET2BxTYJ
+deployed_id: prod_SPOzruNzUfNIgx
 sandboxes:
-  default: prod_Sb15cfiauD7AQQ
-name: Surfpool Max
-description: Tailored for pro teams running pipelines, testnets, and multiple high-stakes projects.
+  default: prod_Sb0qbiM4wsr5j8
+name: Surfpool +
+description: Ideal for solo hackers and indie builders validating one idea at a time.
 active: true
 metadata:
-  description: Tailored for pro teams running pipelines, testnets, and multiple high-stakes projects.
+  description: Ideal for solo hackers and indie builders validating one idea at a time.
   feature_overview:
     features:
       - description: Simulate transactions and inspect on-chain state in a web UI.
@@ -23,7 +22,7 @@ metadata:
       - description: Get help with Studio, IaC, simulations, and indexing.
         key: support
         name: Support & Helpdesk
-        value: Priority Support + SLA
+        value: Community Support
     title: Basics
   feature_subgraph_deployment:
     features:
@@ -38,29 +37,29 @@ metadata:
       - description: Geographically distributed with latency-based routing.
         key: edge_optimized
         name: Edge Optimized
-        value: "Yes"
+        value: "No"
     title: Cloud Subgraph (beta)
   feature_subgraph_limits:
     features:
       - description: Number of subgraphs being indexed
         key: instances
         name: GraphQL Subgraphs
-        value: "30 subgraphs"
+        value: "1 subgraph"
       - description: Max storage for your indexed subgraph data.
         key: storage
         name: Max Storage Limit
-        value: "100 GB"
+        value: "250 MB"
       - description: Handle GraphQL queries with on-demand serverless Lambdas.
         key: limits
         name: GraphQL Queries
-        value: "1M queries included"
+        value: "10k queries included"
     title: ""
   feature_surfnets:
     features:
       - description: Number of networks you can run in the cloud.
         key: instances
         name: Number of Networks
-        value: "30 networks"
+        value: "1 network"
       - description: Request limits for Studio and hosted networks.
         key: usage
         name: API Usage
@@ -68,43 +67,48 @@ metadata:
       - description: Use your own domain for hosted Surfnet endpoints.
         key: custom_domains
         name: Custom Domains
-        value: "Yes"
+        value: "No"
     title: Cloud Surfnet
   features:
     - feature_overview
     - feature_surfnets
     - feature_subgraph_deployment
     - feature_subgraph_limits
-created_at: 1751038907
-updated_at: 1762194119
+created_at: 1748639388
+updated_at: 1762194120
 product_type: Service
 images: []
 statement_descriptor: null
 unit_label: null
 prices:
-  - id: RKTEfVxwBciNinV8mgeqxj
-    deployed_id: price_1RrNPdEnJqOnsxQ26UQe4hM3
+  - id: Twpw38a1KBDGXQCnidHaos
+    deployed_id: price_1Rg5G2EnJqOnsxQ2vbk03wEP
     sandboxes:
-      default: price_1Rfp3HISlaF29E0R9DzrjH0D
+      default: price_1Rg5AQISlaF29E0RMER0qbDu
     active: true
     currency: usd
-    unit_amount: 49900
+    unit_amount: 450
     pricing_type: recurring
     recurring_interval: month
     recurring_interval_count: 1
     nickname: null
     metadata: {}
-    created_at: 1754071837
-  - id: "6gkdE1nyBrd4sHoDR9TtC3"
-    deployed_id: price_1ReePQEnJqOnsxQ25cSu7Dly
+    created_at: 1751380442
+  - id: NiGz6n9DJSisbqrts4x4aH
+    deployed_id: price_1Red4WEnJqOnsxQ2adLRPMQo
     sandboxes:
-      default: price_1Rfp3HISlaF29E0R9DzrjH0D
-    active: false
+      default: price_1SPS6zISlaF29E0R3tTaONdc
+    active: true
     currency: usd
-    unit_amount: 45000
+    unit_amount: 0
     pricing_type: recurring
     recurring_interval: month
     recurring_interval_count: 1
-    nickname: null
-    metadata: {}
-    created_at: 1751038908
+    nickname: Perfect for hackers exploring Solana, or builders laser-focused on 1 project.
+    metadata:
+      description: Ideal for solo hackers and indie builders validating one idea at a time.
+      networks: "1"
+      requests_daily: "1000"
+      requests_monthly: "20000"
+      team: "1"
+    created_at: 1751033768

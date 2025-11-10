@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
 use console::style;
 use indexmap::IndexMap;
@@ -20,7 +20,7 @@ use solana_keypair::Signer;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 use crate::Context;
-use crate::manifest::ProviderConfig;
+use crate::manifest::x402::X402Config;
 
 #[derive(Debug, Clone, PartialEq, clap::Args)]
 pub struct RunCommand {
@@ -62,17 +62,17 @@ impl RunCommand {
         println!("{}", style("Starting provider server").dim());
         println!();
 
-        // Get catalog path from first Stripe provider (or default to "billing/catalog/v1")
-        let catalog_path = ctx
+        // Get catalog path from first catalog (or default to "billing/v1")
+        let catalog_base_path = ctx
             .manifest
-            .providers
+            .catalogs
             .values()
-            .find_map(|p| p.stripe_config())
+            .next()
             .map(|c| c.catalog_path.as_str())
-            .unwrap_or("billing/catalog/v1");
+            .unwrap_or("billing/v1");
 
-        // Load products from catalog directory
-        let catalog_dir = ctx.manifest_path.join(catalog_path);
+        // Load products from {catalog_path}/products directory
+        let catalog_dir = ctx.manifest_path.join(catalog_base_path).join("products");
 
         if !catalog_dir.exists() {
             return Err(RunCommandError::CatalogDirNotFound(
@@ -120,16 +120,15 @@ impl RunCommand {
             style(format!("✓ {} products", products.len())).green()
         );
 
-        // Load meters from metering directory (replace "catalog" with "metering" in path)
-        let metering_path = catalog_path.replace("/catalog/", "/metering/");
-        let metering_dir = ctx.manifest_path.join(metering_path);
+        // Load meters from {catalog_path}/meters directory
+        let meters_dir = ctx.manifest_path.join(catalog_base_path).join("meters");
         let mut meters = Vec::new();
 
-        if metering_dir.exists() {
+        if meters_dir.exists() {
             print!("{} ", style("Loading meters").dim());
 
-            let meter_entries = fs::read_dir(&metering_dir)
-                .map_err(|e| RunCommandError::DirectoryReadError(metering_dir, e))?;
+            let meter_entries = fs::read_dir(&meters_dir)
+                .map_err(|e| RunCommandError::DirectoryReadError(meters_dir, e))?;
 
             for entry in meter_entries {
                 let entry = entry.map_err(RunCommandError::DirectoryEntryReadError)?;
@@ -171,11 +170,11 @@ impl RunCommand {
         println!();
 
         println!("{}", style("Endpoints").dim());
-        println!("  GET http://localhost:{}/config", self.port);
+        println!("  GET http://localhost:{}/health", self.port);
+        println!("  GET http://localhost:{}/x402/config", self.port);
         println!("  GET http://localhost:{}/v1/products", self.port);
         println!("  GET http://localhost:{}/v1/prices", self.port);
         println!("  GET http://localhost:{}/v1/billing/meters", self.port);
-        println!("  GET http://localhost:{}/health", self.port);
         println!();
 
         println!(
@@ -195,19 +194,17 @@ impl RunCommand {
 
         let mut billing_networks = ctx
             .manifest
-            .providers
+            .networks
             .iter()
-            .filter_map(|(_name, provider)| {
-                provider.x402_config().and_then(|config| {
-                    if self.sandbox {
-                        config
-                            .sandboxes
-                            .get("default")
-                            .map(|config| config.billing_networks.clone())
-                    } else {
-                        Some(config.billing_networks.clone())
-                    }
-                })
+            .filter_map(|(_name, x402_config)| {
+                if self.sandbox {
+                    x402_config
+                        .sandboxes
+                        .get("default")
+                        .map(|config| config.billing_networks.clone())
+                } else {
+                    Some(x402_config.billing_networks.clone())
+                }
             })
             .flatten()
             .map(|(name, config)| {
@@ -243,7 +240,7 @@ impl RunCommand {
         // Build facilitator config once for sandbox mode
         let facilitator_config = if self.sandbox {
             Some(
-                build_facilitator_config(&ctx.manifest.providers)
+                build_facilitator_config(&ctx.manifest.networks)
                     .await
                     .map_err(|e| RunCommandError::StartFacilitatorNetworks(e))?,
             )
@@ -289,20 +286,20 @@ impl RunCommand {
             .await
             .map_err(RunCommandError::FundLocalAccountsError)?;
 
-        // Get the first provider name and description (for branding assets)
-        let (provider_name, provider_description) = ctx
+        // Get the first catalog name and description (for branding assets)
+        let (catalog_name, catalog_description, catalog_path) = ctx
             .manifest
-            .providers
+            .catalogs
             .iter()
             .next()
             .map(|(name, config)| {
-                let description = match config {
-                    ProviderConfig::Stripe(stripe_config) => stripe_config.description.clone(),
-                    ProviderConfig::X402(x402_config) => x402_config.description.clone(),
-                };
-                (Some(name.clone()), description)
+                (
+                    Some(name.clone()),
+                    config.description.clone(),
+                    PathBuf::from(&config.catalog_path),
+                )
             })
-            .unwrap_or((None, None));
+            .unwrap_or((None, None, ctx.manifest_path.clone()));
 
         // Use the actual local validator RPC URL from the running validator
         let validator_rpc_url = if self.sandbox {
@@ -319,9 +316,9 @@ impl RunCommand {
             self.port,
             self.sandbox,
             billing_manager,
-            ctx.manifest_path.clone(),
-            provider_name,
-            provider_description,
+            catalog_path,
+            catalog_name,
+            catalog_description,
             facilitator_pubkey,
             validator_rpc_url,
         )
@@ -333,23 +330,21 @@ impl RunCommand {
 }
 
 async fn build_facilitator_config(
-    providers: &HashMap<String, ProviderConfig>,
+    networks: &IndexMap<String, X402Config>,
 ) -> Result<FacilitatorConfig, String> {
-    let sandbox_x402_config = providers
+    let sandbox_x402_config = networks
         .iter()
-        .filter_map(|(name, provider)| {
-            provider.x402_config().and_then(|config| {
-                // Check if there's a "default" sandbox configuration with local facilitator
-                config
-                    .sandboxes
-                    .get("default")
-                    .map(|c| (name.clone(), c.clone()))
-            })
+        .filter_map(|(name, x402_config)| {
+            // Check if there's a "default" sandbox configuration with local facilitator
+            x402_config
+                .sandboxes
+                .get("default")
+                .map(|c| (name.clone(), c.clone()))
         })
         .collect::<Vec<_>>();
 
     if sandbox_x402_config.is_empty() {
-        // Create default in-memory configuration using data from first provider
+        // Create default in-memory configuration
         use moneymq_types::x402::config::facilitator::SolanaSurfnetFacilitatorConfig;
         use solana_keypair::Keypair;
         use url::Url;
@@ -376,7 +371,7 @@ async fn build_facilitator_config(
 
     if sandbox_x402_config.len() > 1 {
         eprintln!(
-            "{} Multiple X402 sandbox providers found in manifest. Only the first local facilitator ({}) will be started.",
+            "{} Multiple X402 sandbox networks found in manifest. Only the first local facilitator ({}) will be started.",
             style("Warning:").yellow(),
             sandbox_x402_config[0].0
         );

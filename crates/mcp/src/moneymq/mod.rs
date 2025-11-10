@@ -1,7 +1,6 @@
-use convert_case::{Case, Casing};
-use std::collections::HashMap;
-use std::{fs, path::PathBuf};
+use std::{collections::HashMap, fs, path::PathBuf};
 
+use convert_case::{Case, Casing};
 use moneymq_types::{Price, Product};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
@@ -343,7 +342,9 @@ impl MoneyMqMcp {
 
             tracing::info!(?product, "Creating product");
 
-            let product_path = root_path.join(format!("{}.yaml", product.id));
+            // Generate base58 filename from product ID
+            let filename_base58 = bs58::encode(&product.id).into_string();
+            let product_path = root_path.join(format!("{}.yaml", filename_base58));
             tracing::info!("Writing product to file: {}", product_path.display());
             fs::write(&product_path, yaml_content)
                 .map_err(|e| {
