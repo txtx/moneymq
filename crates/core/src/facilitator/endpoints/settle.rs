@@ -10,7 +10,11 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{error, info};
 
-use crate::facilitator::{FacilitatorState, networks};
+use crate::facilitator::{
+    FacilitatorState,
+    endpoints::{FacilitatorExtraContext, serialize_to_base64},
+    networks,
+};
 
 /// POST /settle endpoint - settle a payment on-chain
 pub async fn handler(
@@ -61,7 +65,7 @@ pub async fn handler(
     }
 
     // Delegate to network-specific settlement
-    match network_config.network() {
+    let (status_code, response) = match network_config.network() {
         Network::Solana => {
             let rpc_client = Arc::new(RpcClient::new_with_commitment(
                 network_config.rpc_url().to_string(),
@@ -70,21 +74,74 @@ pub async fn handler(
             match networks::solana::settle_solana_payment(&request, &network_config, &rpc_client)
                 .await
             {
-                Ok(response) => (StatusCode::OK, Json(response)),
+                Ok(response) => (StatusCode::OK, response),
                 Err(e) => {
                     error!("Settlement failed: {}", e);
                     (
                         StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(SettleResponse {
+                        SettleResponse {
                             success: false,
                             error_reason: Some(FacilitatorErrorReason::FreeForm(e.to_string())),
                             payer: request.payment_requirements.pay_to.clone(),
                             transaction: None,
                             network: request.payment_requirements.network.clone(),
-                        }),
+                        },
                     )
                 }
             }
         }
+    };
+
+    let settle_request_base64 = serialize_to_base64(&request);
+    let settle_response_base64 = serialize_to_base64(&response);
+    let x402_payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
+
+    let extra = match request.payment_requirements.extra.as_ref() {
+        Some(extra) => {
+            let extra: FacilitatorExtraContext = serde_json::from_value(extra.clone()).unwrap();
+            Some(extra)
+        }
+        None => None,
+    };
+
+    let status = if response.success {
+        "completed".into()
+    } else {
+        "failed".into()
+    };
+    let signature = response
+        .transaction
+        .as_ref()
+        .map(|tx_hash| tx_hash.to_string());
+    let amount = request
+        .payment_requirements
+        .max_amount_required
+        .0
+        .to_string();
+
+    match state.db_manager.find_transaction_id_for_settlement_update(
+        &amount,
+        &x402_payment_requirement_base64,
+        extra,
+    ) {
+        Ok(Some(tx_id)) => {
+            if let Err(e) = state.db_manager.update_transaction_after_settlement(
+                tx_id,
+                Some(status),
+                signature,
+                Some(settle_request_base64),
+                Some(settle_response_base64),
+            ) {
+                error!("{}", e);
+            }
+        }
+        Ok(None) => {
+            error!("No matching transaction found to update after settlement");
+        }
+        Err(e) => {
+            error!("{}", e);
+        }
     }
+
+    (status_code, Json(response))
 }
