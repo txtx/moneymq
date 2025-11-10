@@ -2,6 +2,7 @@ use crate::facilitator::db::{PooledConnection, schema::*};
 use diesel::prelude::*;
 use moneymq_types::x402::transactions::TransactionCustomer;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 pub fn find_customer_by_address(
     conn: &mut PooledConnection,
@@ -52,6 +53,10 @@ impl<'a> NewTransactionCustomer<'a> {
         }
     }
     pub fn insert(&self, conn: &mut PooledConnection) -> QueryResult<i32> {
+        debug!(
+            "Inserting transaction customer with address: {}, label: {:?}",
+            self.address, self.label
+        );
         diesel::insert_into(transaction_customers::table)
             .values(self)
             .on_conflict(transaction_customers::address)
