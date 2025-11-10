@@ -26,3 +26,4 @@ target
 examples/surfpool/dist
 examples/surfpool/node_modules
 .env
+facilitator.db
