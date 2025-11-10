@@ -1,6 +1,7 @@
 use diesel::prelude::*;
 use moneymq_types::x402::transactions::FacilitatedTransaction;
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::facilitator::db::{PooledConnection, models::TransactionCustomerModel, schema::*};
 
@@ -176,6 +177,10 @@ impl NewFacilitatedTransaction {
         }
     }
     pub fn insert(&self, conn: &mut PooledConnection) -> QueryResult<usize> {
+        debug!(
+            "Inserting facilitated transaction with amount: {}, currency: {:?}, product: {:?}, customer_id: {:?}",
+            self.amount, self.currency, self.product, self.customer_id
+        );
         diesel::insert_into(facilitated_transactions::table)
             .values(self)
             .execute(conn)
@@ -209,6 +214,10 @@ impl UpdateFacilitatedTransaction {
         }
     }
     pub fn update(&self, conn: &mut PooledConnection, transaction_id: i32) -> QueryResult<usize> {
+        debug!(
+            "Updating facilitated transaction with id: {}, status: {:?}, signature: {:?}",
+            transaction_id, self.status, self.signature
+        );
         diesel::update(
             facilitated_transactions::table.filter(facilitated_transactions::id.eq(transaction_id)),
         )
