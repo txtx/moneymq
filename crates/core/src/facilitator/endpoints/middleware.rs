@@ -289,7 +289,8 @@ async fn settle_payment_with_facilitator(
 }
 
 /// Extract payment amount and description from request
-fn extract_payment_details(state: &ProviderState, req_path: &str) -> (String, String) {
+/// Returns (amount_in_cents, description)
+fn extract_payment_details(state: &ProviderState, req_path: &str) -> Option<(i64, String)> {
     // Check if this is a payment intent confirm request
     if req_path.starts_with("/v1/payment_intents/") && req_path.ends_with("/confirm") {
         // Extract payment intent ID from path: /v1/payment_intents/{id}/confirm
@@ -300,16 +301,13 @@ fn extract_payment_details(state: &ProviderState, req_path: &str) -> (String, St
             // Look up the payment intent from state
             if let Ok(payment_intents) = state.payment_intents.lock() {
                 if let Some(intent) = payment_intents.get(payment_intent_id) {
-                    // Convert amount from cents to token amount (assuming 6 decimals for USDC)
-                    // Stripe uses cents (100 = $1.00), USDC uses 6 decimals (1000000 = 1 USDC)
-                    // So we multiply by 10000: cents * 10000 = micro-USDC
-                    let token_amount = (intent.amount * 10000).to_string();
                     let description = intent
                         .description
                         .clone()
                         .unwrap_or_else(|| format!("Payment intent {}", payment_intent_id));
 
-                    return (token_amount, description);
+                    // Return amount in cents - the middleware will do the conversion to token amount
+                    return Some((intent.amount, description));
                 } else {
                     println!(
                         "WARN: Payment intent {} not found in state",
@@ -319,24 +317,7 @@ fn extract_payment_details(state: &ProviderState, req_path: &str) -> (String, St
             }
         }
     }
-
-    // Check if this is a meter event request
-    if req_path.starts_with("/v1/billing/meter_events") {
-        // For now, try to find a meter and use its pricing
-        // In a real implementation, you'd parse the request body to get the specific meter
-        if let Some(meter) = state.meters.first() {
-            // TODO: Parse meter pricing properly - for now use a default
-            return (
-                "1000000".to_string(),
-                format!("Meter event: {}", meter.event_name),
-            );
-        }
-
-        return ("1000000".to_string(), "Payment for meter event".to_string());
-    }
-
-    // Default fallback
-    ("1000000".to_string(), "Payment required".to_string())
+    None
 }
 
 /// Middleware to handle payment requirements for meter events
@@ -380,48 +361,52 @@ pub async fn payment_middleware(
             }
         } else {
             let subscription_req = SubscriptionRequest::parse(&request_bytes);
-            let Some(_) = subscription_req.customer else {
-                debug!("Not x402 gated endpoint, continuing to handler");
-                // Not x402 gated endpoint, continue to handler
-                return next.run(req).await;
-            };
-            debug!(
-                "Parsed subscription request from request, price IDs: {:?}",
-                subscription_req.price_ids
-            );
+            if let Some(_) = subscription_req.customer {
+                debug!(
+                    "Parsed subscription request from request, price IDs: {:?}",
+                    subscription_req.price_ids
+                );
 
-            let active_price = state
-                .products
-                .iter()
-                .flat_map(|product| {
-                    product.prices.iter().filter_map(|price| {
-                        let price_id = if state.use_sandbox {
-                            price.sandboxes.get("default")
-                        } else {
-                            price.deployed_id.as_ref()
-                        }
-                        .unwrap_or(&price.id);
-                        if subscription_req.price_ids.contains(&price_id) && price.active {
-                            let is_margin = price.pricing_type.eq("margin");
-                            let price = price.unit_amount.clone().unwrap_or(1);
-                            let description =
-                                product.statement_descriptor.clone().unwrap_or_else(|| {
-                                    product.name.clone().unwrap_or("Product".to_string())
-                                });
-                            let name = product.name.clone().unwrap_or("Product".to_string());
-                            Some((description, price, is_margin, name))
-                        } else {
-                            None
-                        }
+                let active_price = state
+                    .products
+                    .iter()
+                    .flat_map(|product| {
+                        product.prices.iter().filter_map(|price| {
+                            let price_id = if state.use_sandbox {
+                                price.sandboxes.get("default")
+                            } else {
+                                price.deployed_id.as_ref()
+                            }
+                            .unwrap_or(&price.id);
+                            if subscription_req.price_ids.contains(&price_id) && price.active {
+                                let is_margin = price.pricing_type.eq("margin");
+                                let price = price.unit_amount.clone().unwrap_or(1);
+                                let description =
+                                    product.statement_descriptor.clone().unwrap_or_else(|| {
+                                        product.name.clone().unwrap_or("Product".to_string())
+                                    });
+                                let name = product.name.clone().unwrap_or("Product".to_string());
+                                Some((description, price, is_margin, name))
+                            } else {
+                                None
+                            }
+                        })
                     })
-                })
-                .collect::<Vec<_>>();
-            let (description, price, is_margin, product_name) = active_price
-                .first()
-                .cloned()
-                .unwrap_or(("Product".to_string(), 1, false, "Product".to_string())); // TODO: handle multiple prices properly
+                    .collect::<Vec<_>>();
+                let (description, price, is_margin, product_name) = active_price
+                    .first()
+                    .cloned()
+                    .unwrap_or(("Product".to_string(), 1, false, "Product".to_string())); // TODO: handle multiple prices properly
 
-            (description, price, is_margin, product_name)
+                (description, price, is_margin, product_name)
+            } else {
+                let Some((price, description)) = extract_payment_details(&state, req.uri().path())
+                else {
+                    return next.run(req).await;
+                };
+
+                (description, price, false, "Product".to_string())
+            }
         }
     };
 
@@ -451,10 +436,6 @@ pub async fn payment_middleware(
         .collect::<Vec<_>>();
 
     let recipient = billing_config.recipient();
-
-    // Extract payment amount and description based on the request path
-    let req_path = req.uri().path();
-    let (amount_str, description) = extract_payment_details(&state, req_path);
 
     // TODO: allow pay to to be overridden by product
     // TODO: consider allowing the assets allowed to be overridden by product

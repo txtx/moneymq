@@ -1,5 +1,6 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 
 /// Stripe-compatible payment intent response
 #[derive(Debug, Clone, Serialize, Deserialize)]

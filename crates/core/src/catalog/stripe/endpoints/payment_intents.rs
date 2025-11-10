@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use axum::{
     Json,
     body::Bytes,
@@ -5,7 +7,6 @@ use axum::{
     http::StatusCode,
     response::IntoResponse,
 };
-use std::collections::HashMap;
 
 use crate::catalog::{
     ProviderState,
@@ -20,57 +21,127 @@ pub async fn create_payment_intent(
     State(state): State<ProviderState>,
     body: Bytes,
 ) -> impl IntoResponse {
-    // Parse form-encoded body
+    // Try to parse as JSON first, then fall back to form-encoded
     let body_str = String::from_utf8_lossy(&body);
 
-    let mut params: HashMap<String, String> = HashMap::new();
+    let (amount, currency, customer, payment_method, description, confirm, metadata) =
+        if body_str.trim().starts_with('{') {
+            // Parse as JSON
+            let json_value: serde_json::Value = match serde_json::from_slice(&body) {
+                Ok(v) => v,
+                Err(e) => {
+                    println!("ERROR: Failed to parse JSON body: {}", e);
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(serde_json::json!({
+                            "error": {
+                                "message": format!("Invalid JSON: {}", e),
+                                "type": "invalid_request_error"
+                            }
+                        })),
+                    )
+                        .into_response();
+                }
+            };
 
-    for part in body_str.split('&') {
-        if let Some((key, value)) = part.split_once('=') {
-            let decoded_value = urlencoding::decode(value).unwrap_or_default().to_string();
-            params.insert(key.to_string(), decoded_value);
-        }
-    }
+            let amount = json_value
+                .get("amount")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0);
+            let currency = json_value
+                .get("currency")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "usd".to_string());
+            let customer = json_value
+                .get("customer")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let payment_method = json_value
+                .get("payment_method")
+                .or_else(|| json_value.get("paymentMethod"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let description = json_value
+                .get("description")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let confirm = json_value
+                .get("confirm")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let metadata = json_value
+                .get("metadata")
+                .and_then(|v| v.as_object())
+                .map(|obj| {
+                    obj.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect()
+                })
+                .unwrap_or_default();
 
-    // Extract fields
-    let amount = params
-        .get("amount")
-        .and_then(|s| {
-            let parsed = s.parse::<i64>().ok();
-            if parsed.is_none() {
-                println!("WARN: Failed to parse amount from: {}", s);
+            (
+                amount,
+                currency,
+                customer,
+                payment_method,
+                description,
+                confirm,
+                metadata,
+            )
+        } else {
+            // Parse as form-encoded
+            let mut params: HashMap<String, String> = HashMap::new();
+
+            for part in body_str.split('&') {
+                if let Some((key, value)) = part.split_once('=') {
+                    let decoded_value = urlencoding::decode(value).unwrap_or_default().to_string();
+                    params.insert(key.to_string(), decoded_value);
+                }
             }
-            parsed
-        })
-        .unwrap_or(0);
 
-    let currency = params
-        .get("currency")
-        .cloned()
-        .unwrap_or_else(|| "usd".to_string());
-    let customer = params.get("customer").cloned();
-    let payment_method = params.get("payment_method").cloned();
-    let description = params.get("description").cloned();
-    let confirm = params
-        .get("confirm")
-        .and_then(|s| s.parse::<bool>().ok())
-        .unwrap_or(false);
+            let amount = params
+                .get("amount")
+                .and_then(|s| s.parse::<i64>().ok())
+                .unwrap_or(0);
+            let currency = params
+                .get("currency")
+                .cloned()
+                .unwrap_or_else(|| "usd".to_string());
+            let customer = params.get("customer").cloned();
+            let payment_method = params.get("payment_method").cloned();
+            let description = params.get("description").cloned();
+            let confirm = params
+                .get("confirm")
+                .and_then(|s| s.parse::<bool>().ok())
+                .unwrap_or(false);
 
-    // Extract metadata (metadata[key]=value format)
-    let metadata: HashMap<String, String> = params
-        .iter()
-        .filter_map(|(k, v)| {
-            if k.starts_with("metadata[") && k.ends_with(']') {
-                let key = k
-                    .strip_prefix("metadata[")
-                    .and_then(|s| s.strip_suffix(']'))
-                    .unwrap_or(k);
-                Some((key.to_string(), v.clone()))
-            } else {
-                None
-            }
-        })
-        .collect();
+            // Extract metadata (metadata[key]=value format)
+            let metadata: HashMap<String, String> = params
+                .iter()
+                .filter_map(|(k, v)| {
+                    if k.starts_with("metadata[") && k.ends_with(']') {
+                        let key = k
+                            .strip_prefix("metadata[")
+                            .and_then(|s| s.strip_suffix(']'))
+                            .unwrap_or(k);
+                        Some((key.to_string(), v.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            (
+                amount,
+                currency,
+                customer,
+                payment_method,
+                description,
+                confirm,
+                metadata,
+            )
+        };
 
     let payment_intent_id = generate_stripe_id("pi");
     let created = chrono::Utc::now().timestamp();
@@ -118,12 +189,7 @@ pub async fn create_payment_intent(
         .unwrap()
         .insert(payment_intent_id, payment_intent.clone());
 
-    println!(
-        "INFO: Created payment intent {} with amount {} cents, description: {:?}",
-        payment_intent.id, payment_intent.amount, payment_intent.description
-    );
-
-    (StatusCode::OK, Json(payment_intent))
+    (StatusCode::OK, Json(payment_intent)).into_response()
 }
 
 /// GET /v1/payment_intents/:id - Retrieve a payment intent

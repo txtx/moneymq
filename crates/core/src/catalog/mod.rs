@@ -3,6 +3,7 @@ pub mod stripe;
 pub mod x402;
 
 use std::{
+    collections::HashMap,
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -14,12 +15,11 @@ use axum::{
     routing::{get, post},
 };
 use moneymq_types::{Meter, Product, x402::transactions::FacilitatedTransaction};
-use std::collections::HashMap;
+use stripe::types::StripePaymentIntent;
 use tower_http::cors::{Any, CorsLayer};
 use url::Url;
 
 use crate::{billing::BillingManager, facilitator::endpoints::middleware::x402_post};
-use stripe::types::StripePaymentIntent;
 
 /// Application state
 #[derive(Clone)]

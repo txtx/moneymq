@@ -1,7 +1,8 @@
-use crate::facilitator::db::{PooledConnection, models::TransactionCustomerModel, schema::*};
 use diesel::prelude::*;
 use moneymq_types::x402::transactions::FacilitatedTransaction;
 use serde::{Deserialize, Serialize};
+
+use crate::facilitator::db::{PooledConnection, models::TransactionCustomerModel, schema::*};
 
 pub fn find_transaction_id_for_settlement_update(
     conn: &mut PooledConnection,

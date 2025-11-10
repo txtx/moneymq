@@ -1,7 +1,8 @@
-use crate::facilitator::db::{PooledConnection, schema::*};
 use diesel::prelude::*;
 use moneymq_types::x402::transactions::TransactionCustomer;
 use serde::{Deserialize, Serialize};
+
+use crate::facilitator::db::{PooledConnection, schema::*};
 
 pub fn find_customer_by_address(
     conn: &mut PooledConnection,
