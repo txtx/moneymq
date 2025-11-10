@@ -7,7 +7,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{MethodRouter, post},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use moneymq_types::x402::{
     ExactPaymentPayload, FacilitatorErrorReason, PaymentPayload, PaymentRequirements,
     SupportedResponse,
@@ -19,7 +19,12 @@ use crate::{
     facilitator::{
         endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
     },
-    provider::ProviderState,
+    provider::{
+        ProviderState,
+        stripe::endpoints::{
+            billing::BillingMeterEventRequest, subscriptions::SubscriptionRequest,
+        },
+    },
 };
 
 #[derive(thiserror::Error, Debug)]

@@ -141,7 +141,10 @@ pub async fn start_provider(
             post(stripe::attach_payment_method),
         )
         // Subscription endpoints
-        .route("/v1/subscriptions", post(stripe::create_subscription))
+        .route(
+            "/v1/subscriptions",
+            x402_post(stripe::create_subscription, state.clone()),
+        )
         .layer(cors_layer)
         .with_state(state);
 
