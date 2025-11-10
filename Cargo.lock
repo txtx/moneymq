@@ -1858,6 +1858,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "diesel"
+version = "2.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e7624a3bb9fffd82fff016be9a7f163d20e5a89eb8d28f9daaa6b30fff37500"
+dependencies = [
+ "bitflags 2.10.0",
+ "byteorder",
+ "chrono",
+ "diesel_derives",
+ "downcast-rs",
+ "itoa",
+ "libsqlite3-sys",
+ "pq-sys",
+ "r2d2",
+ "serde_json",
+ "sqlite-wasm-rs",
+ "time",
+ "uuid",
+]
+
+[[package]]
+name = "diesel-dynamic-schema"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "030a2287b125235908614c5f32f9b3bdc43c4d639846853d66e8a68c75a02756"
+dependencies = [
+ "diesel",
+]
+
+[[package]]
+name = "diesel_derives"
+version = "2.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9daac6489a36e42570da165a10c424f3edcefdff70c5fd55e1847c23f3dd7562"
+dependencies = [
+ "diesel_table_macro_syntax",
+ "dsl_auto_type",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+]
+
+[[package]]
+name = "diesel_migrations"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee060f709c3e3b1cadd83fcd0f61711f7a8cf493348f758d3a1c1147d70b3c97"
+dependencies = [
+ "diesel",
+ "migrations_internals",
+ "migrations_macros",
+]
+
+[[package]]
+name = "diesel_table_macro_syntax"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe2444076b48641147115697648dc743c2c00b61adade0f01ce67133c7babe8c"
+dependencies = [
+ "syn 2.0.108",
+]
+
+[[package]]
 name = "difflib"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2001,6 +2064,26 @@ name = "downcast"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1435fa1053d8b2fbbe9be7e97eca7f33d37b28409959813daefc1446a14247f1"
+
+[[package]]
+name = "downcast-rs"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "117240f60069e65410b3ae1bb213295bd828f707b5bec6596a1afc8793ce0cbc"
+
+[[package]]
+name = "dsl_auto_type"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dd122633e4bef06db27737f21d3738fb89c8f6d5360d6d9d7635dda142a7757e"
+dependencies = [
+ "darling 0.21.3",
+ "either",
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.108",
+]
 
 [[package]]
 name = "dyn-clone"
@@ -4158,6 +4241,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c10584274047cb335c23d3e61bcef8e323adae7c5c8c760540f73610177fc3f"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "libyml"
 version = "0.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4397,6 +4491,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "migrations_internals"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36c791ecdf977c99f45f23280405d7723727470f6689a5e6dbf513ac547ae10d"
+dependencies = [
+ "serde",
+ "toml 0.9.8",
+]
+
+[[package]]
+name = "migrations_macros"
+version = "2.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36fc5ac76be324cfd2d3f2cf0fdf5d5d3c4f14ed8aaebadb09e304ba42282703"
+dependencies = [
+ "migrations_internals",
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4600,8 +4715,13 @@ dependencies = [
  "bincode",
  "bs58",
  "chrono",
+ "diesel",
+ "diesel-dynamic-schema",
+ "diesel_derives",
+ "diesel_migrations",
  "indexmap 2.12.0",
  "kora-lib",
+ "libsqlite3-sys",
  "moneymq-types",
  "reqwest 0.12.24",
  "serde",
@@ -5316,6 +5436,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pq-sys"
+version = "0.7.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "574ddd6a267294433f140b02a726b0640c43cf7c6f717084684aaa3b285aba61"
+dependencies = [
+ "libc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "predicates"
 version = "2.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5628,6 +5759,17 @@ name = "r-efi"
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r2d2"
+version = "0.8.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "51de85fb3fb6524929c8a2eb85e6b6d363de4e8c48f9e2c2eac4944abc181c93"
+dependencies = [
+ "log",
+ "parking_lot 0.12.5",
+ "scheduled-thread-pool",
+]
 
 [[package]]
 name = "radium"
@@ -6377,6 +6519,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "891d81b926048e76efe18581bf793546b4c0eaf8448d72be8de2bbee5fd166e1"
 dependencies = [
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "scheduled-thread-pool"
+version = "0.2.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cbc66816425a074528352f5789333ecff06ca41b36b0b0efdfbb29edc391a19"
+dependencies = [
+ "parking_lot 0.12.5",
 ]
 
 [[package]]
@@ -10769,6 +10920,21 @@ dependencies = [
  "spl-discriminator",
  "spl-pod",
  "thiserror 2.0.17",
+]
+
+[[package]]
+name = "sqlite-wasm-rs"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54e4348c16a3d2e2a45437eff67efc5462b60443de76f61b5d0ed9111c626d9d"
+dependencies = [
+ "js-sys",
+ "once_cell",
+ "thiserror 2.0.17",
+ "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
