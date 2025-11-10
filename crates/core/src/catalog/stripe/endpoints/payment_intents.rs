@@ -22,7 +22,6 @@ pub async fn create_payment_intent(
 ) -> impl IntoResponse {
     // Parse form-encoded body
     let body_str = String::from_utf8_lossy(&body);
-    println!("DEBUG: Raw request body: {}", body_str);
 
     let mut params: HashMap<String, String> = HashMap::new();
 
@@ -32,8 +31,6 @@ pub async fn create_payment_intent(
             params.insert(key.to_string(), decoded_value);
         }
     }
-
-    println!("DEBUG: Payment intent request params: {:?}", params);
 
     // Extract fields
     let amount = params
@@ -47,7 +44,6 @@ pub async fn create_payment_intent(
         })
         .unwrap_or(0);
 
-    println!("DEBUG: Extracted amount: {} cents", amount);
     let currency = params
         .get("currency")
         .cloned()
@@ -88,7 +84,11 @@ pub async fn create_payment_intent(
         PaymentIntentStatus::RequiresPaymentMethod
     };
 
-    let client_secret = Some(format!("{}_secret_{}", payment_intent_id, generate_stripe_id("")));
+    let client_secret = Some(format!(
+        "{}_secret_{}",
+        payment_intent_id,
+        generate_stripe_id("")
+    ));
 
     let latest_charge = if status == PaymentIntentStatus::Succeeded {
         Some(generate_stripe_id("ch"))
@@ -112,16 +112,15 @@ pub async fn create_payment_intent(
     };
 
     // Store payment intent in state
-    state.payment_intents
+    state
+        .payment_intents
         .lock()
         .unwrap()
         .insert(payment_intent_id, payment_intent.clone());
 
     println!(
         "INFO: Created payment intent {} with amount {} cents, description: {:?}",
-        payment_intent.id,
-        payment_intent.amount,
-        payment_intent.description
+        payment_intent.id, payment_intent.amount, payment_intent.description
     );
 
     (StatusCode::OK, Json(payment_intent))
@@ -133,26 +132,23 @@ pub async fn retrieve_payment_intent(
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let payment_intents = state.payment_intents.lock().unwrap();
-    let payment_intent = payment_intents
-        .get(&id)
-        .cloned()
-        .unwrap_or_else(|| {
-            // Fallback for backward compatibility
-            StripePaymentIntent {
-                id: id.clone(),
-                object: "payment_intent".to_string(),
-                amount: 4990,
-                currency: "usd".to_string(),
-                status: PaymentIntentStatus::RequiresPaymentMethod,
-                created: chrono::Utc::now().timestamp(),
-                customer: None,
-                payment_method: None,
-                description: None,
-                metadata: HashMap::new(),
-                latest_charge: None,
-                client_secret: Some(format!("{}_secret_{}", id, generate_stripe_id(""))),
-            }
-        });
+    let payment_intent = payment_intents.get(&id).cloned().unwrap_or_else(|| {
+        // Fallback for backward compatibility
+        StripePaymentIntent {
+            id: id.clone(),
+            object: "payment_intent".to_string(),
+            amount: 4990,
+            currency: "usd".to_string(),
+            status: PaymentIntentStatus::RequiresPaymentMethod,
+            created: chrono::Utc::now().timestamp(),
+            customer: None,
+            payment_method: None,
+            description: None,
+            metadata: HashMap::new(),
+            latest_charge: None,
+            client_secret: Some(format!("{}_secret_{}", id, generate_stripe_id(""))),
+        }
+    });
 
     (StatusCode::OK, Json(payment_intent))
 }
@@ -178,26 +174,23 @@ pub async fn confirm_payment_intent(
 
     // Look up the payment intent from state
     let mut payment_intents = state.payment_intents.lock().unwrap();
-    let mut payment_intent = payment_intents
-        .get(&id)
-        .cloned()
-        .unwrap_or_else(|| {
-            // Fallback for backward compatibility
-            StripePaymentIntent {
-                id: id.clone(),
-                object: "payment_intent".to_string(),
-                amount: 4990,
-                currency: "usd".to_string(),
-                status: PaymentIntentStatus::RequiresConfirmation,
-                created: chrono::Utc::now().timestamp(),
-                customer: None,
-                payment_method: None,
-                description: None,
-                metadata: HashMap::new(),
-                latest_charge: None,
-                client_secret: Some(format!("{}_secret_{}", id, generate_stripe_id(""))),
-            }
-        });
+    let mut payment_intent = payment_intents.get(&id).cloned().unwrap_or_else(|| {
+        // Fallback for backward compatibility
+        StripePaymentIntent {
+            id: id.clone(),
+            object: "payment_intent".to_string(),
+            amount: 4990,
+            currency: "usd".to_string(),
+            status: PaymentIntentStatus::RequiresConfirmation,
+            created: chrono::Utc::now().timestamp(),
+            customer: None,
+            payment_method: None,
+            description: None,
+            metadata: HashMap::new(),
+            latest_charge: None,
+            client_secret: Some(format!("{}_secret_{}", id, generate_stripe_id(""))),
+        }
+    });
 
     // Update the payment intent status to succeeded
     payment_intent.status = PaymentIntentStatus::Succeeded;

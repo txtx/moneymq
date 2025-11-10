@@ -1,3 +1,4 @@
+pub mod db;
 pub mod endpoints;
 pub mod networks;
 
@@ -21,6 +22,9 @@ use kora_lib::{
 };
 use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
 use tokio::task::JoinHandle;
+use tower_http::cors::{Any, CorsLayer};
+
+use crate::facilitator::db::DbManager;
 
 pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 pub const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
@@ -33,23 +37,31 @@ pub const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID: &str =
 #[derive(Clone)]
 pub struct FacilitatorState {
     pub config: Arc<FacilitatorConfig>,
+    pub db_manager: Arc<db::DbManager>,
 }
 
 impl FacilitatorState {
-    pub fn new(config: FacilitatorConfig) -> Self {
+    pub fn new(config: FacilitatorConfig, database_url: &str) -> Self {
         Self {
             config: Arc::new(config),
+            db_manager: Arc::new(DbManager::new(database_url).unwrap()),
         }
     }
 }
 
 /// Create the facilitator router
 pub fn create_router(state: FacilitatorState) -> Router {
+    let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any);
     Router::new()
         .route("/health", get(endpoints::health::handler))
         .route("/verify", post(endpoints::verify::handler))
         .route("/settle", post(endpoints::settle::handler))
         .route("/supported", get(endpoints::supported::handler))
+        .route(
+            "/v1/transactions",
+            get(endpoints::transactions::list_transactions),
+        )
+        .layer(cors_layer)
         .with_state(state)
 }
 
@@ -122,7 +134,7 @@ pub async fn start_facilitator(
     let signer_pool = SignerPool::from_config(signer_pool_config).await?;
     init_signer_pool(signer_pool)?;
 
-    let state = FacilitatorState::new(config);
+    let state = FacilitatorState::new(config, format!("sqlite://{}", "facilitator.db").as_str());
     let app = create_router(state);
 
     let addr = format!("0.0.0.0:{}", url.port().expect("URL must have a port"));

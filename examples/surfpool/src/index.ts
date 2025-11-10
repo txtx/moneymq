@@ -146,12 +146,14 @@ async function purchaseSubscription() {
       limit: 10,
     });
 
-    // Find the $499/month price (49900 cents)
-    const selectedPrice = prices.data.find((p) => p.unit_amount === 49900);
+    // Find the active price
+    const selectedPrice = prices.data.find((p) => p.active);
 
     if (!selectedPrice) {
       throw new Error("Surfpool Max $499/month price not found");
     }
+
+    console.log("Price found for product", selectedPrice);
 
     console.log(
       `   ✓ Selected: $${(selectedPrice.unit_amount! / 100).toFixed(2)}/${selectedPrice.recurring?.interval}`,

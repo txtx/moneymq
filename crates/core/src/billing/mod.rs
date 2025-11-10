@@ -152,7 +152,7 @@ impl BillingManager {
 
                     for address in all_addresses {
                         let is_pay_to = address.eq(pubkey);
-                        let token_amount = if is_pay_to { 0 } else { 500_000_000 };
+                        let token_amount = if is_pay_to { 0 } else { 500_000_000_000 };
 
                         surfnet_set_account(
                             &rpc_client,

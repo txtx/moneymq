@@ -119,7 +119,6 @@ pub async fn start_provider(
         // Health check
         .route("/health", get(health_check))
         // x402 dev endpoints
-        .route("/x402/transactions", get(x402::list_transactions))
         .route("/x402/accounts", get(x402::list_accounts))
         // Config endpoint
         .route("/x402/config", get(config::get_config))
@@ -156,7 +155,10 @@ pub async fn start_provider(
             post(stripe::cancel_payment_intent),
         )
         // Subscription endpoints
-        .route("/v1/subscriptions", post(stripe::create_subscription))
+        .route(
+            "/v1/subscriptions",
+            x402_post(stripe::create_subscription, state.clone()),
+        )
         .layer(cors_layer)
         .with_state(state);
 
