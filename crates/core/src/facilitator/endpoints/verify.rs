@@ -9,7 +9,11 @@ use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, Verify
 use solana_client::nonblocking::rpc_client::RpcClient;
 use tracing::{debug, error};
 
-use crate::facilitator::{FacilitatorState, networks};
+use crate::facilitator::{
+    FacilitatorState,
+    endpoints::{FacilitatorExtraContext, serialize_to_base64},
+    networks,
+};
 
 /// POST /verify endpoint - verify a payment payload
 pub async fn handler(
@@ -62,24 +66,47 @@ pub async fn handler(
     }
 
     // Delegate to network-specific verification
-    match network_config.network() {
+    let (status, response) = match network_config.network() {
         Network::Solana => {
             let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
             match networks::solana::verify_solana_payment(&request, &network_config, &rpc_client)
                 .await
             {
-                Ok(response) => (StatusCode::OK, Json(response)),
+                Ok(response) => (StatusCode::OK, response),
                 Err(e) => {
                     error!("Verification failed: {}", e);
                     (
                         StatusCode::BAD_REQUEST,
-                        Json(VerifyResponse::Invalid {
+                        VerifyResponse::Invalid {
                             reason: FacilitatorErrorReason::FreeForm(e.to_string()),
                             payer: None,
-                        }),
+                        },
                     )
                 }
             }
         }
-    }
+    };
+
+    let verify_request_base64 = serialize_to_base64(&request);
+    let verify_response_base64 = serialize_to_base64(&response);
+    let payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
+    let extra = match request.payment_requirements.extra.as_ref() {
+        Some(extra) => {
+            let extra: FacilitatorExtraContext = serde_json::from_value(extra.clone()).unwrap();
+            Some(extra)
+        }
+        None => None,
+    };
+
+    if let Err(e) = state.db_manager.insert_transaction(
+        extra,
+        request.payment_requirements.max_amount_required.0.clone(),
+        payment_requirement_base64,
+        verify_request_base64,
+        verify_response_base64,
+    ) {
+        error!("Failed to log transaction to database: {}", e);
+    };
+
+    (status, Json(response))
 }

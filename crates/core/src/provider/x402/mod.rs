@@ -1,3 +1,3 @@
 pub mod endpoints;
 
-pub use endpoints::{accounts::list_accounts, transactions::list_transactions};
+pub use endpoints::accounts::list_accounts;

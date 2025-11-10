@@ -7,18 +7,24 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{MethodRouter, post},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
+use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use moneymq_types::x402::{
     ExactPaymentPayload, FacilitatorErrorReason, PaymentPayload, PaymentRequirements,
     SupportedResponse,
-    transactions::{FacilitatedTransaction, TransactionStatus},
 };
 use serde_json::json;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    facilitator::networks::solana::extract_customer_from_transaction,
-    provider::{ProviderState, stripe::utils::generate_stripe_id},
+    facilitator::{
+        endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
+    },
+    provider::{
+        ProviderState,
+        stripe::endpoints::{
+            billing::BillingMeterEventRequest, subscriptions::SubscriptionRequest,
+        },
+    },
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -179,7 +185,7 @@ async fn verify_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<(moneymq_types::x402::MixedAddress, String, String), X402FacilitatorRequestError> {
+) -> Result<moneymq_types::x402::MixedAddress, X402FacilitatorRequestError> {
     use moneymq_types::x402::{VerifyRequest, VerifyResponse, X402Version};
 
     // Construct the verify request
@@ -188,11 +194,6 @@ async fn verify_payment_with_facilitator(
         payment_payload: payment_payload.clone(),
         payment_requirements: payment_requirements.clone(),
     };
-
-    // Serialize request for debug data
-    let verify_request_json =
-        serde_json::to_string(&verify_request).unwrap_or_else(|_| "{}".to_string());
-    let verify_request_base64 = BASE64.encode(&verify_request_json);
 
     // Build the facilitator verify URL
     let verify_url = format!("{}verify", state.facilitator_url);
@@ -217,7 +218,6 @@ async fn verify_payment_with_facilitator(
         .text()
         .await
         .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
-    let verify_response_base64 = BASE64.encode(&response_text);
 
     // Parse response
     let verify_response: VerifyResponse =
@@ -225,9 +225,7 @@ async fn verify_payment_with_facilitator(
 
     // Check if payment is valid
     match verify_response {
-        VerifyResponse::Valid { payer } => {
-            Ok((payer, verify_request_base64, verify_response_base64))
-        }
+        VerifyResponse::Valid { payer } => Ok(payer),
         VerifyResponse::Invalid { reason, .. } => Err(
             X402FacilitatorRequestError::PaymentVerificationFailed(reason),
         ),
@@ -239,7 +237,7 @@ async fn settle_payment_with_facilitator(
     state: &ProviderState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
-) -> Result<(moneymq_types::x402::SettleResponse, String, String), X402FacilitatorRequestError> {
+) -> Result<(), X402FacilitatorRequestError> {
     use moneymq_types::x402::{SettleRequest, SettleResponse, X402Version};
 
     // Construct the settle request (identical structure to verify request)
@@ -248,11 +246,6 @@ async fn settle_payment_with_facilitator(
         payment_payload: payment_payload.clone(),
         payment_requirements: payment_requirements.clone(),
     };
-
-    // Serialize settle request for debug purposes
-    let settle_request_json =
-        serde_json::to_string(&settle_request).unwrap_or_else(|_| "{}".to_string());
-    let settle_request_base64 = BASE64.encode(&settle_request_json);
 
     // Build the facilitator settle URL
     let settle_url = format!("{}settle", state.facilitator_url);
@@ -277,7 +270,6 @@ async fn settle_payment_with_facilitator(
         .text()
         .await
         .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
-    let settle_response_base64 = BASE64.encode(&response_text);
 
     // Parse response
     let settle_response: SettleResponse =
@@ -288,11 +280,7 @@ async fn settle_payment_with_facilitator(
         if let Some(ref tx_hash) = settle_response.transaction {
             debug!("  Transaction hash: {}", tx_hash);
         }
-        Ok((
-            settle_response,
-            settle_request_base64,
-            settle_response_base64,
-        ))
+        Ok(())
     } else {
         Err(X402FacilitatorRequestError::PaymentSettlementFailed(
             settle_response.error_reason,
@@ -303,10 +291,93 @@ async fn settle_payment_with_facilitator(
 /// Middleware to handle payment requirements for meter events
 pub async fn payment_middleware(
     State(state): State<ProviderState>,
-    mut req: Request<Body>,
+    req: Request<Body>,
     next: Next,
 ) -> Response {
     use moneymq_types::x402::{Network, Scheme, TokenAmount};
+
+    let (parts, body) = req.into_parts();
+    let request_bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+
+    let mut req = Request::from_parts(parts, Body::from(request_bytes.clone()));
+
+    let (description, amount, is_margin, product_name) = {
+        let billing_event = BillingMeterEventRequest::parse(&request_bytes);
+        if let Some(event_name) = billing_event.event_name {
+            debug!("Parsed billing event name from request: {}", event_name);
+
+            let billing_event = state.meters.iter().find(|m| m.event_name == event_name);
+            if let Some(billing_event) = billing_event {
+                (
+                    billing_event
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| billing_event.event_name.clone()),
+                    // TODO: need to figure out price for billing events
+                    100,
+                    false,
+                    billing_event
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| billing_event.event_name.clone()),
+                )
+            } else {
+                // Unknown billing event, default amount
+                ("Meter Event".into(), 100, false, "Meter Event".into())
+            }
+        } else {
+            let subscription_req = SubscriptionRequest::parse(&request_bytes);
+            let Some(_) = subscription_req.customer else {
+                debug!("Not x402 gated endpoint, continuing to handler");
+                // Not x402 gated endpoint, continue to handler
+                return next.run(req).await;
+            };
+            debug!(
+                "Parsed subscription request from request, price IDs: {:?}",
+                subscription_req.price_ids
+            );
+
+            let active_price = state
+                .products
+                .iter()
+                .flat_map(|product| {
+                    product.prices.iter().filter_map(|price| {
+                        let price_id = if state.use_sandbox {
+                            price.sandboxes.get("default")
+                        } else {
+                            price.deployed_id.as_ref()
+                        }
+                        .unwrap_or(&price.id);
+                        if subscription_req.price_ids.contains(&price_id) && price.active {
+                            let is_margin = price.pricing_type.eq("margin");
+                            let price = price.unit_amount.clone().unwrap_or(1);
+                            let description =
+                                product.statement_descriptor.clone().unwrap_or_else(|| {
+                                    product.name.clone().unwrap_or("Product".to_string())
+                                });
+                            let name = product.name.clone().unwrap_or("Product".to_string());
+                            Some((description, price, is_margin, name))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            let (description, price, is_margin, product_name) = active_price
+                .first()
+                .cloned()
+                .unwrap_or(("Product".to_string(), 1, false, "Product".to_string())); // TODO: handle multiple prices properly
+
+            (description, price, is_margin, product_name)
+        }
+    };
+
+    debug!(
+        "Creating payment requirements for resource: {}, Amount: {}",
+        description, amount
+    );
 
     let supported = match fetch_supported(&state).await {
         Ok(supported) => supported,
@@ -325,7 +396,7 @@ pub async fn payment_middleware(
     let assets = billing_config
         .currencies()
         .iter()
-        .map(|currency| currency.address())
+        .map(|currency| (currency.address(), currency.decimals()))
         .collect::<Vec<_>>();
 
     let recipient = billing_config.recipient();
@@ -337,26 +408,39 @@ pub async fn payment_middleware(
     // For now, create a mock payment requirement for testing
     let payment_requirements = assets
         .into_iter()
-        .map(|asset| {
+        .map(|(asset, decimals)| {
+            let token_amount =
+                TokenAmount((amount * 10_i64.pow((decimals as u32).saturating_sub(2))).to_string());
+            debug!(
+                "  Payment Requirement - Asset: {}, Amount (raw): {}",
+                asset, token_amount.0
+            );
             PaymentRequirements {
                 scheme: Scheme::Exact,
                 network: network.clone(),
-                max_amount_required: TokenAmount("1000000".to_string()), // 1 USDC (6 decimals)
+                // TODO: our price is in cents, but USDC has 6 decimals.
+                // We need a consistent conversion between these rather than assuming 2 decimals
+                max_amount_required: token_amount,
                 resource: state.facilitator_url.clone(), // TODO: I think this should actually be the resource being accessed
-                description: "Payment for meter event".to_string(),
+                description: format!("Payment for {}", description),
                 mime_type: "application/json".to_string(),
                 output_schema: None,
                 pay_to: recipient.address(),
                 max_timeout_seconds: 300,
                 asset,
-                extra: supported
+                extra: Some(json!({
+                    "feePayer": supported
                     .kinds
                     .iter()
                     .find(|kind| kind.network == network)
-                    .and_then(|kind| Some(serde_json::to_value(&kind.extra).unwrap())),
+                    .and_then(|kind| kind.extra.as_ref().map(|e| e.fee_payer.clone())),
+                    "product": product_name,
+                })),
             }
         })
         .collect::<Vec<_>>();
+
+    let mut selected_payment_requirement = payment_requirements[0].clone(); // For now, just use the first one
 
     let headers = req.headers();
 
@@ -369,48 +453,70 @@ pub async fn payment_middleware(
                 payment_payload.scheme, payment_payload.network
             );
 
+            // Extract customer pubkey from the transaction
+            let customer_pubkey = match &payment_payload.payload {
+                ExactPaymentPayload::Solana(solana_payload) => {
+                    match extract_customer_from_transaction(&solana_payload.transaction) {
+                        Ok(pubkey) => {
+                            info!("Extracted customer pubkey: {}", pubkey);
+                            Some(pubkey)
+                        }
+                        Err(e) => {
+                            warn!("Failed to extract customer pubkey: {}", e);
+                            None
+                        }
+                    }
+                }
+            };
+
+            debug!("  Customer: {:?}", customer_pubkey);
+
+            // Find the customer label by matching the customer pubkey with user accounts
+            let customer_label = customer_pubkey.and_then(|customer| {
+                billing_config
+                    .user_accounts()
+                    .iter()
+                    .find(|account| {
+                        if let moneymq_types::x402::MixedAddress::Solana(addr) = account.address() {
+                            addr == customer
+                        } else {
+                            false
+                        }
+                    })
+                    .and_then(|account| account.label())
+            });
+
+            // Extract currency from asset
+            let currency = billing_config
+                .currencies()
+                .iter()
+                .find(|c| c.address() == selected_payment_requirement.asset)
+                .and_then(|c| c.solana_currency())
+                .map(|sc| sc.symbol.clone())
+                .unwrap_or_else(|| "USDC".to_string());
+
+            let current_extra = selected_payment_requirement
+                .extra
+                .take()
+                .unwrap_or_default();
+            let mut new_extra: FacilitatorExtraContext =
+                serde_json::from_value(current_extra).unwrap();
+            new_extra.customer_address = customer_pubkey.as_ref().map(|c| c.to_string());
+            new_extra.customer_label = customer_label.clone();
+            new_extra.currency = Some(currency.clone());
+            selected_payment_requirement.extra = Some(serde_json::to_value(new_extra).unwrap());
+
             // Verify payment with facilitator
             match verify_payment_with_facilitator(
                 &state,
                 &payment_payload,
-                &payment_requirements[0], // Use the first payment requirement
+                &selected_payment_requirement,
             )
             .await
             {
-                Ok((payer, verify_req_b64, verify_resp_b64)) => {
+                Ok(payer) => {
                     info!("Verified - Payment verified by facilitator");
                     debug!("  Payer: {:?}", payer);
-
-                    // Extract customer pubkey from the transaction
-                    let customer_pubkey = match &payment_payload.payload {
-                        ExactPaymentPayload::Solana(solana_payload) => {
-                            match extract_customer_from_transaction(&solana_payload.transaction) {
-                                Ok(pubkey) => {
-                                    info!("Extracted customer pubkey: {}", pubkey);
-                                    Some(pubkey)
-                                }
-                                Err(e) => {
-                                    warn!("Failed to extract customer pubkey: {}", e);
-                                    None
-                                }
-                            }
-                        }
-                    };
-                    debug!("  Customer: {:?}", customer_pubkey);
-
-                    // Reconstruct the 402 Payment Required response that would have been sent
-                    // when no X-Payment header was present
-                    let payment_required_body = json!({
-                        "error": {
-                            "code": "payment_required",
-                            "message": "Payment required to access this resource. Please include X-Payment header.",
-                            "type": "invalid_request_error",
-                            "payment_requirements": payment_requirements,
-                        }
-                    });
-                    let payment_required_json = serde_json::to_string(&payment_required_body)
-                        .unwrap_or_else(|_| "{}".to_string());
-                    let payment_required_b64 = BASE64.encode(&payment_required_json);
 
                     // Store payer and customer in request extensions for use by handler
                     req.extensions_mut().insert(payer.clone());
@@ -426,69 +532,12 @@ pub async fn payment_middleware(
                         match settle_payment_with_facilitator(
                             &state,
                             &payment_payload,
-                            &payment_requirements[0],
+                            &selected_payment_requirement,
                         )
                         .await
                         {
-                            Ok((settle_response, settle_req_b64, settle_resp_b64)) => {
+                            Ok(_) => {
                                 info!("Settled - Payment settled on-chain");
-                                // Find the customer label by matching the customer pubkey with user accounts
-                                let customer_label = customer_pubkey.and_then(|customer| {
-                                    billing_config
-                                        .user_accounts()
-                                        .iter()
-                                        .find(|account| {
-                                            if let moneymq_types::x402::MixedAddress::Solana(addr) =
-                                                account.address()
-                                            {
-                                                addr == customer
-                                            } else {
-                                                false
-                                            }
-                                        })
-                                        .and_then(|account| account.label())
-                                });
-
-                                // Extract currency from asset
-                                let currency = billing_config
-                                    .currencies()
-                                    .iter()
-                                    .find(|c| c.address() == payment_requirements[0].asset)
-                                    .and_then(|c| c.solana_currency())
-                                    .map(|sc| sc.symbol.clone())
-                                    .unwrap_or_else(|| "USDC".to_string());
-
-                                // Convert amount from raw token amount to decimal string
-                                let amount = &payment_requirements[0].max_amount_required.0;
-
-                                let transaction = FacilitatedTransaction::new(
-                                    generate_stripe_id("txn"),
-                                    chrono::Utc::now().timestamp(),
-                                    payment_requirements[0].description.clone(),
-                                    customer_label,
-                                    customer_pubkey
-                                        .map(|c| c.to_string())
-                                        .unwrap_or_else(|| payer.to_string()),
-                                    amount.clone(),
-                                    currency,
-                                    TransactionStatus::Completed,
-                                    settle_response.transaction.map(|tx| match tx {
-                                        moneymq_types::x402::TransactionHash::Solana(bytes) => {
-                                            bs58::encode(bytes).into_string()
-                                        }
-                                    }),
-                                )
-                                .with_x402_data(
-                                    Some(payment_required_b64),
-                                    Some(verify_req_b64.clone()),
-                                    Some(verify_resp_b64.clone()),
-                                    Some(settle_req_b64),
-                                    Some(settle_resp_b64),
-                                );
-
-                                if let Ok(mut transactions) = state.transactions.lock() {
-                                    transactions.insert(0, transaction); // Insert at beginning for latest-first ordering
-                                }
                             }
                             Err(error_message) => {
                                 error!("Settlement Failed - {}", error_message);

@@ -27,6 +27,12 @@ impl Currency {
         }
     }
 
+    pub fn decimals(&self) -> u8 {
+        match self {
+            Currency::Solana(solana_currency) => solana_currency.decimals,
+        }
+    }
+
     pub fn solana_currency(&self) -> Option<&SolanaCurrency> {
         match self {
             Currency::Solana(solana_currency) => Some(solana_currency),
