@@ -52,21 +52,33 @@ pub async fn list_meters(
     })
 }
 
+pub struct BillingMeterEventRequest {
+    pub event_name: Option<String>,
+}
+
+impl BillingMeterEventRequest {
+    pub const DEFAULT_EVENT: &str = "unknown_event";
+    pub fn parse(body: &Bytes) -> BillingMeterEventRequest {
+        let body_str = String::from_utf8_lossy(body);
+        // Extract event_name field
+        let event_name = body_str
+            .split('&')
+            .find(|part| part.starts_with("event_name="))
+            .and_then(|part| part.strip_prefix("event_name="))
+            .map(|name| urlencoding::decode(name).unwrap_or_default().to_string());
+
+        BillingMeterEventRequest { event_name }
+    }
+}
+
 /// POST /v1/billing/meter_events - Record a meter event
 pub async fn create_meter_event(
     State(_state): State<ProviderState>,
     body: Bytes,
 ) -> impl IntoResponse {
-    // Parse form-encoded body manually
-    let body_str = String::from_utf8_lossy(&body);
-
-    // Extract event_name
-    let event_name = body_str
-        .split('&')
-        .find(|part| part.starts_with("event_name="))
-        .and_then(|part| part.strip_prefix("event_name="))
-        .map(|name| urlencoding::decode(name).unwrap_or_default().to_string())
-        .unwrap_or_else(|| "unknown_event".to_string());
+    let BillingMeterEventRequest { event_name } = BillingMeterEventRequest::parse(&body);
+    let event_name =
+        event_name.unwrap_or_else(|| BillingMeterEventRequest::DEFAULT_EVENT.to_string());
 
     // Generate a mock meter event ID
     let event_id = generate_stripe_id("bmes");

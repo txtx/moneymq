@@ -175,7 +175,7 @@ impl MoneyMqManagedRecipient {
 pub struct LocalManagedRecipient {
     /// The [MixedAddress] being managed by MoneyMQ
     pub address: MixedAddress,
-    pub keypair_bytes: Vec<u8>,
+    pub keypair_bytes: [u8; 64],
     pub label: Option<String>,
 }
 
@@ -198,7 +198,7 @@ impl LocalManagedRecipient {
         };
 
         let pubkey = keypair.pubkey();
-        let keypair_bytes = keypair.to_bytes().to_vec();
+        let keypair_bytes = keypair.to_bytes();
 
         Ok(Self {
             address: MixedAddress::Solana(pubkey),
@@ -217,7 +217,7 @@ impl LocalManagedRecipient {
         let seed = Self::generate_seed_for_payment_recipient();
         let keypair = solana_keypair::Keypair::new_from_array(seed);
         let pubkey = keypair.pubkey();
-        let keypair_bytes = keypair.to_bytes().to_vec();
+        let keypair_bytes = keypair.to_bytes();
 
         Ok(Self {
             address: MixedAddress::Solana(pubkey),

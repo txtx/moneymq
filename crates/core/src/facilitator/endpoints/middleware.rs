@@ -286,10 +286,93 @@ async fn settle_payment_with_facilitator(
 /// Middleware to handle payment requirements for meter events
 pub async fn payment_middleware(
     State(state): State<ProviderState>,
-    mut req: Request<Body>,
+    req: Request<Body>,
     next: Next,
 ) -> Response {
     use moneymq_types::x402::{Network, Scheme, TokenAmount};
+
+    let (parts, body) = req.into_parts();
+    let request_bytes = axum::body::to_bytes(body, usize::MAX)
+        .await
+        .unwrap_or_default();
+
+    let mut req = Request::from_parts(parts, Body::from(request_bytes.clone()));
+
+    let (description, amount, is_margin, product_name) = {
+        let billing_event = BillingMeterEventRequest::parse(&request_bytes);
+        if let Some(event_name) = billing_event.event_name {
+            debug!("Parsed billing event name from request: {}", event_name);
+
+            let billing_event = state.meters.iter().find(|m| m.event_name == event_name);
+            if let Some(billing_event) = billing_event {
+                (
+                    billing_event
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| billing_event.event_name.clone()),
+                    // TODO: need to figure out price for billing events
+                    100,
+                    false,
+                    billing_event
+                        .display_name
+                        .clone()
+                        .unwrap_or_else(|| billing_event.event_name.clone()),
+                )
+            } else {
+                // Unknown billing event, default amount
+                ("Meter Event".into(), 100, false, "Meter Event".into())
+            }
+        } else {
+            let subscription_req = SubscriptionRequest::parse(&request_bytes);
+            let Some(_) = subscription_req.customer else {
+                debug!("Not x402 gated endpoint, continuing to handler");
+                // Not x402 gated endpoint, continue to handler
+                return next.run(req).await;
+            };
+            debug!(
+                "Parsed subscription request from request, price IDs: {:?}",
+                subscription_req.price_ids
+            );
+
+            let active_price = state
+                .products
+                .iter()
+                .flat_map(|product| {
+                    product.prices.iter().filter_map(|price| {
+                        let price_id = if state.use_sandbox {
+                            price.sandboxes.get("default")
+                        } else {
+                            price.deployed_id.as_ref()
+                        }
+                        .unwrap_or(&price.id);
+                        if subscription_req.price_ids.contains(&price_id) && price.active {
+                            let is_margin = price.pricing_type.eq("margin");
+                            let price = price.unit_amount.clone().unwrap_or(1);
+                            let description =
+                                product.statement_descriptor.clone().unwrap_or_else(|| {
+                                    product.name.clone().unwrap_or("Product".to_string())
+                                });
+                            let name = product.name.clone().unwrap_or("Product".to_string());
+                            Some((description, price, is_margin, name))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect::<Vec<_>>();
+            let (description, price, is_margin, product_name) = active_price
+                .first()
+                .cloned()
+                .unwrap_or(("Product".to_string(), 1, false, "Product".to_string())); // TODO: handle multiple prices properly
+
+            (description, price, is_margin, product_name)
+        }
+    };
+
+    debug!(
+        "Creating payment requirements for resource: {}, Amount: {}",
+        description, amount
+    );
 
     let supported = match fetch_supported(&state).await {
         Ok(supported) => supported,
@@ -308,7 +391,7 @@ pub async fn payment_middleware(
     let assets = billing_config
         .currencies()
         .iter()
-        .map(|currency| currency.address())
+        .map(|currency| (currency.address(), currency.decimals()))
         .collect::<Vec<_>>();
 
     let recipient = billing_config.recipient();
@@ -320,13 +403,21 @@ pub async fn payment_middleware(
     // For now, create a mock payment requirement for testing
     let payment_requirements = assets
         .into_iter()
-        .map(|asset| {
+        .map(|(asset, decimals)| {
+            let token_amount =
+                TokenAmount((amount * 10_i64.pow((decimals as u32).saturating_sub(2))).to_string());
+            debug!(
+                "  Payment Requirement - Asset: {}, Amount (raw): {}",
+                asset, token_amount.0
+            );
             PaymentRequirements {
                 scheme: Scheme::Exact,
                 network: network.clone(),
-                max_amount_required: TokenAmount("1000000".to_string()), // 1 USDC (6 decimals)
+                // TODO: our price is in cents, but USDC has 6 decimals.
+                // We need a consistent conversion between these rather than assuming 2 decimals
+                max_amount_required: token_amount,
                 resource: state.facilitator_url.clone(), // TODO: I think this should actually be the resource being accessed
-                description: "Payment for meter event".to_string(),
+                description: format!("Payment for {}", description),
                 mime_type: "application/json".to_string(),
                 output_schema: None,
                 pay_to: recipient.address(),
@@ -338,7 +429,7 @@ pub async fn payment_middleware(
                     .iter()
                     .find(|kind| kind.network == network)
                     .and_then(|kind| kind.extra.as_ref().map(|e| e.fee_payer.clone())),
-                    "product": "example_product_id", // TODO: set actual product ID
+                    "product": product_name,
                 })),
             }
         })
