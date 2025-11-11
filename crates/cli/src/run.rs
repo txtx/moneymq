@@ -447,9 +447,13 @@ async fn start_facilitator_networks(
     }
 
     let url = facilitator_config.url.clone();
-    let handle = moneymq_core::facilitator::start_facilitator(facilitator_config, sandbox)
-        .await
-        .map_err(|e| format!("Failed to start facilitator: {e}"))?;
+    let handle = moneymq_core::facilitator::start_facilitator(
+        facilitator_config,
+        networks_config.clone(),
+        sandbox,
+    )
+    .await
+    .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 
     Ok(Some((handle, local_validator_handles, url)))
 }

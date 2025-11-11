@@ -1,15 +1,19 @@
-use axum::{Json, extract::State, response::IntoResponse};
-use serde_json::json;
+use axum::{Json, extract::State};
+use serde_json::{Value, json};
 
 use crate::{
     billing::recipient::{
         LocalManagedRecipient, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
     },
-    catalog::ProviderState,
+    facilitator::FacilitatorState,
 };
 
-/// GET /v1/accounts - List local network accounts
-pub async fn list_accounts(State(state): State<ProviderState>) -> impl IntoResponse {
+/// GET /sandbox/accounts - List local network accounts
+pub async fn list_accounts(State(state): State<Option<FacilitatorState>>) -> Result<Json<Value>, Json<Value>> {
+    let Some(state) = state else {
+        return Ok(Json(json!({})));
+    };
+
     let networks_config = &state.networks_config;
 
     let mut res = json!({});
@@ -50,5 +54,5 @@ pub async fn list_accounts(State(state): State<ProviderState>) -> impl IntoRespo
         });
     }
 
-    Json(res)
+    Ok(Json(res))
 }

@@ -2,7 +2,7 @@
 pub const DEFAULT_BINDING_ADDRESS: &str = "0.0.0.0";
 
 /// Default port for the facilitator service
-pub const DEFAULT_FACILITATOR_PORT: u16 = 8080;
+pub const DEFAULT_FACILITATOR_PORT: u16 = 7781;
 
 /// Default RPC port for the validator
 pub const DEFAULT_RPC_PORT: u16 = 8899;

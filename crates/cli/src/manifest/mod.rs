@@ -223,6 +223,7 @@ mod tests {
         SandboxFacilitatorConfig, SupportedNetworkConfig, ValidatorConfig, X402PaymentConfig,
         X402SandboxConfig,
     };
+    use moneymq_types::x402::config::constants::DEFAULT_FACILITATOR_PORT;
     use std::fs;
     use tempfile::TempDir;
 
@@ -289,7 +290,7 @@ mod tests {
                 description: Some("Local development sandbox".to_string()),
                 facilitator: FacilitatorConfig::Embedded(SandboxFacilitatorConfig {
                     binding_address: "0.0.0.0".to_string(),
-                    binding_port: 8080,
+                    binding_port: DEFAULT_FACILITATOR_PORT,
                     supported: sandbox_facilitator_supported,
                 }),
                 validator: ValidatorConfig {
@@ -379,7 +380,7 @@ mod tests {
         // Verify sandbox facilitator is embedded
         match &sandbox.facilitator {
             FacilitatorConfig::Embedded(config) => {
-                assert_eq!(config.binding_port, 8080);
+                assert_eq!(config.binding_port, DEFAULT_FACILITATOR_PORT);
                 assert_eq!(config.supported.len(), 1);
             }
             _ => panic!("Expected Embedded facilitator in sandbox"),
