@@ -75,6 +75,7 @@ pub fn create_router(state: FacilitatorState) -> Router {
 /// Start the facilitator server
 pub async fn start_facilitator(
     config: FacilitatorConfig,
+    _sandbox: bool,
 ) -> Result<
     JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
     Box<dyn std::error::Error>,

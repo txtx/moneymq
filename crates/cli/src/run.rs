@@ -254,14 +254,9 @@ impl RunCommand {
             let config = build_facilitator_config(&ctx.manifest.payments)
                 .await
                 .map_err(RunCommandError::StartFacilitatorNetworks)?;
-            let pubkey = config.networks.values().next().and_then(|net| {
-                match net {
-                    moneymq_types::x402::config::facilitator::FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
-                        Some(cfg.payer_keypair.pubkey().to_string())
-                    }
-                    _ => None,
-                }
-            });
+
+            let facilitator_pubkey =
+                config.get_facilitator_pubkey(&NetworkIdentifier::Solana.to_string());
 
             println!();
             println!("# {}", style("x402 endpoints").dim());
@@ -270,10 +265,10 @@ impl RunCommand {
             println!(" {} {}settle", post, config.url);
 
             // Only start local facilitator server in sandbox mode
-            let handles = start_facilitator_networks(config, &networks_config)
+            let handles = start_facilitator_networks(config, &networks_config, self.sandbox)
                 .await
                 .map_err(RunCommandError::StartFacilitatorNetworks)?;
-            (pubkey, handles)
+            (facilitator_pubkey, handles)
         } else {
             (None, None)
         };
@@ -406,6 +401,7 @@ type ValidatorData = IndexMap<Network, (std::process::Child, url::Url)>;
 async fn start_facilitator_networks(
     facilitator_config: FacilitatorConfig,
     networks_config: &NetworksConfig,
+    sandbox: bool,
 ) -> Result<Option<(FacilitatorHandle, ValidatorData, url::Url)>, String> {
     let mut local_validator_handles = IndexMap::new();
     for (network_name, network_config) in facilitator_config.networks.iter() {
@@ -444,7 +440,7 @@ async fn start_facilitator_networks(
     }
 
     let url = facilitator_config.url.clone();
-    let handle = moneymq_core::facilitator::start_facilitator(facilitator_config)
+    let handle = moneymq_core::facilitator::start_facilitator(facilitator_config, sandbox)
         .await
         .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 

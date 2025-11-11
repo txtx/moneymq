@@ -14,6 +14,19 @@ pub struct FacilitatorConfig {
     pub networks: HashMap<String, FacilitatorNetworkConfig>,
 }
 
+impl FacilitatorConfig {
+    pub fn get_facilitator_pubkey(&self, name: &str) -> Option<String> {
+        self.networks.get(name).and_then(|config| match config {
+            FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
+                Some(cfg.payer_keypair.pubkey().to_string())
+            }
+            FacilitatorNetworkConfig::SolanaMainnet(cfg) => {
+                Some(cfg.payer_keypair.pubkey().to_string())
+            }
+        })
+    }
+}
+
 #[derive(Debug)]
 pub enum FacilitatorNetworkConfig {
     SolanaSurfnet(SolanaSurfnetFacilitatorConfig),
