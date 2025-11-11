@@ -15,7 +15,7 @@ mod yaml_util;
 
 use manifest::Manifest;
 
-use crate::manifest::{CatalogConfig, x402::X402Config};
+use crate::manifest::{CatalogConfig, x402::PaymentConfig};
 
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -47,8 +47,8 @@ impl Context {
         self.manifest.get_catalog(&self.catalog_name)
     }
 
-    pub fn get_network(&self) -> Option<&X402Config> {
-        self.manifest.get_network(&self.network_name)
+    pub fn get_payment(&self) -> Option<&PaymentConfig> {
+        self.manifest.get_payment(&self.network_name)
     }
 }
 
@@ -166,7 +166,7 @@ async fn main() {
     } else {
         // Auto-detect first catalog from manifest
         manifest
-            .networks
+            .payments
             .keys()
             .next()
             .cloned()

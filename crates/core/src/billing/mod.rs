@@ -16,24 +16,24 @@ pub mod recipient;
 
 /// Manages billing configurations across multiple networks
 #[derive(Debug, Clone)]
-pub struct BillingManager {
+pub struct NetworksConfig {
     /// Mapping of network names to their billing configurations
-    pub configs: IndexMap<String, NetworkBillingConfig>,
+    pub configs: IndexMap<String, NetworkConfig>,
     /// Mapping of networks to their names
-    pub network_name_map: IndexMap<Network, String>,
+    pub lookup: IndexMap<Network, String>,
 }
 
-impl BillingManager {
-    /// Initializes the [BillingManager] with the provided network configurations
+impl NetworksConfig {
+    /// Initializes the [NetworksConfig] with the provided network configurations
     pub async fn initialize(
         networks_map: IndexMap<
             String,
             (MoneyMqNetwork, Option<String>, Vec<String>, Vec<String>), // (network, payment_recipient, currencies, user_accounts)
         >,
         is_sandbox: bool,
-    ) -> Result<Self, BillingManagerError> {
+    ) -> Result<Self, NetworksConfigError> {
         let mut configs = IndexMap::new();
-        let mut network_name_map = IndexMap::new();
+        let mut lookup = IndexMap::new();
 
         for (
             network_name,
@@ -46,7 +46,7 @@ impl BillingManager {
                 let currency = Currency::from_symbol_and_network(&symbol, &network)
                     .await
                     .map_err(|e| {
-                        BillingManagerError::InitializationError(network.clone(), e.to_string())
+                        NetworksConfigError::InitializationError(network.clone(), e.to_string())
                     })?;
                 currencies.push(currency);
             }
@@ -58,10 +58,10 @@ impl BillingManager {
             )
             .await
             .map_err(|e| {
-                BillingManagerError::InitializationError(network.clone(), e.to_string())
+                NetworksConfigError::InitializationError(network.clone(), e.to_string())
             })?;
 
-            let billing_config = match moneymq_network {
+            let network_config = match moneymq_network {
                 MoneyMqNetwork::SolanaSurfnet => {
                     let cap = 10.max(user_accounts_strs.len());
                     let mut user_accounts = Vec::with_capacity(cap);
@@ -76,36 +76,33 @@ impl BillingManager {
                         )
                         .await
                         .map_err(|e| {
-                            BillingManagerError::InitializationError(network.clone(), e.to_string())
+                            NetworksConfigError::InitializationError(network.clone(), e.to_string())
                         })?;
                         debug!("User account {}: {:?}", i, some_provided_account);
 
                         user_accounts.push(recipient);
                     }
 
-                    NetworkBillingConfig::SolanaSurfnet(SolanaSurfnetBillingConfig {
+                    NetworkConfig::SolanaSurfnet(SolanaSurfnetConfig {
                         payment_recipient,
                         currencies,
                         user_accounts,
                     })
                 }
                 MoneyMqNetwork::SolanaMainnet => {
-                    NetworkBillingConfig::SolanaMainnet(SolanaMainnetBillingConfig {
+                    NetworkConfig::SolanaMainnet(SolanaMainnetConfig {
                         payment_recipient,
                         currencies,
                     })
                 }
             };
 
-            network_name_map.insert(network, network_name.clone());
+            lookup.insert(network, network_name.clone());
 
-            configs.insert(network_name, billing_config);
+            configs.insert(network_name, network_config);
         }
 
-        Ok(BillingManager {
-            configs,
-            network_name_map,
-        })
+        Ok(NetworksConfig { configs, lookup })
     }
 
     /// Funds local accounts and MoneyMQ-managed accounts
@@ -113,14 +110,14 @@ impl BillingManager {
         &self,
         local_validator_rpc_urls: &IndexMap<Network, url::Url>,
     ) -> Result<(), String> {
-        for (_, billing_config) in self.configs.iter() {
-            let recipient = billing_config.recipient();
+        for (_, network_config) in self.configs.iter() {
+            let recipient = network_config.recipient();
             let address = recipient.address();
             let pubkey = address.pubkey().expect("Expected Solana address");
-            let default_rpc_url = billing_config.default_rpc_url();
+            let default_rpc_url = network_config.default_rpc_url();
 
-            match billing_config {
-                NetworkBillingConfig::SolanaSurfnet(surfnet_cfg) => {
+            match network_config {
+                NetworkConfig::SolanaSurfnet(surfnet_cfg) => {
                     let rpc_url = local_validator_rpc_urls
                         .get(&Network::Solana)
                         .cloned()
@@ -158,7 +155,7 @@ impl BillingManager {
                             &rpc_client,
                             SetAccountRequest::new(*address).lamports(1_000_000_000),
                         )?;
-                        for currency in billing_config.currencies() {
+                        for currency in network_config.currencies() {
                             #[allow(irrefutable_let_patterns)]
                             if let Currency::Solana(solana_currency) = currency {
                                 debug!(
@@ -178,7 +175,7 @@ impl BillingManager {
                         }
                     }
                 }
-                NetworkBillingConfig::SolanaMainnet(_) => {
+                NetworkConfig::SolanaMainnet(_) => {
                     if recipient.is_managed() {
                         // TODO: Fund mainnet accounts if MoneyMqManaged
                     }
@@ -190,8 +187,8 @@ impl BillingManager {
     }
 
     /// Retrieves the billing configuration for the specified network
-    pub fn get_config_for_network(&self, network: &Network) -> Option<&NetworkBillingConfig> {
-        self.network_name_map
+    pub fn get_config_for_network(&self, network: &Network) -> Option<&NetworkConfig> {
+        self.lookup
             .get(network)
             .and_then(|name| self.configs.get(name))
     }
@@ -202,67 +199,67 @@ impl BillingManager {
 }
 
 #[derive(Debug, Clone)]
-pub enum NetworkBillingConfig {
-    SolanaSurfnet(SolanaSurfnetBillingConfig),
-    SolanaMainnet(SolanaMainnetBillingConfig),
+pub enum NetworkConfig {
+    SolanaSurfnet(SolanaSurfnetConfig),
+    SolanaMainnet(SolanaMainnetConfig),
 }
 
-impl NetworkBillingConfig {
+impl NetworkConfig {
     pub fn recipient(&self) -> &Recipient {
         match self {
-            NetworkBillingConfig::SolanaSurfnet(cfg) => &cfg.payment_recipient,
-            NetworkBillingConfig::SolanaMainnet(cfg) => &cfg.payment_recipient,
+            NetworkConfig::SolanaSurfnet(cfg) => &cfg.payment_recipient,
+            NetworkConfig::SolanaMainnet(cfg) => &cfg.payment_recipient,
         }
     }
     pub fn currencies(&self) -> &Vec<Currency> {
         match self {
-            NetworkBillingConfig::SolanaSurfnet(cfg) => &cfg.currencies,
-            NetworkBillingConfig::SolanaMainnet(cfg) => &cfg.currencies,
+            NetworkConfig::SolanaSurfnet(cfg) => &cfg.currencies,
+            NetworkConfig::SolanaMainnet(cfg) => &cfg.currencies,
         }
     }
     pub fn default_rpc_url(&self) -> Url {
         match self {
-            NetworkBillingConfig::SolanaSurfnet(_) => "http://localhost:8899".parse().unwrap(),
-            NetworkBillingConfig::SolanaMainnet(_) => {
+            NetworkConfig::SolanaSurfnet(_) => "http://localhost:8899".parse().unwrap(),
+            NetworkConfig::SolanaMainnet(_) => {
                 "https://api.mainnet-beta.solana.com".parse().unwrap()
             }
         }
     }
-    pub fn surfnet_config(&self) -> Option<&SolanaSurfnetBillingConfig> {
+    pub fn surfnet_config(&self) -> Option<&SolanaSurfnetConfig> {
         match self {
-            NetworkBillingConfig::SolanaSurfnet(cfg) => Some(cfg),
+            NetworkConfig::SolanaSurfnet(cfg) => Some(cfg),
             _ => None,
         }
     }
     pub fn network(&self) -> MoneyMqNetwork {
         match self {
-            NetworkBillingConfig::SolanaSurfnet(_) => MoneyMqNetwork::SolanaSurfnet,
-            NetworkBillingConfig::SolanaMainnet(_) => MoneyMqNetwork::SolanaMainnet,
+            NetworkConfig::SolanaSurfnet(_) => MoneyMqNetwork::SolanaSurfnet,
+            NetworkConfig::SolanaMainnet(_) => MoneyMqNetwork::SolanaMainnet,
         }
     }
     pub fn user_accounts(&self) -> Vec<Recipient> {
         match self {
-            NetworkBillingConfig::SolanaSurfnet(cfg) => cfg.user_accounts.clone(),
-            NetworkBillingConfig::SolanaMainnet(_) => vec![],
+            NetworkConfig::SolanaSurfnet(cfg) => cfg.user_accounts.clone(),
+            NetworkConfig::SolanaMainnet(_) => vec![],
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct SolanaSurfnetBillingConfig {
+pub struct SolanaSurfnetConfig {
     pub payment_recipient: Recipient,
     pub currencies: Vec<Currency>,
     pub user_accounts: Vec<Recipient>,
 }
 
 #[derive(Debug, Clone)]
-pub struct SolanaMainnetBillingConfig {
+pub struct SolanaMainnetConfig {
     pub payment_recipient: Recipient,
     pub currencies: Vec<Currency>,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum BillingManagerError {
+pub enum NetworksConfigError {
     #[error("Failed to initialize network {0}: {1}")]
     InitializationError(Network, String),
 }

@@ -134,7 +134,7 @@ pub async fn start_facilitator(
     let signer_pool = SignerPool::from_config(signer_pool_config).await?;
     init_signer_pool(signer_pool)?;
 
-    let state = FacilitatorState::new(config, format!("sqlite://{}", "facilitator.db").as_str());
+    let state = FacilitatorState::new(config, format!("sqlite://{}", ":memory:").as_str());
     let app = create_router(state);
 
     let addr = format!("0.0.0.0:{}", url.port().expect("URL must have a port"));

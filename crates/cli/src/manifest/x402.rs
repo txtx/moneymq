@@ -1,30 +1,63 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use moneymq_types::x402::config::facilitator::{
-    FacilitatorConfig, FacilitatorNetworkConfig, SolanaMainnetFacilitatorConfig,
-    SolanaSurfnetFacilitatorConfig,
+use moneymq_types::x402::config::{
+    constants::{
+        DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT, DEFAULT_WS_PORT,
+    },
+    facilitator::{
+        FacilitatorConfig as FacilitatorRuntimeConfig, FacilitatorNetworkConfig,
+        SolanaSurfnetFacilitatorConfig,
+    },
 };
 use serde::{Deserialize, Serialize};
 use solana_keypair::{EncodableKey, Keypair};
 use url::Url;
 
-pub const DEFAULT_LOCAL_FACILITATOR_URL: &str = "http://localhost:8080";
-pub const DEFAULT_PROD_FACILITATOR_URL: &str = "https://facilitator.moneymq.co";
+/// Payment configuration with protocol as enum tag
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "protocol")]
+pub enum PaymentConfig {
+    #[serde(rename = "x402")]
+    X402(X402PaymentConfig),
+}
 
-/// x402 catalog configuration
+impl Default for PaymentConfig {
+    fn default() -> Self {
+        PaymentConfig::X402(X402PaymentConfig::default())
+    }
+}
+
+/// Facilitator configuration - either a service URL or local config
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum FacilitatorConfig {
+    /// Remote facilitator service URL
+    ServiceUrl { service_url: String },
+    /// Local facilitator configuration
+    Embedded(SandboxFacilitatorConfig),
+}
+
+impl Default for FacilitatorConfig {
+    fn default() -> Self {
+        FacilitatorConfig::Embedded(SandboxFacilitatorConfig::default())
+    }
+}
+
+/// X402 payment protocol configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct X402Config {
-    /// Optional description of this catalog
+pub struct X402PaymentConfig {
+    /// Optional description of this payment network
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Configuration of the networks supported by this catalog
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub billing_networks: IndexMap<String, BillingNetworkConfigFile>,
+    /// Facilitator configuration for production
+    #[serde(default)]
+    pub facilitator: FacilitatorConfig,
 
-    /// Facilitator config
-    pub facilitator: FacilitatorConfigFile,
+    /// Accepted networks for production payments
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub accepted: IndexMap<NetworkIdentifier, AcceptedNetworkConfig>,
 
     /// Nested sandbox/test configurations
     /// Key is the sandbox name (e.g., "default", "staging", "test")
@@ -33,205 +66,32 @@ pub struct X402Config {
     pub sandboxes: IndexMap<String, X402SandboxConfig>,
 }
 
-/// Configurations for different network types
+/// Accepted network configuration for production
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "network_type", rename_all = "kebab-case")]
-pub enum BillingNetworkConfigFile {
-    SolanaSurfnet(SolanaSurfnetBillingConfigFile),
-    SolanaMainnet(SolanaMainnetBillingConfigFile),
-}
+pub struct AcceptedNetworkConfig {
+    /// Payment recipient address (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,
 
-impl BillingNetworkConfigFile {
-    pub fn network(&self) -> moneymq_types::x402::MoneyMqNetwork {
-        match self {
-            BillingNetworkConfigFile::SolanaSurfnet(_) => {
-                moneymq_types::x402::MoneyMqNetwork::SolanaSurfnet
-            }
-            BillingNetworkConfigFile::SolanaMainnet(_) => {
-                moneymq_types::x402::MoneyMqNetwork::SolanaMainnet
-            }
-        }
-    }
-    pub fn payment_recipient(&self) -> Option<String> {
-        match self {
-            BillingNetworkConfigFile::SolanaSurfnet(cfg) => cfg.payment_recipient.clone(),
-            BillingNetworkConfigFile::SolanaMainnet(cfg) => cfg.payment_recipient.clone(),
-        }
-    }
-    pub fn currencies(&self) -> &Vec<String> {
-        match self {
-            BillingNetworkConfigFile::SolanaSurfnet(cfg) => &cfg.currencies,
-            BillingNetworkConfigFile::SolanaMainnet(cfg) => &cfg.currencies,
-        }
-    }
-    pub fn user_accounts(&self) -> Vec<String> {
-        match self {
-            BillingNetworkConfigFile::SolanaSurfnet(cfg) => cfg.user_accounts.clone(),
-            BillingNetworkConfigFile::SolanaMainnet(_) => vec![],
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaSurfnetBillingConfigFile {
-    pub payment_recipient: Option<String>,
-    pub currencies: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub user_accounts: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaMainnetBillingConfigFile {
-    pub payment_recipient: Option<String>,
+    /// Accepted currencies for this network
     pub currencies: Vec<String>,
 }
 
-/// x402 Facilitator configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct FacilitatorConfigFile {
-    /// The facilitator service URL
-    pub url: Option<String>,
-    /// Optional API token for authenticating with the facilitator
-    pub api_token: Option<String>,
-    /// Configuration of the networks supported by the facilitator
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub networks: IndexMap<String, FacilitatorProviderConfigFile>,
+/// Network identifier for configuration
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NetworkIdentifier {
+    Solana,
 }
 
-impl TryInto<FacilitatorConfig> for &FacilitatorConfigFile {
-    type Error = String;
-    fn try_into(self) -> Result<FacilitatorConfig, Self::Error> {
-        let mut networks = HashMap::new();
-        for (name, net_config_file) in &self.networks {
-            networks.insert(
-                name.clone(),
-                net_config_file.try_into().map_err(|e| {
-                    format!(
-                        "Failed to parse facilitator network config for {}: {}",
-                        name, e
-                    )
-                })?,
-            );
-        }
-
-        let url = if networks.is_empty() {
-            // if no network config is provided, we're using an existing facilitator (using ours as default)
-            match self.url.as_ref() {
-                Some(url_str) => url_str
-                    .parse::<Url>()
-                    .map_err(|e| format!("Failed to parse facilitator URL {}: {}", url_str, e))?,
-                None => DEFAULT_PROD_FACILITATOR_URL
-                    .parse::<Url>()
-                    .expect("Failed to parse default production URL"),
-            }
-        } else {
-            // if a network config is provided, we're starting a facilitator, so a localhost URL is default
-            match self.url.as_ref() {
-                Some(url_str) => url_str
-                    .parse::<Url>()
-                    .map_err(|e| format!("Failed to parse facilitator URL {}: {}", url_str, e))?,
-                None => DEFAULT_LOCAL_FACILITATOR_URL
-                    .parse::<Url>()
-                    .expect("Failed to parse default localhost URL"),
-            }
-        };
-
-        Ok(FacilitatorConfig {
-            url,
-            networks,
-            api_token: self.api_token.clone(),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "network_type", rename_all = "kebab-case")]
-pub enum FacilitatorProviderConfigFile {
-    SolanaSurfnet(SolanaSurfnetFacilitatorProviderConfigFile),
-    SolanaMainnet(SolanaMainnetFacilitatorProviderConfigFile),
-}
-
-impl TryInto<FacilitatorNetworkConfig> for &FacilitatorProviderConfigFile {
-    type Error = String;
-    fn try_into(self) -> Result<FacilitatorNetworkConfig, Self::Error> {
+impl std::fmt::Display for NetworkIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            FacilitatorProviderConfigFile::SolanaSurfnet(cfg_file) => Ok(
-                FacilitatorNetworkConfig::SolanaSurfnet(cfg_file.try_into().map_err(|e| {
-                    format!("Failed to parse Solana Surfnet facilitator config: {}", e)
-                })?),
-            ),
-            FacilitatorProviderConfigFile::SolanaMainnet(cfg_file) => Ok(
-                FacilitatorNetworkConfig::SolanaMainnet(cfg_file.try_into().map_err(|e| {
-                    format!("Failed to parse Solana Mainnet facilitator config: {}", e)
-                })?),
-            ),
+            NetworkIdentifier::Solana => write!(f, "solana"),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaSurfnetFacilitatorProviderConfigFile {
-    pub payer_keypair_path: Option<String>,
-    pub rpc_url: Option<String>,
-}
-
-impl TryInto<SolanaSurfnetFacilitatorConfig> for &SolanaSurfnetFacilitatorProviderConfigFile {
-    type Error = String;
-    fn try_into(self) -> Result<SolanaSurfnetFacilitatorConfig, Self::Error> {
-        let rpc_url = if let Some(ref url) = self.rpc_url {
-            url.parse::<Url>()
-                .map_err(|e| format!("Failed to parse RPC URL {}: {}", url, e))?
-        } else {
-            "http://127.0.0.1:8899"
-                .parse::<Url>()
-                .expect("Failed to parse default Surfnet RPC URL")
-        };
-
-        let payer_keypair = if let Some(ref path) = self.payer_keypair_path {
-            Keypair::read_from_file(path)
-                .map_err(|e| format!("Failed to read Solana keypair from file: {}", e))?
-        } else {
-            Keypair::new()
-        };
-
-        Ok(SolanaSurfnetFacilitatorConfig {
-            rpc_url,
-            payer_keypair,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SolanaMainnetFacilitatorProviderConfigFile {
-    pub payer_keypair_path: Option<String>,
-    pub rpc_url: Option<String>,
-}
-
-impl TryInto<SolanaMainnetFacilitatorConfig> for &SolanaMainnetFacilitatorProviderConfigFile {
-    type Error = String;
-    fn try_into(self) -> Result<SolanaMainnetFacilitatorConfig, Self::Error> {
-        let rpc_url = if let Some(ref url) = self.rpc_url {
-            url.parse::<Url>()
-                .map_err(|e| format!("Failed to parse RPC URL {}: {}", url, e))?
-        } else {
-            "https://api.mainnet-beta.solana.com"
-                .parse::<Url>()
-                .expect("Failed to parse default Mainnet RPC URL")
-        };
-
-        let payer_keypair = if let Some(ref path) = self.payer_keypair_path {
-            Keypair::read_from_file(path)
-                .map_err(|e| format!("Failed to read Solana keypair from file: {}", e))?
-        } else {
-            Keypair::new()
-        };
-
-        Ok(SolanaMainnetFacilitatorConfig {
-            rpc_url,
-            payer_keypair,
-        })
-    }
-}
 /// X402 sandbox/test configuration
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct X402SandboxConfig {
@@ -239,10 +99,149 @@ pub struct X402SandboxConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 
-    /// Configuration of the networks supported by this catalog
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub billing_networks: IndexMap<String, BillingNetworkConfigFile>,
+    /// Facilitator configuration for sandbox
+    #[serde(default)]
+    pub facilitator: FacilitatorConfig,
 
-    /// Facilitator config
-    pub facilitator: FacilitatorConfigFile,
+    /// Validator configuration for sandbox
+    #[serde(default)]
+    pub validator: ValidatorConfig,
+}
+
+/// Sandbox facilitator configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SandboxFacilitatorConfig {
+    /// Binding address for the facilitator server
+    #[serde(default)]
+    pub binding_address: String,
+
+    /// Binding port for the facilitator server
+    #[serde(default)]
+    pub binding_port: u16,
+
+    /// Supported networks for sandbox facilitator
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub supported: IndexMap<NetworkIdentifier, SupportedNetworkConfig>,
+}
+
+impl Default for SandboxFacilitatorConfig {
+    fn default() -> Self {
+        Self {
+            binding_address: DEFAULT_BINDING_ADDRESS.to_string(),
+            binding_port: DEFAULT_FACILITATOR_PORT,
+            supported: IndexMap::new(),
+        }
+    }
+}
+
+/// Supported network configuration for sandbox
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupportedNetworkConfig {
+    /// Payment recipient address (optional)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recipient: Option<String>,
+
+    /// Supported currencies for this network
+    pub currencies: Vec<String>,
+
+    /// Fee amount (in smallest unit)
+    #[serde(default)]
+    pub fee: u64,
+
+    /// Optional payer keypair path for this network
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payer_keypair_path: Option<String>,
+
+    /// Optional RPC URL for this network
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rpc_url: Option<String>,
+
+    /// Optional user accounts to fund in sandbox
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub user_accounts: Vec<String>,
+}
+
+/// Validator configuration for sandbox
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidatorConfig {
+    /// Binding address for the validator
+    #[serde(default)]
+    pub binding_address: String,
+
+    /// RPC binding port for the validator
+    #[serde(default)]
+    pub rpc_binding_port: u16,
+
+    /// WebSocket binding port for the validator
+    #[serde(default)]
+    pub ws_binding_port: u16,
+}
+
+impl Default for ValidatorConfig {
+    fn default() -> Self {
+        Self {
+            binding_address: DEFAULT_BINDING_ADDRESS.to_string(),
+            rpc_binding_port: DEFAULT_RPC_PORT,
+            ws_binding_port: DEFAULT_WS_PORT,
+        }
+    }
+}
+
+// Conversion implementations to maintain compatibility with existing code
+
+impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
+    type Error = String;
+    fn try_into(self) -> Result<FacilitatorRuntimeConfig, Self::Error> {
+        let facilitator_config = match &self.facilitator {
+            FacilitatorConfig::Embedded(config) => config,
+            FacilitatorConfig::ServiceUrl { service_url } => {
+                return Err(format!(
+                    "Cannot convert sandbox with remote facilitator URL '{}' to FacilitatorRuntimeConfig",
+                    service_url
+                ));
+            }
+        };
+
+        let mut networks = HashMap::new();
+
+        // Convert supported networks to facilitator network configs
+        for (network_id, network_config) in &facilitator_config.supported {
+            let rpc_url = if let Some(ref url) = network_config.rpc_url {
+                url.parse::<Url>()
+                    .map_err(|e| format!("Failed to parse RPC URL {}: {}", url, e))?
+            } else {
+                format!(
+                    "http://{}:{}",
+                    self.validator.binding_address, self.validator.rpc_binding_port
+                )
+                .parse::<Url>()
+                .map_err(|e| format!("Failed to parse validator RPC URL: {}", e))?
+            };
+
+            let payer_keypair = if let Some(ref path) = network_config.payer_keypair_path {
+                Keypair::read_from_file(path)
+                    .map_err(|e| format!("Failed to read Solana keypair from file: {}", e))?
+            } else {
+                Keypair::new()
+            };
+
+            // For now, all networks are treated as SolanaSurfnet in sandbox
+            networks.insert(
+                network_id.to_string(),
+                FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
+                    rpc_url,
+                    payer_keypair,
+                }),
+            );
+        }
+
+        let url = format!(
+            "http://{}:{}",
+            facilitator_config.binding_address, facilitator_config.binding_port
+        )
+        .parse::<Url>()
+        .map_err(|e| format!("Failed to parse facilitator URL: {}", e))?;
+
+        Ok(FacilitatorRuntimeConfig { url, networks })
+    }
 }

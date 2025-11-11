@@ -5,6 +5,7 @@ use std::{
 
 use console::style;
 use dialoguer::{MultiSelect, Password, Select, theme::ColorfulTheme};
+use indexmap::IndexMap;
 
 use crate::Context;
 
@@ -216,14 +217,56 @@ impl InitCommand {
 
                 let manifest_yaml_path = ctx.manifest_path.join(moneymq_types::MANIFEST_FILE_NAME);
                 if !manifest_yaml_path.exists() {
-                    save_manifest_file(
-                        &manifest_yaml_path,
-                        &provider_name,
-                        &account_info,
-                        sandbox_account_info.as_ref(),
-                        sandbox_key.is_some(),
-                        &catalog_version,
-                    )?;
+                    // Create manifest with catalog configuration
+                    let mut manifest = crate::manifest::Manifest {
+                        catalogs: IndexMap::new(),
+                        payments: IndexMap::new(), // Empty - will trigger footer in save()
+                    };
+
+                    // Build catalog config
+                    let account_name = extract_account_name(&account_info);
+                    let catalog_path = format!("billing/{}", catalog_version);
+
+                    let mut catalog_config = crate::manifest::CatalogConfig {
+                        description: Some(account_name.to_string()),
+                        catalog_path,
+                        source: Some(crate::manifest::CatalogSourceType::Stripe(
+                            crate::manifest::StripeConfig {
+                                api_key: None,
+                                api_version: None,
+                                webhook_endpoint: None,
+                                webhook_secret_env: None,
+                                sandboxes: IndexMap::new(),
+                            },
+                        )),
+                    };
+
+                    // Add sandbox if available
+                    if sandbox_key.is_some() {
+                        let sandbox_description = sandbox_account_info
+                            .as_ref()
+                            .map(|info| format!("Stripe sandbox - {}", extract_account_name(info)))
+                            .unwrap_or_else(|| "Stripe sandbox".to_string());
+
+                        let sandbox = crate::manifest::StripeSandboxConfig {
+                            description: Some(sandbox_description),
+                            api_key: None,
+                            api_version: None,
+                            webhook_endpoint: None,
+                            webhook_secret_env: None,
+                        };
+
+                        if let Some(crate::manifest::CatalogSourceType::Stripe(ref mut stripe_config)) =
+                            catalog_config.source
+                        {
+                            stripe_config.sandboxes.insert("default".to_string(), sandbox);
+                        }
+                    }
+
+                    manifest.catalogs.insert(provider_name.clone(), catalog_config);
+
+                    // Save using the new method (will add payments footer automatically)
+                    manifest.save(&manifest_yaml_path)?;
                 }
 
                 // Create directories (silently, since we already have a manifest)
@@ -1187,86 +1230,13 @@ fn save_env_file(
     Ok(())
 }
 
-fn save_manifest_file(
-    path: &Path,
-    provider_name: &str,
-    account_info: &moneymq_core::catalog::stripe::iac::AccountInfo,
-    sandbox_account_info: Option<&moneymq_core::catalog::stripe::iac::AccountInfo>,
-    has_sandbox: bool,
-    catalog_version: &str,
-) -> Result<(), String> {
-    // Generate description from account info
-    let account_name = account_info
+/// Helper to extract account name from account info
+fn extract_account_name(account_info: &moneymq_core::catalog::stripe::iac::AccountInfo) -> &str {
+    account_info
         .display_name
         .as_deref()
         .or(account_info.business_name.as_deref())
-        .unwrap_or("(no name)");
-
-    let description = format!("{}", account_name);
-    let catalog_path = format!("billing/{}", catalog_version);
-
-    let sandbox_section = if has_sandbox {
-        let sandbox_description = if let Some(sandbox_info) = sandbox_account_info {
-            let sandbox_name = sandbox_info
-                .display_name
-                .as_deref()
-                .or(sandbox_info.business_name.as_deref())
-                .unwrap_or("(no name)");
-            format!("Stripe sandbox - {}", sandbox_name)
-        } else {
-            "Stripe sandbox".to_string()
-        };
-
-        format!(
-            r#"
-    # Sandbox configuration (used when --sandbox is specified)
-    sandboxes:
-      default:
-        description: "{}"
-        # api_key: sk_test_...
-        # api_version: "2023-10-16""#,
-            sandbox_description
-        )
-    } else {
-        r#"
-    # Sandbox configuration (used when --sandbox is specified)
-    # sandboxes:
-    #   default:
-    #     description: "Sandbox environment"
-    #     api_key: sk_test_...
-    #     api_version: "2023-10-16""#
-            .to_string()
-    };
-
-    let content = format!(
-        r#"---
-# MoneyMQ Manifest - API version v1
-catalogs:
-  {}:
-    description: "{}"
-    catalog_path: {}
-    source_type: stripe
-    # API credentials (overridden by environment variables)
-    # api_key: sk_live_...
-    # api_version: "2023-10-16"
-{}
-# Payment networks (X402)
-# Uncomment and configure to enable blockchain payment processing
-# networks:
-#   solana:
-#     description: "Solana payment network"
-#     billing_networks:
-#       usdc:
-#         network: solana_surfnet
-#         currencies:
-#           - USDC
-"#,
-        provider_name, description, catalog_path, sandbox_section
-    );
-
-    fs::write(path, content).map_err(|e| format!("Failed to write manifest: {}", e))?;
-
-    Ok(())
+        .unwrap_or("(no name)")
 }
 
 /// Download an image from a URL and save it to a file

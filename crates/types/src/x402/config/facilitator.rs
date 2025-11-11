@@ -11,7 +11,6 @@ use crate::x402::{Network, SupportedPaymentKindExtra};
 #[derive(Debug)]
 pub struct FacilitatorConfig {
     pub url: Url,
-    pub api_token: Option<String>,
     pub networks: HashMap<String, FacilitatorNetworkConfig>,
 }
 
@@ -74,11 +73,6 @@ impl Display for FacilitatorConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "FacilitatorConfig {{")?;
         writeln!(f, "  url: {}", self.url)?;
-        writeln!(
-            f,
-            "  api_token: {}",
-            self.api_token.as_ref().map(|_| "***").unwrap_or("None")
-        )?;
         writeln!(f, "  networks: {{")?;
         for (name, config) in &self.networks {
             writeln!(f, "    {}: {}", name, config)?;

@@ -1,4 +1,5 @@
 /// Helper functions for YAML serialization with pretty formatting
+use moneymq_types::x402::config::constants::DEFAULT_PAYMENTS_FOOTER;
 use serde::Serialize;
 
 /// Serialize a value to a pretty-formatted YAML string with Kubernetes-style header
@@ -11,6 +12,22 @@ pub fn to_pretty_yaml_with_header<T: Serialize>(
     value: &T,
     resource_type: Option<&str>,
     api_version: Option<&str>,
+) -> Result<String, String> {
+    to_pretty_yaml_with_header_and_footer(value, resource_type, api_version, None)
+}
+
+/// Serialize a value to a pretty-formatted YAML string with header and optional footer
+///
+/// # Arguments
+/// * `value` - The value to serialize
+/// * `resource_type` - Optional resource type (e.g., "Product", "Meter", "Manifest")
+/// * `api_version` - Optional API version (defaults to "v1")
+/// * `footer` - Optional footer text to append (e.g., commented configuration examples)
+pub fn to_pretty_yaml_with_header_and_footer<T: Serialize>(
+    value: &T,
+    resource_type: Option<&str>,
+    api_version: Option<&str>,
+    footer: Option<&str>,
 ) -> Result<String, String> {
     // First serialize with serde_yml
     let yaml_str =
@@ -34,5 +51,18 @@ pub fn to_pretty_yaml_with_header<T: Serialize>(
 
     output.push_str(&formatted);
 
+    // Add footer if provided
+    if let Some(footer_text) = footer {
+        if !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(footer_text);
+    }
+
     Ok(output)
+}
+
+/// Get the default payments section footer for manifests
+pub fn get_default_payments_footer() -> String {
+    format!("\n{}", DEFAULT_PAYMENTS_FOOTER)
 }

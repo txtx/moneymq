@@ -126,7 +126,7 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
     // Build payout account configuration
     let payout_account =
         state
-            .billing_manager
+            .networks_config
             .configs
             .iter()
             .next()
@@ -159,7 +159,7 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
         // Parse the payer pubkey and compute its ATA
         let in_account =
             state
-                .billing_manager
+                .networks_config
                 .configs
                 .iter()
                 .next()
@@ -204,7 +204,7 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
 
     let validator = state.validator_rpc_url.as_ref().and_then(|rpc_url| {
         state
-            .billing_manager
+            .networks_config
             .configs
             .iter()
             .next()

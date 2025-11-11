@@ -10,11 +10,11 @@ use crate::{
 
 /// GET /v1/accounts - List local network accounts
 pub async fn list_accounts(State(state): State<ProviderState>) -> impl IntoResponse {
-    let billing_manager = &state.billing_manager;
+    let networks_config = &state.networks_config;
 
     let mut res = json!({});
-    for (network_name, config) in &billing_manager.configs {
-        let network = billing_manager
+    for (network_name, config) in &networks_config.configs {
+        let network = networks_config
             .get_network_for_name(&network_name)
             .expect("expected network to be configured");
         let address = config.recipient().address();

@@ -19,7 +19,7 @@ use stripe::types::StripePaymentIntent;
 use tower_http::cors::{Any, CorsLayer};
 use url::Url;
 
-use crate::{billing::BillingManager, facilitator::endpoints::middleware::x402_post};
+use crate::{billing::NetworksConfig, facilitator::endpoints::middleware::x402_post};
 
 /// Application state
 #[derive(Clone)]
@@ -28,7 +28,7 @@ pub struct ProviderState {
     pub meters: Arc<Vec<Meter>>,
     pub use_sandbox: bool,
     pub facilitator_url: Url,
-    pub billing_manager: BillingManager,
+    pub networks_config: NetworksConfig,
     pub catalog_path: PathBuf,
     pub catalog_name: Option<String>,
     pub catalog_description: Option<String>,
@@ -53,7 +53,7 @@ impl ProviderState {
         meters: Vec<Meter>,
         use_sandbox: bool,
         facilitator_url: Url,
-        billing_manager: BillingManager,
+        networks_config: NetworksConfig,
         catalog_path: PathBuf,
         catalog_name: Option<String>,
         catalog_description: Option<String>,
@@ -65,7 +65,7 @@ impl ProviderState {
             meters: Arc::new(meters),
             use_sandbox,
             facilitator_url,
-            billing_manager,
+            networks_config,
             catalog_path,
             catalog_name,
             catalog_description,
@@ -90,7 +90,7 @@ pub async fn start_provider(
     facilitator_url: Url,
     port: u16,
     use_sandbox: bool,
-    billing_manager: BillingManager,
+    networks_config: NetworksConfig,
     catalog_path: PathBuf,
     catalog_name: Option<String>,
     catalog_description: Option<String>,
@@ -102,7 +102,7 @@ pub async fn start_provider(
         meters,
         use_sandbox,
         facilitator_url,
-        billing_manager,
+        networks_config,
         catalog_path,
         catalog_name,
         catalog_description,

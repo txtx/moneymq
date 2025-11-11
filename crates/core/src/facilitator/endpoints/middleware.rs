@@ -424,18 +424,18 @@ pub async fn payment_middleware(
     };
 
     let network = Network::Solana; // TODO: Determine network based on request / product
-    let Some(billing_config) = state.billing_manager.get_config_for_network(&network) else {
+    let Some(network_config) = state.networks_config.get_config_for_network(&network) else {
         panic!("No billing config for network {:?}", network); // TODO: Handle this error properly
     };
 
     // TODO: probably need some sort of filtering here based on product being accessed
-    let assets = billing_config
+    let assets = network_config
         .currencies()
         .iter()
         .map(|currency| (currency.address(), currency.decimals()))
         .collect::<Vec<_>>();
 
-    let recipient = billing_config.recipient();
+    let recipient = network_config.recipient();
 
     // TODO: allow pay to to be overridden by product
     // TODO: consider allowing the assets allowed to be overridden by product
@@ -507,7 +507,7 @@ pub async fn payment_middleware(
 
             // Find the customer label by matching the customer pubkey with user accounts
             let customer_label = customer_pubkey.and_then(|customer| {
-                billing_config
+                network_config
                     .user_accounts()
                     .iter()
                     .find(|account| {
@@ -521,7 +521,7 @@ pub async fn payment_middleware(
             });
 
             // Extract currency from asset
-            let currency = billing_config
+            let currency = network_config
                 .currencies()
                 .iter()
                 .find(|c| c.address() == selected_payment_requirement.asset)

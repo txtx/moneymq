@@ -6,7 +6,7 @@ use tracing::info;
 use url::Url;
 
 use crate::{
-    billing::{SolanaSurfnetBillingConfig, currency::SolanaCurrency},
+    billing::{SolanaSurfnetConfig, currency::SolanaCurrency},
     validator::surfnet_utils::{SetTokenAccountRequest, surfnet_set_token_account},
 };
 
@@ -26,9 +26,9 @@ fn check_if_validator_running(rpc_client: &RpcClient) -> bool {
     }
 }
 
-pub fn start_local_solana_validator(
+pub fn start_embedded_validator(
     config: SolanaValidatorConfig,
-    billing_config: Option<&SolanaSurfnetBillingConfig>,
+    network_config: Option<&SolanaSurfnetConfig>,
 ) -> Result<Option<Child>, Box<dyn std::error::Error>> {
     let rpc_url = config.rpc_api_url.clone();
 
@@ -96,7 +96,7 @@ pub fn start_local_solana_validator(
 
     info!("Local Solana validator started at {}", config.rpc_api_url);
 
-    for currency in billing_config
+    for currency in network_config
         .map(|c| c.currencies.iter())
         .unwrap_or_default()
     {

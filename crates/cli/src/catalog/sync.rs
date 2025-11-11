@@ -400,7 +400,10 @@ fn display_diff(local: &Product, remote: &Product) {
                     .unit_amount
                     .map(|a| format!("${}.{:02}", a / 100, a % 100))
                     .unwrap_or_else(|| "custom".to_string());
-                let interval = match (&remote_price.recurring_interval, remote_price.recurring_interval_count) {
+                let interval = match (
+                    &remote_price.recurring_interval,
+                    remote_price.recurring_interval_count,
+                ) {
                     (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i),
                     (Some(i), _) => format!("per {}", i),
                     _ => "one-time".to_string(),
@@ -430,7 +433,10 @@ fn display_diff(local: &Product, remote: &Product) {
                     .unit_amount
                     .map(|a| format!("${}.{:02}", a / 100, a % 100))
                     .unwrap_or_else(|| "custom".to_string());
-                let interval = match (&local_price.recurring_interval, local_price.recurring_interval_count) {
+                let interval = match (
+                    &local_price.recurring_interval,
+                    local_price.recurring_interval_count,
+                ) {
                     (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i),
                     (Some(i), _) => format!("per {}", i),
                     _ => "one-time".to_string(),
@@ -1299,9 +1305,10 @@ impl SyncCommand {
                         if let Some(sandbox_id) = local_price.sandboxes.get("default") {
                             // Price has sandbox ID - check if amount changed
                             // Find the corresponding remote price by sandbox ID
-                            let remote_price = remote.prices.iter().find(|rp| {
-                                rp.sandboxes.get("default") == Some(sandbox_id)
-                            });
+                            let remote_price = remote
+                                .prices
+                                .iter()
+                                .find(|rp| rp.sandboxes.get("default") == Some(sandbox_id));
 
                             if let Some(remote_price) = remote_price {
                                 // Compare amounts
@@ -1326,11 +1333,16 @@ impl SyncCommand {
                 );
 
                 if total_new_prices > 0 {
-                    let mut price_msg = format!("  {} {} prices", style("Prices:").dim(), total_new_prices);
+                    let mut price_msg =
+                        format!("  {} {} prices", style("Prices:").dim(), total_new_prices);
                     if prices_to_create > 0 && prices_with_amount_changes > 0 {
-                        price_msg.push_str(&format!(" ({} new, {} amount changes)", prices_to_create, prices_with_amount_changes));
+                        price_msg.push_str(&format!(
+                            " ({} new, {} amount changes)",
+                            prices_to_create, prices_with_amount_changes
+                        ));
                     } else if prices_with_amount_changes > 0 {
-                        price_msg.push_str(&format!(" ({} amount changes)", prices_with_amount_changes));
+                        price_msg
+                            .push_str(&format!(" ({} amount changes)", prices_with_amount_changes));
                     } else {
                         price_msg.push_str(&format!(" ({} new)", prices_to_create));
                     }
@@ -1404,22 +1416,23 @@ impl SyncCommand {
                         for (local, remote) in &products_with_sandbox {
                             if let Some(sandbox_product_id) = local.get_sandbox_id("default") {
                                 for price in &local.prices {
-                                    let should_create = if let Some(sandbox_id) = price.sandboxes.get("default") {
-                                        // Has sandbox ID - check if amount changed
-                                        let remote_price = remote.prices.iter().find(|rp| {
-                                            rp.sandboxes.get("default") == Some(sandbox_id)
-                                        });
+                                    let should_create =
+                                        if let Some(sandbox_id) = price.sandboxes.get("default") {
+                                            // Has sandbox ID - check if amount changed
+                                            let remote_price = remote.prices.iter().find(|rp| {
+                                                rp.sandboxes.get("default") == Some(sandbox_id)
+                                            });
 
-                                        if let Some(remote_price) = remote_price {
-                                            // Amount changed?
-                                            price.unit_amount != remote_price.unit_amount
+                                            if let Some(remote_price) = remote_price {
+                                                // Amount changed?
+                                                price.unit_amount != remote_price.unit_amount
+                                            } else {
+                                                false
+                                            }
                                         } else {
-                                            false
-                                        }
-                                    } else {
-                                        // No sandbox ID - brand new price
-                                        true
-                                    };
+                                            // No sandbox ID - brand new price
+                                            true
+                                        };
 
                                     if should_create {
                                         let amount = price
@@ -1508,9 +1521,10 @@ impl SyncCommand {
                 for local_price in &local.prices {
                     if let Some(deployed_id) = &local_price.deployed_id {
                         // Price has deployed ID - check if amount changed
-                        let remote_price = remote.prices.iter().find(|rp| {
-                            rp.deployed_id.as_ref() == Some(deployed_id)
-                        });
+                        let remote_price = remote
+                            .prices
+                            .iter()
+                            .find(|rp| rp.deployed_id.as_ref() == Some(deployed_id));
 
                         if let Some(remote_price) = remote_price {
                             // Compare amounts
@@ -1535,11 +1549,16 @@ impl SyncCommand {
             );
 
             if total_new_prices > 0 {
-                let mut price_msg = format!("  {} {} prices", style("Prices:").dim(), total_new_prices);
+                let mut price_msg =
+                    format!("  {} {} prices", style("Prices:").dim(), total_new_prices);
                 if prices_to_create > 0 && prices_with_amount_changes > 0 {
-                    price_msg.push_str(&format!(" ({} new, {} amount changes)", prices_to_create, prices_with_amount_changes));
+                    price_msg.push_str(&format!(
+                        " ({} new, {} amount changes)",
+                        prices_to_create, prices_with_amount_changes
+                    ));
                 } else if prices_with_amount_changes > 0 {
-                    price_msg.push_str(&format!(" ({} amount changes)", prices_with_amount_changes));
+                    price_msg
+                        .push_str(&format!(" ({} amount changes)", prices_with_amount_changes));
                 } else {
                     price_msg.push_str(&format!(" ({} new)", prices_to_create));
                 }
@@ -1625,9 +1644,10 @@ impl SyncCommand {
                             for price in &local.prices {
                                 let should_create = if let Some(deployed_id) = &price.deployed_id {
                                     // Has deployed ID - check if amount changed
-                                    let remote_price = remote.prices.iter().find(|rp| {
-                                        rp.deployed_id.as_ref() == Some(deployed_id)
-                                    });
+                                    let remote_price = remote
+                                        .prices
+                                        .iter()
+                                        .find(|rp| rp.deployed_id.as_ref() == Some(deployed_id));
 
                                     if let Some(remote_price) = remote_price {
                                         // Amount changed?

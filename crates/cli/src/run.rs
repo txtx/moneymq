@@ -3,7 +3,7 @@ use std::{fs, path::PathBuf};
 use console::style;
 use indexmap::IndexMap;
 use moneymq_core::{
-    billing::{BillingManager, BillingManagerError},
+    billing::{NetworksConfig, NetworksConfigError},
     validator::SolanaValidatorConfig,
 };
 // TODO: Re-enable when refactoring X402 facilitator
@@ -13,14 +13,24 @@ use moneymq_types::{
     Product,
     x402::{
         MoneyMqNetwork, Network,
-        config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig},
+        config::{
+            constants::{DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT},
+            facilitator::{
+                FacilitatorConfig, FacilitatorNetworkConfig, SolanaSurfnetFacilitatorConfig,
+            },
+        },
     },
 };
-use solana_keypair::Signer;
+use solana_keypair::{Keypair, Signer};
+use url::Url;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
-use crate::Context;
-use crate::manifest::x402::X402Config;
+use crate::{
+    Context,
+    manifest::x402::{
+        FacilitatorConfig as ManifestFacilitatorConfig, NetworkIdentifier, PaymentConfig,
+    },
+};
 
 #[derive(Debug, Clone, PartialEq, clap::Args)]
 pub struct RunCommand {
@@ -35,20 +45,16 @@ pub struct RunCommand {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RunCommandError {
-    #[error("Catalog directory not found: {0}\nRun 'moneymq init' or 'moneymq catalog sync' first")]
-    CatalogDirNotFound(String),
     #[error("Failed to read {} directory: {}", .0.display(), 1)]
     DirectoryReadError(PathBuf, std::io::Error),
     #[error("Failed to read directory entry: {0}")]
     DirectoryEntryReadError(std::io::Error),
     #[error("Failed to read file {}: {}", .0.display(), 1)]
     ReadFileError(PathBuf, std::io::Error),
-    #[error("No products found in catalog directory")]
-    NoProductsFound,
     #[error("Failed to start local facilitator networks: {0}")]
     StartFacilitatorNetworks(String),
     #[error("Failed configure billing settings: {0}")]
-    BillingManagerInitializationError(BillingManagerError),
+    NetworksConfigInitializationError(NetworksConfigError),
     #[error("Failed to fund local accounts: {0}")]
     FundLocalAccountsError(String),
     #[error("Failed to start provider server: {0}")]
@@ -68,59 +74,61 @@ impl RunCommand {
 
         // Load products from {catalog_path}/products directory
         let catalog_dir = ctx.manifest_path.join(catalog_base_path).join("products");
-        if !catalog_dir.exists() {
-            return Err(RunCommandError::CatalogDirNotFound(
-                catalog_dir.display().to_string(),
-            ));
-        }
 
         print!("{} ", style("Loading products").dim());
 
         let mut products = Vec::new();
-        let entries = fs::read_dir(&catalog_dir)
-            .map_err(|e| RunCommandError::DirectoryReadError(catalog_dir, e))?;
 
-        for entry in entries {
-            let entry = entry.map_err(RunCommandError::DirectoryEntryReadError)?;
-            let path = entry.path();
+        if !catalog_dir.exists() {
+            println!("{}", style("⚠ Products directory not found").yellow());
+        } else {
+            let entries = fs::read_dir(&catalog_dir)
+                .map_err(|e| RunCommandError::DirectoryReadError(catalog_dir, e))?;
 
-            if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-                let content = fs::read_to_string(&path)
-                    .map_err(|e| RunCommandError::ReadFileError(path.clone(), e))?;
+            for entry in entries {
+                let entry = entry.map_err(RunCommandError::DirectoryEntryReadError)?;
+                let path = entry.path();
 
-                match serde_yml::from_str::<Product>(&content) {
-                    Ok(product) => {
-                        products.push(product);
-                    }
-                    Err(e) => {
-                        eprintln!(
-                            "\n{} Failed to parse {}: {}",
-                            style("✗").red(),
-                            path.display(),
-                            e
-                        );
-                        eprintln!("  {}", style("Skipping this file").dim());
+                if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                    let content = fs::read_to_string(&path)
+                        .map_err(|e| RunCommandError::ReadFileError(path.clone(), e))?;
+
+                    match serde_yml::from_str::<Product>(&content) {
+                        Ok(product) => {
+                            products.push(product);
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "\n{} Failed to parse {}: {}",
+                                style("✗").red(),
+                                path.display(),
+                                e
+                            );
+                            eprintln!("  {}", style("Skipping this file").dim());
+                        }
                     }
                 }
             }
         }
 
         if products.is_empty() {
-            return Err(RunCommandError::NoProductsFound);
+            println!("{}", style("⚠ No products found").yellow());
+        } else {
+            println!(
+                "{}",
+                style(format!("✓ {} products", products.len())).green()
+            );
         }
-
-        println!(
-            "{}",
-            style(format!("✓ {} products", products.len())).green()
-        );
 
         // Load meters from {catalog_path}/meters directory
         let meters_dir = ctx.manifest_path.join(catalog_base_path).join("meters");
         let mut meters = Vec::new();
 
-        if meters_dir.exists() {
-            print!("{} ", style("Loading meters").dim());
+        print!("{} ", style("Loading meters").dim());
 
+        if !meters_dir.exists() {
+            println!("{}", style("⚠ Meters directory not found").yellow());
+        } else {
             let meter_entries = fs::read_dir(&meters_dir)
                 .map_err(|e| RunCommandError::DirectoryReadError(meters_dir, e))?;
 
@@ -149,7 +157,11 @@ impl RunCommand {
                 }
             }
 
-            println!("{}", style(format!("✓ {} meters", meters.len())).green());
+            if meters.is_empty() {
+                println!("{}", style("⚠ No meters found").yellow());
+            } else {
+                println!("{}", style(format!("✓ {} meters", meters.len())).green());
+            }
         }
 
         println!();
@@ -170,29 +182,55 @@ impl RunCommand {
 
         let mut billing_networks = ctx
             .manifest
-            .networks
+            .payments
             .iter()
-            .filter_map(|(_name, x402_config)| {
-                if self.sandbox {
-                    x402_config
-                        .sandboxes
-                        .get("default")
-                        .map(|config| config.billing_networks.clone())
-                } else {
-                    Some(x402_config.billing_networks.clone())
+            .flat_map(|(_name, payment_config)| match payment_config {
+                PaymentConfig::X402(x402_config) => {
+                    if self.sandbox {
+                        // Get networks from sandbox config
+                        x402_config
+                            .sandboxes
+                            .get("default")
+                            .and_then(|sandbox| match &sandbox.facilitator {
+                                ManifestFacilitatorConfig::Embedded(config) => Some(
+                                    config
+                                        .supported
+                                        .iter()
+                                        .map(|(network_id, network)| {
+                                            (
+                                                network_id.to_string(),
+                                                (
+                                                    MoneyMqNetwork::SolanaSurfnet,
+                                                    network.recipient.clone(),
+                                                    network.currencies.clone(),
+                                                    network.user_accounts.clone(),
+                                                ),
+                                            )
+                                        })
+                                        .collect::<Vec<_>>(),
+                                ),
+                                ManifestFacilitatorConfig::ServiceUrl { .. } => None,
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        // Get networks from accepted config
+                        x402_config
+                            .accepted
+                            .iter()
+                            .map(|(network_id, network)| {
+                                (
+                                    network_id.to_string(),
+                                    (
+                                        MoneyMqNetwork::SolanaSurfnet,
+                                        network.recipient.clone(),
+                                        network.currencies.clone(),
+                                        vec![],
+                                    ),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    }
                 }
-            })
-            .flatten()
-            .map(|(name, config)| {
-                (
-                    name.clone(),
-                    (
-                        config.network().clone(),
-                        config.payment_recipient().clone(),
-                        config.currencies().clone(),
-                        config.user_accounts().clone(),
-                    ),
-                )
             })
             .collect::<IndexMap<_, _>>();
 
@@ -209,13 +247,13 @@ impl RunCommand {
             );
         }
 
-        let billing_manager = BillingManager::initialize(billing_networks, self.sandbox)
+        let networks_config = NetworksConfig::initialize(billing_networks, self.sandbox)
             .await
-            .map_err(RunCommandError::BillingManagerInitializationError)?;
+            .map_err(RunCommandError::NetworksConfigInitializationError)?;
 
         // Build facilitator config once for sandbox mode
         let (facilitator_pubkey, handles) = if self.sandbox {
-            let config = build_facilitator_config(&ctx.manifest.networks)
+            let config = build_facilitator_config(&ctx.manifest.payments)
                 .await
                 .map_err(RunCommandError::StartFacilitatorNetworks)?;
             let pubkey = config.networks.values().next().and_then(|net| {
@@ -234,7 +272,7 @@ impl RunCommand {
             println!(" {} {}settle", post, config.url);
 
             // Only start local facilitator server in sandbox mode
-            let handles = start_facilitator_networks(config, &billing_manager)
+            let handles = start_facilitator_networks(config, &networks_config)
                 .await
                 .map_err(RunCommandError::StartFacilitatorNetworks)?;
             (pubkey, handles)
@@ -263,7 +301,7 @@ impl RunCommand {
             .iter()
             .map(|(network, (_handle, url))| (network.clone(), url.clone()))
             .collect::<IndexMap<_, _>>();
-        billing_manager
+        networks_config
             .fund_accounts(&local_validator_rpc_urls)
             .await
             .map_err(RunCommandError::FundLocalAccountsError)?;
@@ -297,7 +335,7 @@ impl RunCommand {
             facilitator_url,
             self.port,
             self.sandbox,
-            billing_manager,
+            networks_config,
             catalog_path,
             catalog_name,
             catalog_description,
@@ -312,30 +350,30 @@ impl RunCommand {
 }
 
 async fn build_facilitator_config(
-    networks: &IndexMap<String, X402Config>,
+    payments: &IndexMap<String, PaymentConfig>,
 ) -> Result<FacilitatorConfig, String> {
-    let sandbox_x402_config = networks
+    let sandbox_x402_config = payments
         .iter()
-        .filter_map(|(name, x402_config)| {
-            // Check if there's a "default" sandbox configuration with local facilitator
-            x402_config
-                .sandboxes
-                .get("default")
-                .map(|c| (name.clone(), c.clone()))
+        .filter_map(|(name, payment_config)| {
+            match payment_config {
+                PaymentConfig::X402(x402_config) => {
+                    // Check if there's a "default" sandbox configuration with local facilitator
+                    x402_config
+                        .sandboxes
+                        .get("default")
+                        .map(|c| (name.clone(), c.clone()))
+                }
+            }
         })
         .collect::<Vec<_>>();
 
     if sandbox_x402_config.is_empty() {
         // Create default in-memory configuration
-        use moneymq_types::x402::config::facilitator::SolanaSurfnetFacilitatorConfig;
-        use solana_keypair::Keypair;
-        use url::Url;
-
         let mut networks = std::collections::HashMap::new();
         networks.insert(
-            "solana".to_string(),
+            NetworkIdentifier::Solana.to_string(),
             FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
-                rpc_url: "http://127.0.0.1:8899"
+                rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
                     .parse::<Url>()
                     .expect("Failed to parse default RPC URL"),
                 payer_keypair: Keypair::new(),
@@ -343,11 +381,10 @@ async fn build_facilitator_config(
         );
 
         return Ok(FacilitatorConfig {
-            url: crate::manifest::x402::DEFAULT_LOCAL_FACILITATOR_URL
+            url: format!("http://localhost:{}", DEFAULT_FACILITATOR_PORT)
                 .parse::<Url>()
                 .expect("Failed to parse default facilitator URL"),
             networks,
-            api_token: None,
         });
     }
 
@@ -359,8 +396,8 @@ async fn build_facilitator_config(
         );
     }
 
-    let facilitator_config_file = &sandbox_x402_config[0].1.facilitator;
-    let facilitator_config: FacilitatorConfig = facilitator_config_file.try_into()?;
+    let sandbox_config = &sandbox_x402_config[0].1;
+    let facilitator_config: FacilitatorConfig = sandbox_config.try_into()?;
     Ok(facilitator_config)
 }
 
@@ -370,13 +407,13 @@ type ValidatorData = IndexMap<Network, (std::process::Child, url::Url)>;
 
 async fn start_facilitator_networks(
     facilitator_config: FacilitatorConfig,
-    billing_manager: &BillingManager,
+    networks_config: &NetworksConfig,
 ) -> Result<Option<(FacilitatorHandle, ValidatorData, url::Url)>, String> {
     let mut local_validator_handles = IndexMap::new();
     for (network_name, network_config) in facilitator_config.networks.iter() {
         match network_config {
             FacilitatorNetworkConfig::SolanaSurfnet(surfnet_config) => {
-                let billing_config = billing_manager
+                let network_config = networks_config
                     .configs
                     .get(network_name)
                     .and_then(|c| c.surfnet_config());
@@ -386,9 +423,9 @@ async fn start_facilitator_networks(
                     facilitator_pubkey: surfnet_config.payer_keypair.pubkey(),
                 };
 
-                let Some(handle) = moneymq_core::validator::start_local_solana_validator(
+                let Some(handle) = moneymq_core::validator::start_embedded_validator(
                     validator_config,
-                    billing_config,
+                    network_config,
                 )
                 .map_err(|e| {
                     format!(

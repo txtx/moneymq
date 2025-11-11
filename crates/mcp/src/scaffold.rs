@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use moneymq_types::x402::config::constants::DEFAULT_PAYMENTS_FOOTER;
+
 /// Scaffold a MoneyMQ project with directory structure and manifest file
 ///
 /// Creates:
@@ -36,14 +38,8 @@ pub fn scaffold_moneymq_project(
             .unwrap_or_else(|| "project".to_string());
 
         let manifest_content = format!(
-            r#"---
-# MoneyMQ Manifest - API version v1
-catalogs:
-  {}:
-    description: "{}'s catalog"
-    catalog_path: {}
-"#,
-            catalog_version, dir_name, catalog_path
+            "---\n# MoneyMQ Manifest - API version v1\ncatalogs:\n  {}:\n    description: \"{}'s catalog\"\n    catalog_path: {}\n\n{}",
+            catalog_version, dir_name, catalog_path, DEFAULT_PAYMENTS_FOOTER
         );
 
         fs::write(&manifest_path, manifest_content)
@@ -65,4 +61,45 @@ catalogs:
         .map_err(|e| format!("Failed to create assets directory: {}", e))?;
 
     Ok((products_path, meters_path, assets_path))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_scaffold_includes_payments_footer() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        let project_path = temp_dir.path();
+
+        // Scaffold a new project
+        scaffold_moneymq_project(project_path, "stripe", "v1").expect("Failed to scaffold project");
+
+        // Read the generated manifest
+        let manifest_path = project_path.join("moneymq.yaml");
+        assert!(manifest_path.exists(), "Manifest file should exist");
+
+        let content = fs::read_to_string(&manifest_path).expect("Failed to read manifest");
+
+        // Verify header
+        assert!(content.starts_with("---\n"));
+        assert!(content.contains("# MoneyMQ Manifest - API version v1"));
+
+        // Verify catalog section
+        assert!(content.contains("catalogs:"));
+        assert!(content.contains("v1:"));
+
+        // Verify payments footer is present
+        assert!(content.contains("# Payment configuration for accepting crypto payments"));
+        assert!(content.contains("# payments:"));
+        assert!(content.contains("#   stablecoins:"));
+        assert!(content.contains("#     protocol: x402"));
+        assert!(content.contains("# Learn more: https://docs.moneymq.co/payments"));
+        assert!(content.contains("service_url: https://facilitator.moneymq.co"));
+        assert!(content.contains("binding_address: 0.0.0.0"));
+        assert!(content.contains("rpc_binding_port: 8899"));
+
+        println!("Generated manifest:\n{}", content);
+    }
 }
