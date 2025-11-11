@@ -6,6 +6,7 @@ use std::{
 use console::style;
 use dialoguer::{MultiSelect, Password, Select, theme::ColorfulTheme};
 use indexmap::IndexMap;
+use moneymq_types::x402::config::constants::DEFAULT_SANDBOX;
 
 use crate::Context;
 
@@ -259,7 +260,7 @@ impl InitCommand {
                         if let Some(crate::manifest::CatalogSourceType::Stripe(ref mut stripe_config)) =
                             catalog_config.source
                         {
-                            stripe_config.sandboxes.insert("default".to_string(), sandbox);
+                            stripe_config.sandboxes.insert(DEFAULT_SANDBOX.to_string(), sandbox);
                         }
                     }
 
@@ -352,12 +353,12 @@ impl InitCommand {
                                 {
                                     // The sandbox product should have its ID in sandboxes["default"]
                                     if let Some(sandbox_id) =
-                                        sandbox_product.sandboxes.get("default")
+                                        sandbox_product.sandboxes.get(DEFAULT_SANDBOX)
                                     {
                                         // Add the sandbox ID to the production product
                                         prod_product
                                             .sandboxes
-                                            .insert("default".to_string(), sandbox_id.clone());
+                                            .insert(DEFAULT_SANDBOX.to_string(), sandbox_id.clone());
                                         matched_sandbox_ids.insert(sandbox_id.clone());
                                         matched_count += 1;
 
@@ -369,10 +370,10 @@ impl InitCommand {
                                                 .find(|sp| sp.nickname == prod_price.nickname)
                                             {
                                                 if let Some(sandbox_price_id) =
-                                                    sandbox_price.sandboxes.get("default")
+                                                    sandbox_price.sandboxes.get(DEFAULT_SANDBOX)
                                                 {
                                                     prod_price.sandboxes.insert(
-                                                        "default".to_string(),
+                                                        DEFAULT_SANDBOX.to_string(),
                                                         sandbox_price_id.clone(),
                                                     );
                                                 }
@@ -386,7 +387,7 @@ impl InitCommand {
                             let mut sandbox_only_count = 0;
                             for sandbox_product in &sandbox_catalog.products {
                                 // Check if this sandbox product was matched to a production product
-                                if let Some(sandbox_id) = sandbox_product.sandboxes.get("default") {
+                                if let Some(sandbox_id) = sandbox_product.sandboxes.get(DEFAULT_SANDBOX) {
                                     if !matched_sandbox_ids.contains(sandbox_id) {
                                         // This is a sandbox-only product - add it to the catalog
                                         let mut new_product = sandbox_product.clone();
@@ -468,11 +469,11 @@ impl InitCommand {
                                     .iter()
                                     .find(|sm| sm.event_name == prod_meter.event_name)
                                 {
-                                    if let Some(sandbox_id) = sandbox_meter.sandboxes.get("default")
+                                    if let Some(sandbox_id) = sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
                                     {
                                         prod_meter
                                             .sandboxes
-                                            .insert("default".to_string(), sandbox_id.clone());
+                                            .insert(DEFAULT_SANDBOX.to_string(), sandbox_id.clone());
                                         matched_sandbox_ids.insert(sandbox_id.clone());
                                         _matched_count += 1;
                                     }
@@ -482,7 +483,7 @@ impl InitCommand {
                             // Add sandbox-only meters
                             let mut _sandbox_only_count = 0;
                             for sandbox_meter in &sandbox_meter_collection.meters {
-                                if let Some(sandbox_id) = sandbox_meter.sandboxes.get("default") {
+                                if let Some(sandbox_id) = sandbox_meter.sandboxes.get(DEFAULT_SANDBOX) {
                                     if !matched_sandbox_ids.contains(sandbox_id) {
                                         let mut new_meter = sandbox_meter.clone();
                                         new_meter.deployed_id = None;

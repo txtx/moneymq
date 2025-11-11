@@ -1,6 +1,7 @@
 use std::{fs, path::Path};
 
 use indexmap::IndexMap;
+use moneymq_types::x402::config::constants::DEFAULT_SANDBOX;
 use serde::{Deserialize, Serialize};
 
 use crate::manifest::x402::PaymentConfig;
@@ -205,6 +206,13 @@ pub struct StripeConfig {
     pub sandboxes: IndexMap<String, StripeSandboxConfig>,
 }
 
+impl StripeConfig {
+    /// Get the default sandbox configuration
+    pub fn get_default_sandbox(&self) -> Option<&StripeSandboxConfig> {
+        self.sandboxes.get(DEFAULT_SANDBOX)
+    }
+}
+
 fn default_catalog_path() -> String {
     "billing/v1".to_string()
 }
@@ -364,7 +372,7 @@ mod tests {
 
         // Verify sandbox
         assert_eq!(x402.sandboxes.len(), 1);
-        let sandbox = x402.sandboxes.get("default").expect("Default sandbox not found");
+        let sandbox = x402.get_default_sandbox().expect("Default sandbox not found");
         assert_eq!(
             sandbox.description,
             Some("Local development sandbox".to_string())

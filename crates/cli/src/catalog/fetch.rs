@@ -69,7 +69,7 @@ impl FetchCommand {
         // Get API key based on sandbox mode
         let (api_key, _env_var_name) = if ctx.use_sandbox {
             // Look for the "default" sandbox
-            if let Some(sandbox_config) = stripe_config.sandboxes.get("default") {
+            if let Some(sandbox_config) = stripe_config.get_default_sandbox() {
                 eprintln!(
                     "ℹ️  Sandbox mode: using 'default' sandbox configuration for provider '{}'",
                     catalog_name

@@ -10,6 +10,9 @@ pub const DEFAULT_RPC_PORT: u16 = 8899;
 /// Default WebSocket port for the validator
 pub const DEFAULT_WS_PORT: u16 = 8900;
 
+/// Default sandbox name used throughout the system
+pub const DEFAULT_SANDBOX: &str = "default";
+
 /// Header comment for payments configuration section in manifest files
 pub const PAYMENTS_CONFIG_HEADER: &str = "\
 # Payment configuration for accepting crypto payments via x402 protocol

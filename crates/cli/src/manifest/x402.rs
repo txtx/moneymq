@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use indexmap::IndexMap;
 use moneymq_types::x402::config::{
     constants::{
-        DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT, DEFAULT_WS_PORT,
+        DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT, DEFAULT_SANDBOX,
+        DEFAULT_WS_PORT,
     },
     facilitator::{
         FacilitatorConfig as FacilitatorRuntimeConfig, FacilitatorNetworkConfig,
@@ -64,6 +65,13 @@ pub struct X402PaymentConfig {
     /// When --sandbox flag is used, the "default" sandbox will be used
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub sandboxes: IndexMap<String, X402SandboxConfig>,
+}
+
+impl X402PaymentConfig {
+    /// Get the default sandbox configuration
+    pub fn get_default_sandbox(&self) -> Option<&X402SandboxConfig> {
+        self.sandboxes.get(DEFAULT_SANDBOX)
+    }
 }
 
 /// Accepted network configuration for production
