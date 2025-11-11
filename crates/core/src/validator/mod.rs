@@ -1,9 +1,9 @@
-use std::process::{Child, Stdio};
-
+use moneymq_types::x402::config::facilitator::FacilitatorRpcConfig;
 use solana_client::rpc_client::RpcClient;
 use solana_keypair::Pubkey;
-use tracing::info;
-use url::Url;
+use surfpool_core::surfnet::svm::SurfnetSvm;
+use surfpool_types::{RpcConfig, SimnetCommand, SimnetConfig, SimnetEvent, SurfpoolConfig};
+use tracing::{error, info};
 
 use crate::{
     billing::{SolanaSurfnetConfig, currency::SolanaCurrency},
@@ -14,7 +14,7 @@ pub mod surfnet_utils;
 
 pub struct SolanaValidatorConfig {
     /// RPC API URL for the local Solana validator
-    pub rpc_api_url: Url,
+    pub rpc_config: FacilitatorRpcConfig,
     /// Public key of the facilitator account used for funding and transactions
     pub facilitator_pubkey: Pubkey,
 }
@@ -26,76 +26,103 @@ fn check_if_validator_running(rpc_client: &RpcClient) -> bool {
     }
 }
 
-pub fn start_embedded_validator(
+#[derive(Debug, thiserror::Error)]
+pub enum SurfpoolError {
+    #[error("Invalid network configuration: {0}")]
+    InvalidNetworkConfig(String),
+    #[error("Surfnet startup failed: {0}")]
+    FailedStartup(String),
+    #[error("Failed to spawn Surfnet thread: {0}")]
+    SpawnSurfnetError(#[from] std::io::Error),
+}
+
+pub fn start_surfpool(
     config: SolanaValidatorConfig,
     network_config: Option<&SolanaSurfnetConfig>,
-) -> Result<Option<Child>, Box<dyn std::error::Error>> {
-    let rpc_url = config.rpc_api_url.clone();
+) -> Result<Option<crossbeam::channel::Sender<SimnetCommand>>, SurfpoolError> {
+    let host = config
+        .rpc_config
+        .bind_host
+        .or_else(|| config.rpc_config.rpc_url.host_str().map(|s| s.to_string()))
+        .ok_or(SurfpoolError::InvalidNetworkConfig(
+            "invalid rpc url host".into(),
+        ))?;
+    let rpc_port = config
+        .rpc_config
+        .rpc_port
+        .or_else(|| config.rpc_config.rpc_url.port())
+        .ok_or(SurfpoolError::InvalidNetworkConfig(
+            "invalid rpc url port".into(),
+        ))?;
+    let ws_port = config.rpc_config.ws_port.ok_or_else(|| {
+        SurfpoolError::InvalidNetworkConfig("missing ws port in rpc config".into())
+    })?;
 
-    let rpc_client = RpcClient::new(rpc_url.as_str());
+    let rpc_client = RpcClient::new(config.rpc_config.rpc_url.as_str());
 
-    // Check if validator is already running at the rpc url
     if check_if_validator_running(&rpc_client) {
         info!(
             "Local Solana validator already running at {}",
-            config.rpc_api_url
+            config.rpc_config.rpc_url
         );
         return Ok(None);
     }
 
-    let host = rpc_url
-        .host_str()
-        .ok_or_else(|| format!("Invalid RPC URL, missing host: {}", config.rpc_api_url))?;
-    let port = rpc_url
-        .port()
-        .ok_or_else(|| format!("Invalid RPC URL, missing port: {}", config.rpc_api_url))?;
+    let (surfnet_svm, simnet_events_rx, geyser_events_rx) = SurfnetSvm::new();
+    let (simnet_commands_tx, simnet_commands_rx) = crossbeam::channel::unbounded();
+    let (subgraph_commands_tx, _) = crossbeam::channel::unbounded();
+    let _ = surfnet_svm.simnet_events_tx.clone();
 
-    let test_validator_stdout = Stdio::null();
-    let test_validator_stderr = Stdio::null();
+    let surfpool_config = SurfpoolConfig {
+        simnets: vec![SimnetConfig {
+            airdrop_addresses: vec![config.facilitator_pubkey],
+            airdrop_token_amount: 1_000_000_000,
+            offline_mode: false,
+            ..Default::default()
+        }],
+        rpc: RpcConfig {
+            bind_host: host,
+            bind_port: rpc_port,
+            ws_port,
+        },
+        ..Default::default()
+    };
 
-    let flags = vec![
-        "--no-tui".to_string(),
-        "--port".to_string(),
-        port.to_string(),
-        "--host".to_string(),
-        host.to_string(),
-        "--airdrop".to_string(),
-        config.facilitator_pubkey.to_string(),
-        "--airdrop-amount".to_string(),
-        "1000000000".to_string(),
-        "--log-level".to_string(),
-        "debug".to_string(),
-    ];
+    let simnet_commands_tx_copy = simnet_commands_tx.clone();
+    let svm_locker = surfpool_core::surfnet::locker::SurfnetSvmLocker::new(surfnet_svm);
+    let svm_locker_clone = svm_locker.clone();
 
-    let mut validator_handle = std::process::Command::new("surfpool")
-        .arg("start")
-        .args(flags)
-        .stdout(test_validator_stdout)
-        .stderr(test_validator_stderr)
-        .spawn()
-        .map_err(|e| format!("Failed to spawn `surfpool`: {e}"))?;
-
-    let ms_wait = 5000;
-    let mut count = 0;
-    while count < ms_wait {
-        if check_if_validator_running(&rpc_client) {
-            break;
+    let _handle = hiro_system_kit::thread_named("surfnet").spawn(move || {
+        let future = surfpool_core::runloops::start_local_surfnet_runloop(
+            svm_locker_clone,
+            surfpool_config,
+            subgraph_commands_tx,
+            simnet_commands_tx_copy,
+            simnet_commands_rx,
+            geyser_events_rx,
+        );
+        if let Err(e) = hiro_system_kit::nestable_block_on(future) {
+            error!("Surfnet exited with error: {e}");
         }
-        std::thread::sleep(std::time::Duration::from_millis(500));
-        count += 500;
+    })?;
+
+    loop {
+        match simnet_events_rx.recv() {
+            Ok(SimnetEvent::Aborted(error)) => return Err(SurfpoolError::FailedStartup(error)),
+            Ok(SimnetEvent::Shutdown) => {
+                return Err(SurfpoolError::FailedStartup(
+                    "Surfnet shut down during startup".into(),
+                ));
+            }
+            Ok(SimnetEvent::Ready) => break,
+            _other => continue,
+        }
     }
 
-    if count >= ms_wait {
-        validator_handle.kill().ok();
-        return Err(format!(
-            "Timed out waiting for local Solana validator to start at {}",
-            config.rpc_api_url
-        )
-        .into());
-    }
-
-    info!("Local Solana validator started at {}", config.rpc_api_url);
-
+    info!(
+        "Funding token accounts for facilitator {} on local Solana validator",
+        config.facilitator_pubkey
+    );
     for currency in network_config
         .map(|c| c.currencies.iter())
         .unwrap_or_default()
@@ -109,20 +136,12 @@ pub fn start_embedded_validator(
         else {
             continue;
         };
-        info!(
-            "Setting up token account for currency {} with mint {}",
-            symbol, mint
-        );
+        info!("Funding currency {} (mint {})", symbol, mint);
         let _ = surfnet_set_token_account(
             &rpc_client,
             SetTokenAccountRequest::new(config.facilitator_pubkey, *mint, *token_program),
         );
     }
 
-    info!(
-        "Set up token account for facilitator {} on local Solana validator",
-        config.facilitator_pubkey
-    );
-
-    Ok(Some(validator_handle))
+    Ok(Some(simnet_commands_tx))
 }

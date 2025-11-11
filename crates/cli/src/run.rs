@@ -14,14 +14,14 @@ use moneymq_types::{
     x402::{
         MoneyMqNetwork, Network,
         config::{
-            constants::{DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT},
+            constants::DEFAULT_FACILITATOR_PORT,
             facilitator::{
                 FacilitatorConfig, FacilitatorNetworkConfig, SolanaSurfnetFacilitatorConfig,
             },
         },
     },
 };
-use solana_keypair::{Keypair, Signer};
+use solana_keypair::Signer;
 use url::Url;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
@@ -297,7 +297,7 @@ impl RunCommand {
 
         let local_validator_rpc_urls = local_validator_ctx
             .iter()
-            .map(|(network, (_handle, url))| (network.clone(), url.clone()))
+            .map(|(network, url)| (network.clone(), url.clone()))
             .collect::<IndexMap<_, _>>();
         networks_config
             .fund_accounts(&local_validator_rpc_urls)
@@ -372,12 +372,7 @@ async fn build_facilitator_config(
         let mut networks = std::collections::HashMap::new();
         networks.insert(
             NetworkIdentifier::Solana.to_string(),
-            FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
-                rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
-                    .parse::<Url>()
-                    .expect("Failed to parse default RPC URL"),
-                payer_keypair: Keypair::new(),
-            }),
+            FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig::default()),
         );
 
         return Ok(FacilitatorConfig {
@@ -403,7 +398,7 @@ async fn build_facilitator_config(
 
 type Error = Box<dyn std::error::Error + Send + Sync>;
 type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
-type ValidatorData = IndexMap<Network, (std::process::Child, url::Url)>;
+type ValidatorData = IndexMap<Network, url::Url>;
 
 async fn start_facilitator_networks(
     facilitator_config: FacilitatorConfig,
@@ -420,25 +415,23 @@ async fn start_facilitator_networks(
                     .and_then(|c| c.surfnet_config());
 
                 let validator_config = SolanaValidatorConfig {
-                    rpc_api_url: surfnet_config.rpc_url.clone(),
+                    rpc_config: surfnet_config.rpc_config.clone(),
                     facilitator_pubkey: surfnet_config.payer_keypair.pubkey(),
                 };
 
-                let Some(handle) = moneymq_core::validator::start_embedded_validator(
-                    validator_config,
-                    network_config,
-                )
-                .map_err(|e| {
-                    format!(
-                        "Failed to start Solana Surfnet validator for network '{}': {}",
-                        network_name, e
-                    )
-                })?
+                let Some(_) =
+                    moneymq_core::validator::start_surfpool(validator_config, network_config)
+                        .map_err(|e| {
+                            format!(
+                                "Failed to start Solana Surfnet validator for network '{}': {}",
+                                network_name, e
+                            )
+                        })?
                 else {
                     continue;
                 };
                 local_validator_handles
-                    .insert(Network::Solana, (handle, surfnet_config.rpc_url.clone()));
+                    .insert(Network::Solana, surfnet_config.rpc_config.rpc_url.clone());
             }
             FacilitatorNetworkConfig::SolanaMainnet(_) => {
                 // No local validator for mainnet

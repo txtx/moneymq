@@ -8,7 +8,7 @@ use moneymq_types::x402::config::{
     },
     facilitator::{
         FacilitatorConfig as FacilitatorRuntimeConfig, FacilitatorNetworkConfig,
-        SolanaSurfnetFacilitatorConfig,
+        FacilitatorRpcConfig, SolanaSurfnetFacilitatorConfig,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -214,16 +214,14 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
 
         // Convert supported networks to facilitator network configs
         for (network_id, network_config) in &facilitator_config.supported {
-            let rpc_url = if let Some(ref url) = network_config.rpc_url {
-                url.parse::<Url>()
-                    .map_err(|e| format!("Failed to parse RPC URL {}: {}", url, e))?
+            let rpc_config = if let Some(ref url) = network_config.rpc_url {
+                FacilitatorRpcConfig::from_url(url)?.with_ws_port(self.validator.ws_binding_port)
             } else {
-                format!(
-                    "http://{}:{}",
-                    self.validator.binding_address, self.validator.rpc_binding_port
-                )
-                .parse::<Url>()
-                .map_err(|e| format!("Failed to parse validator RPC URL: {}", e))?
+                FacilitatorRpcConfig::from_parts(
+                    &self.validator.binding_address,
+                    self.validator.rpc_binding_port,
+                    self.validator.ws_binding_port,
+                )?
             };
 
             let payer_keypair = if let Some(ref path) = network_config.payer_keypair_path {
@@ -237,7 +235,7 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
             networks.insert(
                 network_id.to_string(),
                 FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
-                    rpc_url,
+                    rpc_config,
                     payer_keypair,
                 }),
             );
