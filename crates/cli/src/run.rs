@@ -168,12 +168,14 @@ impl RunCommand {
         let post = style(" POST").magenta();
 
         println!(
-            "# {}",
-            style("catalog endpoints (compatible with Stripe)").dim()
+            "# {}{}{}",
+            style("Catalog & Billing API (schema: ").dim(),
+            style("stripe").green(),
+            style(")").dim()
         );
         println!(" {} http://localhost:{}/v1/products", get, self.port);
         println!(" {} http://localhost:{}/v1/billing/meters", post, self.port);
-        println!(" {} http://localhost:{}/v1/billing/meters", post, self.port);
+        println!(" {}", style(" ...").dim());
 
         // Initialize tracing
         tracing_subscriber::fmt::init();
@@ -259,7 +261,12 @@ impl RunCommand {
                 config.get_facilitator_pubkey(&NetworkIdentifier::Solana.to_string());
 
             println!();
-            println!("# {}", style("x402 endpoints").dim());
+            println!(
+                "# {}{}{}",
+                style("Payment API (protocol: ").dim(),
+                style("x402").green(),
+                style(")").dim()
+            );
             println!(" {} {}supported", get, config.url);
             println!(" {} {}verify", post, config.url);
             println!(" {} {}settle", post, config.url);
@@ -440,9 +447,13 @@ async fn start_facilitator_networks(
     }
 
     let url = facilitator_config.url.clone();
-    let handle = moneymq_core::facilitator::start_facilitator(facilitator_config, sandbox)
-        .await
-        .map_err(|e| format!("Failed to start facilitator: {e}"))?;
+    let handle = moneymq_core::facilitator::start_facilitator(
+        facilitator_config,
+        networks_config.clone(),
+        sandbox,
+    )
+    .await
+    .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 
     Ok(Some((handle, local_validator_handles, url)))
 }

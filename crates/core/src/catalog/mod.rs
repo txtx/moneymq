@@ -1,6 +1,5 @@
 pub mod config;
 pub mod stripe;
-pub mod x402;
 
 use std::{
     collections::HashMap,
@@ -129,10 +128,8 @@ pub async fn start_provider(
     let app = Router::new()
         // Health check
         .route("/health", get(health_check))
-        // x402 dev endpoints
-        .route("/x402/accounts", get(x402::list_accounts))
         // Config endpoint
-        .route("/x402/config", get(config::get_config))
+        .route("/config", get(config::get_config))
         // Product endpoints
         .route("/v1/products", get(stripe::list_products))
         .route("/v1/prices", get(stripe::list_prices))
@@ -140,7 +137,7 @@ pub async fn start_provider(
         .route("/v1/billing/meters", get(stripe::list_meters))
         .route(
             "/v1/billing/meter_events",
-            x402_post(stripe::create_meter_event, state.clone()),
+            x402_post(stripe::create_meter_event, Some(state.clone())),
         )
         // Customer endpoints
         .route("/v1/customers", post(stripe::create_customer))
@@ -159,7 +156,7 @@ pub async fn start_provider(
         )
         .route(
             "/v1/payment_intents/{id}/confirm",
-            x402_post(stripe::confirm_payment_intent, state.clone()),
+            x402_post(stripe::confirm_payment_intent, Some(state.clone())),
         )
         .route(
             "/v1/payment_intents/{id}/cancel",
@@ -168,7 +165,7 @@ pub async fn start_provider(
         // Subscription endpoints
         .route(
             "/v1/subscriptions",
-            x402_post(stripe::create_subscription, state.clone()),
+            x402_post(stripe::create_subscription, Some(state.clone())),
         )
         .fallback(get(serve_studio_static_files))
         .layer(cors_layer)

@@ -604,10 +604,13 @@ pub async fn payment_middleware(
 ///
 /// let route = x402_post(my_handler, state.clone());
 /// ```
-pub fn x402_post<H, T>(handler: H, state: ProviderState) -> MethodRouter<ProviderState>
+pub fn x402_post<H, T>(handler: H, state: Option<ProviderState>) -> MethodRouter<ProviderState>
 where
     H: Handler<T, ProviderState>,
     T: 'static,
 {
+    let Some(state) = state else {
+        return post(|| async { StatusCode::NOT_FOUND });
+    };
     post(handler).layer(middleware::from_fn_with_state(state, payment_middleware))
 }

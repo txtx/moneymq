@@ -17,9 +17,19 @@ use crate::facilitator::{
 
 /// POST /verify endpoint - verify a payment payload
 pub async fn handler(
-    State(state): State<FacilitatorState>,
+    State(state): State<Option<FacilitatorState>>,
     Json(request): Json<VerifyRequest>,
 ) -> impl IntoResponse {
+    let Some(state) = state else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(VerifyResponse::Invalid {
+                reason: FacilitatorErrorReason::FreeForm("Not found".into()),
+                payer: None,
+            }),
+        );
+    };
+
     debug!(
         "Received verify request for network: {:?}",
         request.payment_requirements.network

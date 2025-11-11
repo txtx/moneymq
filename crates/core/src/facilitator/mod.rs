@@ -2,8 +2,7 @@ pub mod db;
 pub mod endpoints;
 pub mod networks;
 
-use std::sync::Arc;
-
+use crate::facilitator::db::DbManager;
 use axum::{
     Router,
     routing::{get, post},
@@ -19,10 +18,9 @@ use kora_lib::{
     },
 };
 use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
-
-use crate::facilitator::db::DbManager;
 
 pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 pub const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
@@ -38,6 +36,7 @@ pub struct FacilitatorState {
     pub db_manager: Arc<db::DbManager>,
     pub kora_config: Arc<Config>,
     pub signer_pool: Arc<SignerPool>,
+    pub networks_config: crate::billing::NetworksConfig,
 }
 
 impl FacilitatorState {
@@ -46,12 +45,14 @@ impl FacilitatorState {
         database_url: &str,
         kora_config: Config,
         signer_pool: SignerPool,
+        networks_config: crate::billing::NetworksConfig,
     ) -> Self {
         Self {
             config: Arc::new(config),
             db_manager: Arc::new(DbManager::new(database_url).unwrap()),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
+            networks_config,
         }
     }
 }
@@ -65,16 +66,19 @@ pub fn create_router(state: FacilitatorState) -> Router {
         .route("/settle", post(endpoints::settle::handler))
         .route("/supported", get(endpoints::supported::handler))
         .route(
-            "/v1/transactions",
-            get(endpoints::transactions::list_transactions),
+            "/admin/transactions",
+            get(endpoints::admin::list_transactions),
         )
+        // Sandbox dev endpoints
+        .route("/sandbox/accounts", get(endpoints::sandbox::list_accounts))
         .layer(cors_layer)
-        .with_state(state)
+        .with_state(Some(state))
 }
 
 /// Start the facilitator server
 pub async fn start_facilitator(
     config: FacilitatorConfig,
+    networks_config: crate::billing::NetworksConfig,
     _sandbox: bool,
 ) -> Result<
     JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
@@ -144,6 +148,7 @@ pub async fn start_facilitator(
         format!("sqlite://{}", ":memory:").as_str(),
         kora_config,
         signer_pool,
+        networks_config,
     );
     let app = create_router(state);
 

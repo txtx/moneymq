@@ -18,9 +18,22 @@ use crate::facilitator::{
 
 /// POST /settle endpoint - settle a payment on-chain
 pub async fn handler(
-    State(state): State<FacilitatorState>,
+    State(state): State<Option<FacilitatorState>>,
     Json(request): Json<SettleRequest>,
 ) -> impl IntoResponse {
+    let Some(state) = state else {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(SettleResponse {
+                success: false,
+                error_reason: Some(FacilitatorErrorReason::UnexpectedSettleError),
+                payer: request.payment_requirements.pay_to.clone(),
+                transaction: None,
+                network: request.payment_requirements.network.clone(),
+            }),
+        );
+    };
+
     info!(
         "Received settle request for network: {:?}",
         request.payment_requirements.network
