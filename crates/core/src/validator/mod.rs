@@ -1,16 +1,20 @@
 use moneymq_types::x402::config::facilitator::FacilitatorRpcConfig;
-use solana_client::rpc_client::RpcClient;
+use serde_json::Value;
+use solana_client::{rpc_client::RpcClient, rpc_response::RpcVersionInfo};
 use solana_keypair::Pubkey;
-use surfpool_core::surfnet::svm::SurfnetSvm;
+use surfpool_core::{rpc::minimal::SurfpoolRpcVersionInfo, surfnet::svm::SurfnetSvm};
 use surfpool_types::{RpcConfig, SimnetCommand, SimnetConfig, SimnetEvent, SurfpoolConfig};
 use tracing::{error, info};
 
 use crate::{
     billing::{SolanaSurfnetConfig, currency::SolanaCurrency},
-    validator::surfnet_utils::{SetTokenAccountRequest, surfnet_set_token_account},
+    validator::surfnet_utils::{
+        SetAccountRequest, SetTokenAccountRequest, surfnet_set_account, surfnet_set_token_account,
+    },
 };
 
 pub mod surfnet_utils;
+pub const DEFAULT_FACILITATOR_LAMPORTS: u64 = 1_000_000_000;
 
 pub struct SolanaValidatorConfig {
     /// RPC API URL for the local Solana validator
@@ -19,10 +23,22 @@ pub struct SolanaValidatorConfig {
     pub facilitator_pubkey: Pubkey,
 }
 
-fn check_if_validator_running(rpc_client: &RpcClient) -> bool {
-    match rpc_client.get_health() {
-        Ok(_) => true,
-        Err(_) => false,
+/// Checks if a validator is running and if it is a surfnet
+fn check_if_validator_running(rpc_client: &RpcClient) -> (bool, bool) {
+    match rpc_client.send::<Value>(
+        solana_client::rpc_request::RpcRequest::GetVersion,
+        Value::Null,
+    ) {
+        Ok(version) => {
+            let Ok(_) = serde_json::from_value::<SurfpoolRpcVersionInfo>(version.clone()) else {
+                return match serde_json::from_value::<RpcVersionInfo>(version) {
+                    Ok(_) => (true, false),
+                    Err(_) => (false, false),
+                };
+            };
+            (true, true)
+        }
+        Err(_) => (false, false),
     }
 }
 
@@ -60,11 +76,23 @@ pub fn start_surfpool(
 
     let rpc_client = RpcClient::new(config.rpc_config.rpc_url.as_str());
 
-    if check_if_validator_running(&rpc_client) {
-        info!(
-            "Local Solana validator already running at {}",
-            config.rpc_config.rpc_url
-        );
+    let (validator_running, is_surfnet) = check_if_validator_running(&rpc_client);
+    if validator_running {
+        if is_surfnet {
+            info!("Surfnet already running at {}", config.rpc_config.rpc_url);
+            let _ = surfnet_set_account(
+                &rpc_client,
+                SetAccountRequest::new(config.facilitator_pubkey)
+                    .lamports(DEFAULT_FACILITATOR_LAMPORTS),
+            );
+            fund_facilitator_accounts(&rpc_client, config.facilitator_pubkey, network_config);
+            return Ok(None);
+        } else {
+            error!(
+                "Local Solana validator was already running at {}, but it is not a surfnet. The accounts will not be funded.",
+                config.rpc_config.rpc_url
+            );
+        }
         return Ok(None);
     }
 
@@ -76,7 +104,7 @@ pub fn start_surfpool(
     let surfpool_config = SurfpoolConfig {
         simnets: vec![SimnetConfig {
             airdrop_addresses: vec![config.facilitator_pubkey],
-            airdrop_token_amount: 1_000_000_000,
+            airdrop_token_amount: DEFAULT_FACILITATOR_LAMPORTS,
             offline_mode: false,
             ..Default::default()
         }],
@@ -119,9 +147,19 @@ pub fn start_surfpool(
         }
     }
 
+    fund_facilitator_accounts(&rpc_client, config.facilitator_pubkey, network_config);
+
+    Ok(Some(simnet_commands_tx))
+}
+
+fn fund_facilitator_accounts(
+    rpc_client: &RpcClient,
+    facilitator_pubkey: Pubkey,
+    network_config: Option<&SolanaSurfnetConfig>,
+) {
     info!(
         "Funding token accounts for facilitator {} on local Solana validator",
-        config.facilitator_pubkey
+        facilitator_pubkey
     );
     for currency in network_config
         .map(|c| c.currencies.iter())
@@ -139,9 +177,7 @@ pub fn start_surfpool(
         info!("Funding currency {} (mint {})", symbol, mint);
         let _ = surfnet_set_token_account(
             &rpc_client,
-            SetTokenAccountRequest::new(config.facilitator_pubkey, *mint, *token_program),
+            SetTokenAccountRequest::new(facilitator_pubkey.clone(), *mint, *token_program),
         );
     }
-
-    Ok(Some(simnet_commands_tx))
 }
