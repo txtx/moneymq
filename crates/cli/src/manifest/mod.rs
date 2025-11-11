@@ -61,7 +61,9 @@ impl Manifest {
 
     /// Save manifest to the specified file path with proper formatting
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        use crate::yaml_util::{get_default_payments_footer, to_pretty_yaml_with_header_and_footer};
+        use crate::yaml_util::{
+            get_default_payments_footer, to_pretty_yaml_with_header_and_footer,
+        };
 
         // Only add the payments footer if payments section is empty
         let footer_string;
@@ -72,12 +74,8 @@ impl Manifest {
             None
         };
 
-        let content = to_pretty_yaml_with_header_and_footer(
-            self,
-            Some("Manifest"),
-            Some("v1"),
-            footer,
-        )?;
+        let content =
+            to_pretty_yaml_with_header_and_footer(self, Some("Manifest"), Some("v1"), footer)?;
 
         std::fs::write(path, content)
             .map_err(|e| format!("Failed to write manifest to {}: {}", path.display(), e))?;
@@ -281,10 +279,7 @@ mod tests {
                 fee: 0,
                 payer_keypair_path: None,
                 rpc_url: None,
-                user_accounts: vec![
-                    "user1_account".to_string(),
-                    "user2_account".to_string(),
-                ],
+                user_accounts: vec!["user1_account".to_string(), "user2_account".to_string()],
             },
         );
 
@@ -326,17 +321,18 @@ mod tests {
         assert!(manifest_path.exists(), "Manifest file was not created");
 
         // Read back and verify it parses correctly
-        let read_content = fs::read_to_string(&manifest_path).expect("Failed to read manifest file");
+        let read_content =
+            fs::read_to_string(&manifest_path).expect("Failed to read manifest file");
         let parsed_manifest: Manifest =
             serde_yml::from_str(&read_content).expect("Failed to parse manifest YAML");
 
         // Verify catalog
         assert_eq!(parsed_manifest.catalogs.len(), 1);
-        let catalog = parsed_manifest.catalogs.get("v1").expect("Catalog v1 not found");
-        assert_eq!(
-            catalog.description,
-            Some("Production catalog".to_string())
-        );
+        let catalog = parsed_manifest
+            .catalogs
+            .get("v1")
+            .expect("Catalog v1 not found");
+        assert_eq!(catalog.description, Some("Production catalog".to_string()));
         assert_eq!(catalog.catalog_path, "billing/v1");
 
         // Verify payment
@@ -372,7 +368,9 @@ mod tests {
 
         // Verify sandbox
         assert_eq!(x402.sandboxes.len(), 1);
-        let sandbox = x402.get_default_sandbox().expect("Default sandbox not found");
+        let sandbox = x402
+            .get_default_sandbox()
+            .expect("Default sandbox not found");
         assert_eq!(
             sandbox.description,
             Some("Local development sandbox".to_string())
@@ -412,7 +410,9 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let manifest_path = temp_dir.path().join("moneymq.yaml");
 
-        manifest.save(&manifest_path).expect("Failed to save manifest");
+        manifest
+            .save(&manifest_path)
+            .expect("Failed to save manifest");
 
         // Read back the content
         let content = fs::read_to_string(&manifest_path).expect("Failed to read manifest");
@@ -453,13 +453,17 @@ mod tests {
             },
         );
 
-        manifest.payments.insert("stablecoins".to_string(), PaymentConfig::default());
+        manifest
+            .payments
+            .insert("stablecoins".to_string(), PaymentConfig::default());
 
         // Save to temp file
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let manifest_path = temp_dir.path().join("moneymq.yaml");
 
-        manifest.save(&manifest_path).expect("Failed to save manifest");
+        manifest
+            .save(&manifest_path)
+            .expect("Failed to save manifest");
 
         // Read back the content
         let content = fs::read_to_string(&manifest_path).expect("Failed to read manifest");
