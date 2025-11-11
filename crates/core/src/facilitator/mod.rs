@@ -17,8 +17,6 @@ use kora_lib::{
         MemorySignerConfig, SelectionStrategy, SignerConfig, SignerPool, SignerPoolConfig,
         SignerTypeConfig, config::SignerPoolSettings,
     },
-    state::{init_config, init_signer_pool},
-    usage_limit::UsageTracker,
 };
 use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
 use tokio::task::JoinHandle;
@@ -38,13 +36,22 @@ pub const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID: &str =
 pub struct FacilitatorState {
     pub config: Arc<FacilitatorConfig>,
     pub db_manager: Arc<db::DbManager>,
+    pub kora_config: Arc<Config>,
+    pub signer_pool: Arc<SignerPool>,
 }
 
 impl FacilitatorState {
-    pub fn new(config: FacilitatorConfig, database_url: &str) -> Self {
+    pub fn new(
+        config: FacilitatorConfig,
+        database_url: &str,
+        kora_config: Config,
+        signer_pool: SignerPool,
+    ) -> Self {
         Self {
             config: Arc::new(config),
             db_manager: Arc::new(DbManager::new(database_url).unwrap()),
+            kora_config: Arc::new(kora_config),
+            signer_pool: Arc::new(signer_pool),
         }
     }
 }
@@ -98,8 +105,6 @@ pub async fn start_facilitator(
         kora: KoraConfig::default(),
         metrics: MetricsConfig::default(),
     };
-    init_config(kora_config)?;
-    UsageTracker::init_usage_limiter().await?;
 
     let signers = config
         .networks
@@ -132,9 +137,13 @@ pub async fn start_facilitator(
         },
     };
     let signer_pool = SignerPool::from_config(signer_pool_config).await?;
-    init_signer_pool(signer_pool)?;
 
-    let state = FacilitatorState::new(config, format!("sqlite://{}", ":memory:").as_str());
+    let state = FacilitatorState::new(
+        config,
+        format!("sqlite://{}", ":memory:").as_str(),
+        kora_config,
+        signer_pool,
+    );
     let app = create_router(state);
 
     let addr = format!("0.0.0.0:{}", url.port().expect("URL must have a port"));

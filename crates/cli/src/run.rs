@@ -79,9 +79,7 @@ impl RunCommand {
 
         let mut products = Vec::new();
 
-        if !catalog_dir.exists() {
-            println!("{}", style("⚠ Products directory not found").yellow());
-        } else {
+        if catalog_dir.exists() {
             let entries = fs::read_dir(&catalog_dir)
                 .map_err(|e| RunCommandError::DirectoryReadError(catalog_dir, e))?;
 
@@ -339,6 +337,8 @@ impl RunCommand {
             catalog_description,
             facilitator_pubkey,
             validator_rpc_url,
+            None, // kora_config
+            None, // signer_pool
         )
         .await
         .map_err(RunCommandError::ProviderStartError)?;

@@ -37,6 +37,8 @@ pub struct ProviderState {
     pub validator_rpc_url: Option<Url>,
     pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
     pub payment_intents: Arc<Mutex<HashMap<String, StripePaymentIntent>>>,
+    pub kora_config: Option<Arc<kora_lib::Config>>,
+    pub signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
 }
 
 /// Application state
@@ -60,6 +62,8 @@ impl ProviderState {
         catalog_description: Option<String>,
         facilitator_pubkey: Option<String>,
         validator_rpc_url: Option<Url>,
+        kora_config: Option<Arc<kora_lib::Config>>,
+        signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
     ) -> Self {
         Self {
             products: Arc::new(products),
@@ -74,6 +78,8 @@ impl ProviderState {
             validator_rpc_url,
             transactions: Arc::new(Mutex::new(Vec::new())),
             payment_intents: Arc::new(Mutex::new(HashMap::new())),
+            kora_config,
+            signer_pool,
         }
     }
 }
@@ -97,6 +103,8 @@ pub async fn start_provider(
     catalog_description: Option<String>,
     facilitator_pubkey: Option<String>,
     validator_rpc_url: Option<Url>,
+    kora_config: Option<Arc<kora_lib::Config>>,
+    signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let state = ProviderState::new(
         products,
@@ -109,6 +117,8 @@ pub async fn start_provider(
         catalog_description,
         facilitator_pubkey,
         validator_rpc_url,
+        kora_config,
+        signer_pool,
     );
 
     let cors_layer = CorsLayer::new()

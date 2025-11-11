@@ -64,7 +64,7 @@ impl Recipient {
                     let managed_address =
                         MoneyMqManagedRecipient::generate_with_index(is_sandbox, index)
                             .await
-                            .map_err(|e| RecipientError::ManagedAddressGenerationError(e))?;
+                            .map_err(RecipientError::ManagedAddressGenerationError)?;
                     Ok(Recipient::MoneyMqManaged(managed_address))
                 }
             },
@@ -104,7 +104,7 @@ impl Recipient {
                     let managed_address =
                         MoneyMqManagedRecipient::generate_payment_recipient(is_sandbox)
                             .await
-                            .map_err(|e| RecipientError::ManagedAddressGenerationError(e))?;
+                            .map_err(RecipientError::ManagedAddressGenerationError)?;
                     Ok(Recipient::MoneyMqManaged(managed_address))
                 }
             },

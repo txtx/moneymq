@@ -1,9 +1,8 @@
-use std::{str::FromStr, sync::Arc};
-
 use anyhow::{Context, Result};
-use kora_lib::rpc_server::method::{
-    sign_and_send_transaction::{SignAndSendTransactionRequest, sign_and_send_transaction},
-    sign_transaction::{SignTransactionRequest, sign_transaction},
+use kora_lib::{
+    Config, SolanaSigner,
+    signer::SignerPool,
+    transaction::{TransactionUtil, VersionedTransactionOps, VersionedTransactionResolved},
 };
 use moneymq_types::x402::{
     ExactPaymentPayload, MixedAddress, SettleRequest, SettleResponse, TransactionHash,
@@ -12,6 +11,7 @@ use moneymq_types::x402::{
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_keypair::Pubkey;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
+use std::sync::Arc;
 use tracing::info;
 
 /// Helper function to decode and extract payer from transaction
@@ -61,21 +61,33 @@ pub fn extract_customer_from_transaction(transaction_str: &str) -> Result<Pubkey
 /// Verify a Solana payment payload
 pub async fn verify_solana_payment(
     request: &VerifyRequest,
-    _config: &FacilitatorNetworkConfig,
     rpc_client: &Arc<RpcClient>,
+    kora_config: &Arc<Config>,
+    signer_pool: &Arc<SignerPool>,
 ) -> Result<VerifyResponse> {
     info!("Verifying Solana payment");
     let solana_payload = match &request.payment_payload.payload {
         ExactPaymentPayload::Solana(payload) => payload,
     };
-    let request = SignTransactionRequest {
-        transaction: solana_payload.transaction.clone(),
-        signer_key: None,
-        sig_verify: false,
-    };
-    let response = sign_transaction(rpc_client, request).await?;
-    let signer_pubkey = Pubkey::from_str(&response.signer_pubkey)?;
-    let payer = MixedAddress::Solana(signer_pubkey);
+    let transaction = TransactionUtil::decode_b64_transaction(&solana_payload.transaction)?;
+
+    // TODO: Check usage limit for transaction sender
+    // UsageTracker::check_transaction_usage_limit(&config, &transaction).await?;
+
+    let meta_signer = signer_pool.get_next_signer().unwrap();
+    let mut resolved_transaction = VersionedTransactionResolved::from_transaction(
+        &transaction,
+        kora_config,
+        rpc_client,
+        false,
+    )
+    .await?;
+
+    let _ = resolved_transaction
+        .sign_transaction(&kora_config, &Arc::clone(&meta_signer.signer), rpc_client)
+        .await?;
+
+    let payer = MixedAddress::Solana(meta_signer.signer.pubkey());
     info!("Payment verified successfully");
     Ok(VerifyResponse::Valid { payer })
 }
@@ -85,42 +97,38 @@ pub async fn settle_solana_payment(
     request: &SettleRequest,
     config: &FacilitatorNetworkConfig,
     rpc_client: &Arc<RpcClient>,
+    kora_config: &Arc<Config>,
+    signer_pool: &Arc<SignerPool>,
 ) -> Result<SettleResponse> {
     info!("Settling Solana payment");
     let solana_payload = match &request.payment_payload.payload {
         ExactPaymentPayload::Solana(payload) => payload,
     };
+    let transaction = TransactionUtil::decode_b64_transaction(&solana_payload.transaction)?;
 
-    let send_request = SignAndSendTransactionRequest {
-        transaction: solana_payload.transaction.clone(),
-        signer_key: None,
-        sig_verify: false,
-    };
-    let response = sign_and_send_transaction(rpc_client, send_request).await?;
+    // TODO: Check usage limit for transaction sender
+    // UsageTracker::check_transaction_usage_limit(&config, &transaction).await?;
 
-    // Decode the signed transaction once and extract both customer and signature
-    use base64::Engine;
-    let signed_tx_bytes = base64::engine::general_purpose::STANDARD
-        .decode(&response.signed_transaction)
-        .context("Failed to decode signed transaction from base64")?;
+    let meta_signer = signer_pool.get_next_signer().unwrap();
+    let mut resolved_transaction = VersionedTransactionResolved::from_transaction(
+        &transaction,
+        kora_config,
+        rpc_client,
+        false,
+    )
+    .await?;
 
-    // Deserialize the transaction
-    let signed_tx: VersionedTransaction = bincode::deserialize(&signed_tx_bytes)
-        .context("Failed to deserialize signed transaction")?;
+    let (signature, _encoded_transaction) = resolved_transaction
+        .sign_and_send_transaction(kora_config, &Arc::clone(&meta_signer.signer), rpc_client)
+        .await?;
 
-    // Extract the transaction signature (first signature)
-    let signature_bytes: [u8; 64] = signed_tx
-        .signatures
-        .first()
-        .context("Transaction has no signatures")?
-        .as_ref()
+    let signature_bytes: [u8; 64] = bs58::decode(&signature)
+        .into_vec()
+        .context("Failed to decode signature from base58")?
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid signature length"))?;
 
-    let signature = bs58::encode(&signature_bytes).into_string();
-    info!("Transaction settled with signature: {}", signature);
-
-    let signer_pubkey = Pubkey::from_str(&response.signer_pubkey)?;
+    let signer_pubkey = meta_signer.signer.pubkey();
     let payer = MixedAddress::Solana(signer_pubkey);
 
     let tx_hash = TransactionHash::Solana(signature_bytes);

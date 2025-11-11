@@ -71,8 +71,14 @@ pub async fn handler(
                 network_config.rpc_url().to_string(),
                 CommitmentConfig::confirmed(),
             ));
-            match networks::solana::settle_solana_payment(&request, &network_config, &rpc_client)
-                .await
+            match networks::solana::settle_solana_payment(
+                &request,
+                &network_config,
+                &rpc_client,
+                &state.kora_config,
+                &state.signer_pool,
+            )
+            .await
             {
                 Ok(response) => (StatusCode::OK, response),
                 Err(e) => {

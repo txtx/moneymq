@@ -54,7 +54,7 @@ impl SetAccountRequest {
 
 /// Sets account data for a given account on the Surfnet local validator
 pub fn surfnet_set_account(rpc_client: &RpcClient, req: SetAccountRequest) -> Result<(), String> {
-    let pubkey = req.pubkey.clone();
+    let pubkey = req.pubkey;
     let _ = rpc_client
         .send::<serde_json::Value>(
             RpcRequest::Custom {
@@ -109,8 +109,8 @@ pub fn surfnet_set_token_account(
     rpc_client: &RpcClient,
     req: SetTokenAccountRequest,
 ) -> Result<(), String> {
-    let pubkey = req.pubkey.clone();
-    let mint = req.mint.clone();
+    let pubkey = req.pubkey;
+    let mint = req.mint;
     debug!("Setting token account with payload: {:?}", req);
 
     let _ = rpc_client
