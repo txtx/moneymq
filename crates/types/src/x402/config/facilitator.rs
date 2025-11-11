@@ -6,7 +6,10 @@ use std::{
 use solana_keypair::{Keypair, Signer};
 use url::Url;
 
-use crate::x402::{Network, SupportedPaymentKindExtra};
+use crate::x402::{
+    Network, SupportedPaymentKindExtra,
+    config::constants::{DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT},
+};
 
 #[derive(Debug)]
 pub struct FacilitatorConfig {
@@ -64,7 +67,9 @@ impl Default for SolanaSurfnetFacilitatorConfig {
     fn default() -> Self {
         Self {
             rpc_config: FacilitatorRpcConfig {
-                rpc_url: "http://localhost:8899".parse().unwrap(),
+                rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
+                    .parse::<Url>()
+                    .expect("Failed to parse default RPC URL"),
                 bind_host: Some("0.0.0.0".to_string()),
                 rpc_port: Some(8899),
                 ws_port: Some(8900),
