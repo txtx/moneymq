@@ -2,9 +2,12 @@ use moneymq_types::x402::config::facilitator::FacilitatorRpcConfig;
 use serde_json::Value;
 use solana_client::{rpc_client::RpcClient, rpc_response::RpcVersionInfo};
 use solana_keypair::Pubkey;
-use surfpool_core::{rpc::minimal::SurfpoolRpcVersionInfo, surfnet::svm::SurfnetSvm};
-use surfpool_types::{RpcConfig, SimnetCommand, SimnetConfig, SimnetEvent, SurfpoolConfig};
 use tracing::{error, info};
+
+#[cfg(feature = "local_validators")]
+use surfpool_core::{rpc::minimal::SurfpoolRpcVersionInfo, surfnet::svm::SurfnetSvm};
+#[cfg(feature = "local_validators")]
+use surfpool_types::{RpcConfig, SimnetCommand, SimnetConfig, SimnetEvent, SurfpoolConfig};
 
 use crate::{
     billing::{SolanaSurfnetConfig, currency::SolanaCurrency},
@@ -23,6 +26,7 @@ pub struct SolanaValidatorConfig {
     pub facilitator_pubkey: Pubkey,
 }
 
+#[cfg(feature = "local_validators")]
 /// Checks if a validator is running and if it is a surfnet
 fn check_if_validator_running(rpc_client: &RpcClient) -> (bool, bool) {
     match rpc_client.send::<Value>(
@@ -52,6 +56,7 @@ pub enum SurfpoolError {
     SpawnSurfnetError(#[from] std::io::Error),
 }
 
+#[cfg(feature = "local_validators")]
 pub fn start_surfpool(
     config: SolanaValidatorConfig,
     network_config: Option<&SolanaSurfnetConfig>,
@@ -152,6 +157,7 @@ pub fn start_surfpool(
     Ok(Some(simnet_commands_tx))
 }
 
+#[cfg(feature = "local_validators")]
 fn fund_facilitator_accounts(
     rpc_client: &RpcClient,
     facilitator_pubkey: Pubkey,

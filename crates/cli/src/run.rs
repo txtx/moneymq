@@ -405,7 +405,8 @@ async fn start_facilitator_networks(
     networks_config: &NetworksConfig,
     sandbox: bool,
 ) -> Result<Option<(FacilitatorHandle, ValidatorData, url::Url)>, String> {
-    let mut local_validator_handles = IndexMap::new();
+    let mut local_validator_handles: IndexMap<Network, Url> = IndexMap::new();
+    #[cfg(feature = "local_validators")]
     for (network_name, network_config) in facilitator_config.networks.iter() {
         match network_config {
             FacilitatorNetworkConfig::SolanaSurfnet(surfnet_config) => {
