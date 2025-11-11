@@ -280,15 +280,13 @@ impl RunCommand {
             (None, None)
         };
 
-        let moneymq_studio_port = 3000;
-        // let moneymq_studio_port = self.port;
         println!();
         println!(
             "{}{} {}: {} - {}",
             style("Money").white(),
             style("MQ").green(),
             style("Studio:").white(),
-            style(format!("http://localhost:{}", moneymq_studio_port)).cyan(),
+            style(format!("http://localhost:{}", self.port)).cyan(),
             style("Press Ctrl+C to stop").dim()
         );
         println!();

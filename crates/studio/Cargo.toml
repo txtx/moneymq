@@ -1,0 +1,21 @@
+[package]
+name = "moneymq-studio-ui"
+description = "Crate for starting the MoneyMQ studio UI"
+version = "0.1.1"
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+keywords = { workspace = true }
+categories = { workspace = true }
+
+[dependencies]
+axum = { workspace = true }
+include_dir = "0.7.4"
+mime_guess = { version = "2.0.4", default-features = false }
+
+[build-dependencies]
+reqwest = { workspace = true, features = ["blocking", "default-tls"] }
+zip = { version = "0.6", features = ["deflate"], default-features = false }
+
+[lib]
+crate-type = ["lib", "cdylib"]

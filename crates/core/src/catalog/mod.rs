@@ -14,6 +14,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
+use moneymq_studio_ui::serve_studio_static_files;
 use moneymq_types::{Meter, Product, x402::transactions::FacilitatedTransaction};
 use stripe::types::StripePaymentIntent;
 use tower_http::cors::{Any, CorsLayer};
@@ -159,6 +160,7 @@ pub async fn start_provider(
             "/v1/subscriptions",
             x402_post(stripe::create_subscription, state.clone()),
         )
+        .fallback(get(serve_studio_static_files))
         .layer(cors_layer)
         .with_state(state);
 

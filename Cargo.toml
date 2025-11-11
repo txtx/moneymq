@@ -6,6 +6,7 @@ members = [
     "crates/drivers/kit",
     "crates/drivers/stripe",
     "crates/mcp",
+    "crates/studio",
     "crates/types",
 ]
 exclude = ["examples/*"]
@@ -22,10 +23,11 @@ keywords = ["payments"]
 categories = ["payments"]
 
 [workspace.dependencies]
-axum-core = { version = "0.5.5" }
+axum = "0.8"
 clap = { version = "4.5.51", default-features = false }
 clap_complete = { version = "4.5.60", default-features = false }
 convert_case = "0.9.0"
+reqwest = { version = "0.12", default-features = false }
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0"
