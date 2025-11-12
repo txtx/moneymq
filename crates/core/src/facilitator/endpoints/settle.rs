@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
+    Extension,
     http::StatusCode,
     response::{IntoResponse, Json},
 };
@@ -18,7 +18,7 @@ use crate::facilitator::{
 
 /// POST /settle endpoint - settle a payment on-chain
 pub async fn handler(
-    State(state): State<Option<FacilitatorState>>,
+    Extension(state): Extension<Option<FacilitatorState>>,
     Json(request): Json<SettleRequest>,
 ) -> impl IntoResponse {
     let Some(state) = state else {

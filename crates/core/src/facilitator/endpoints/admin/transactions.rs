@@ -1,4 +1,4 @@
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Extension, Json, response::IntoResponse};
 
 use crate::{
     catalog::stripe::types::{ListParams, ListResponse},
@@ -9,7 +9,7 @@ use crate::{
 ///
 /// This endpoint returns a list of transactions stored from x402 payments.
 pub async fn list_transactions(
-    State(state): State<Option<FacilitatorState>>,
+    Extension(state): Extension<Option<FacilitatorState>>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let Some(state) = state else {

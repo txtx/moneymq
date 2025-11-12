@@ -1,4 +1,4 @@
-use axum::{Json, extract::State};
+use axum::{Extension, Json};
 use serde_json::{Value, json};
 
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
 
 /// GET /sandbox/accounts - List local network accounts
 pub async fn list_accounts(
-    State(state): State<Option<FacilitatorState>>,
+    Extension(state): Extension<Option<FacilitatorState>>,
 ) -> Result<Json<Value>, Json<Value>> {
     let Some(state) = state else {
         return Ok(Json(json!({})));

@@ -5,7 +5,7 @@ pub mod networks;
 use std::sync::Arc;
 
 use axum::{
-    Router,
+    Extension, Router,
     routing::{get, post},
 };
 use kora_lib::{
@@ -74,7 +74,7 @@ pub fn create_router(state: FacilitatorState) -> Router {
         // Sandbox dev endpoints
         .route("/sandbox/accounts", get(endpoints::sandbox::list_accounts))
         .layer(cors_layer)
-        .with_state(Some(state))
+        .layer(Extension(Some(state)))
 }
 
 /// Start the facilitator server

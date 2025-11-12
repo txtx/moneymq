@@ -1,10 +1,10 @@
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Extension, Json, response::IntoResponse};
 use moneymq_types::x402::{SupportedPaymentKind, SupportedResponse};
 
 use crate::facilitator::FacilitatorState;
 
 /// GET /supported endpoint - returns supported payment kinds
-pub async fn handler(State(state): State<Option<FacilitatorState>>) -> impl IntoResponse {
+pub async fn handler(Extension(state): Extension<Option<FacilitatorState>>) -> impl IntoResponse {
     let Some(state) = state else {
         return Json(SupportedResponse { kinds: vec![] });
     };
