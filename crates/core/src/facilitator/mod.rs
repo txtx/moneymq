@@ -145,7 +145,7 @@ pub async fn start_facilitator(
 
     let state = FacilitatorState::new(
         config,
-        format!("sqlite://{}", ":memory:").as_str(),
+        format!("sqlite://{}", "payments.sqlite").as_str(),
         kora_config,
         signer_pool,
         networks_config,

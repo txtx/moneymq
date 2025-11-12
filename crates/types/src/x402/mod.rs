@@ -1,10 +1,9 @@
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
+use solana_pubkey::Pubkey;
 use std::{
     fmt::{self, Display, Formatter},
     str::FromStr,
 };
-
-use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeStruct};
-use solana_keypair::Pubkey;
 use url::Url;
 
 pub mod config;
