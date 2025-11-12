@@ -1,7 +1,8 @@
 use std::str::FromStr;
 
 use moneymq_types::x402::{MixedAddress, Network};
-use solana_keypair::{Pubkey, Signer};
+use solana_keypair::Signer;
+use solana_pubkey::Pubkey;
 
 /// Represents a billing recipient, which can be either user-managed or MoneyMQ-managed
 #[derive(Debug, Clone)]

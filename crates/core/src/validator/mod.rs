@@ -1,7 +1,7 @@
 use moneymq_types::x402::config::facilitator::FacilitatorRpcConfig;
 use serde_json::Value;
 use solana_client::{rpc_client::RpcClient, rpc_response::RpcVersionInfo};
-use solana_keypair::Pubkey;
+use solana_pubkey::Pubkey;
 #[cfg(feature = "embedded_validator")]
 use surfpool_core::{rpc::minimal::SurfpoolRpcVersionInfo, surfnet::svm::SurfnetSvm};
 #[cfg(feature = "embedded_validator")]

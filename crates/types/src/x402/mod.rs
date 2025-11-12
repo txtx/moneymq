@@ -451,7 +451,7 @@ mod tests {
 fn test_supported_payment_kind_extra_serialization() {
     use std::str::FromStr;
 
-    use solana_keypair::Pubkey;
+    use solana_pubkey::Pubkey;
 
     let pubkey = Pubkey::from_str("11111111111111111111111111111112").unwrap();
     let extra = SupportedPaymentKindExtra {

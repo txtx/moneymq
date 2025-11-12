@@ -4,7 +4,7 @@ use axum::{Json, extract::State, response::IntoResponse};
 use moneymq_types::x402::MixedAddress;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solana_keypair::Pubkey;
+use solana_pubkey::Pubkey;
 
 use super::ProviderState;
 

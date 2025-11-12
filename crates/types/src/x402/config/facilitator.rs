@@ -1,9 +1,8 @@
+use solana_keypair::{Keypair, Signer};
 use std::{
     collections::HashMap,
     fmt::{self, Display},
 };
-
-use solana_keypair::{Keypair, Signer};
 use url::Url;
 
 use crate::x402::{

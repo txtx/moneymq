@@ -1,5 +1,5 @@
 use moneymq_types::x402::MixedAddress;
-use solana_keypair::Pubkey;
+use solana_pubkey::Pubkey;
 
 /// Represents a currency used for billing across different blockchains
 #[derive(Debug, Clone)]

@@ -11,7 +11,7 @@ use moneymq_types::x402::{
     VerifyRequest, VerifyResponse, config::facilitator::FacilitatorNetworkConfig,
 };
 use solana_client::nonblocking::rpc_client::RpcClient;
-use solana_keypair::Pubkey;
+use solana_pubkey::Pubkey;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use tracing::info;
 

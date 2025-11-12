@@ -4744,6 +4744,7 @@ dependencies = [
  "solana-client",
  "solana-commitment-config",
  "solana-keypair",
+ "solana-pubkey 3.0.0",
  "solana-transaction",
  "spl-associated-token-account",
  "spl-token-2022-interface",

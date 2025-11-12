@@ -1,6 +1,6 @@
 use serde_json::json;
 use solana_client::{rpc_client::RpcClient, rpc_request::RpcRequest};
-use solana_keypair::Pubkey;
+use solana_pubkey::Pubkey;
 use tracing::debug;
 
 #[derive(Debug, Clone)]
