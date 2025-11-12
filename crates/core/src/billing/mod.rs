@@ -65,7 +65,7 @@ impl NetworksConfig {
                 MoneyMqNetwork::SolanaSurfnet => {
                     let cap = 10.max(user_accounts_strs.len());
                     let mut user_accounts = Vec::with_capacity(cap);
-                    debug!("Initializing {} user accounts", user_accounts_strs.len());
+                    info!("Initializing {} user accounts", user_accounts_strs.len());
                     for i in 0..cap {
                         let some_provided_account = user_accounts_strs.get(i);
                         let recipient = Recipient::instantiate_with_index(
@@ -78,7 +78,7 @@ impl NetworksConfig {
                         .map_err(|e| {
                             NetworksConfigError::InitializationError(network.clone(), e.to_string())
                         })?;
-                        debug!("User account {}: {:?}", i, some_provided_account);
+                        debug!("User account {}: {:?}", i, recipient);
 
                         user_accounts.push(recipient);
                     }
