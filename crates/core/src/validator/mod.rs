@@ -2,12 +2,11 @@ use moneymq_types::x402::config::facilitator::FacilitatorRpcConfig;
 use serde_json::Value;
 use solana_client::{rpc_client::RpcClient, rpc_response::RpcVersionInfo};
 use solana_keypair::Pubkey;
-use tracing::{error, info};
-
 #[cfg(feature = "embedded_validator")]
 use surfpool_core::{rpc::minimal::SurfpoolRpcVersionInfo, surfnet::svm::SurfnetSvm};
 #[cfg(feature = "embedded_validator")]
 use surfpool_types::{RpcConfig, SimnetCommand, SimnetConfig, SimnetEvent, SurfpoolConfig};
+use tracing::{error, info};
 
 use crate::{
     billing::{SolanaSurfnetConfig, currency::SolanaCurrency},

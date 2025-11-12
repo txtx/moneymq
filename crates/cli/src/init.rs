@@ -257,14 +257,19 @@ impl InitCommand {
                             webhook_secret_env: None,
                         };
 
-                        if let Some(crate::manifest::CatalogSourceType::Stripe(ref mut stripe_config)) =
-                            catalog_config.source
+                        if let Some(crate::manifest::CatalogSourceType::Stripe(
+                            ref mut stripe_config,
+                        )) = catalog_config.source
                         {
-                            stripe_config.sandboxes.insert(DEFAULT_SANDBOX.to_string(), sandbox);
+                            stripe_config
+                                .sandboxes
+                                .insert(DEFAULT_SANDBOX.to_string(), sandbox);
                         }
                     }
 
-                    manifest.catalogs.insert(provider_name.clone(), catalog_config);
+                    manifest
+                        .catalogs
+                        .insert(provider_name.clone(), catalog_config);
 
                     // Save using the new method (will add payments footer automatically)
                     manifest.save(&manifest_yaml_path)?;
@@ -356,9 +361,10 @@ impl InitCommand {
                                         sandbox_product.sandboxes.get(DEFAULT_SANDBOX)
                                     {
                                         // Add the sandbox ID to the production product
-                                        prod_product
-                                            .sandboxes
-                                            .insert(DEFAULT_SANDBOX.to_string(), sandbox_id.clone());
+                                        prod_product.sandboxes.insert(
+                                            DEFAULT_SANDBOX.to_string(),
+                                            sandbox_id.clone(),
+                                        );
                                         matched_sandbox_ids.insert(sandbox_id.clone());
                                         matched_count += 1;
 
@@ -387,7 +393,9 @@ impl InitCommand {
                             let mut sandbox_only_count = 0;
                             for sandbox_product in &sandbox_catalog.products {
                                 // Check if this sandbox product was matched to a production product
-                                if let Some(sandbox_id) = sandbox_product.sandboxes.get(DEFAULT_SANDBOX) {
+                                if let Some(sandbox_id) =
+                                    sandbox_product.sandboxes.get(DEFAULT_SANDBOX)
+                                {
                                     if !matched_sandbox_ids.contains(sandbox_id) {
                                         // This is a sandbox-only product - add it to the catalog
                                         let mut new_product = sandbox_product.clone();
@@ -469,11 +477,13 @@ impl InitCommand {
                                     .iter()
                                     .find(|sm| sm.event_name == prod_meter.event_name)
                                 {
-                                    if let Some(sandbox_id) = sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
+                                    if let Some(sandbox_id) =
+                                        sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
                                     {
-                                        prod_meter
-                                            .sandboxes
-                                            .insert(DEFAULT_SANDBOX.to_string(), sandbox_id.clone());
+                                        prod_meter.sandboxes.insert(
+                                            DEFAULT_SANDBOX.to_string(),
+                                            sandbox_id.clone(),
+                                        );
                                         matched_sandbox_ids.insert(sandbox_id.clone());
                                         _matched_count += 1;
                                     }
@@ -483,7 +493,9 @@ impl InitCommand {
                             // Add sandbox-only meters
                             let mut _sandbox_only_count = 0;
                             for sandbox_meter in &sandbox_meter_collection.meters {
-                                if let Some(sandbox_id) = sandbox_meter.sandboxes.get(DEFAULT_SANDBOX) {
+                                if let Some(sandbox_id) =
+                                    sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
+                                {
                                     if !matched_sandbox_ids.contains(sandbox_id) {
                                         let mut new_meter = sandbox_meter.clone();
                                         new_meter.deployed_id = None;

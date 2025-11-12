@@ -2,7 +2,8 @@ pub mod db;
 pub mod endpoints;
 pub mod networks;
 
-use crate::facilitator::db::DbManager;
+use std::sync::Arc;
+
 use axum::{
     Router,
     routing::{get, post},
@@ -18,9 +19,10 @@ use kora_lib::{
     },
 };
 use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
-use std::sync::Arc;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
+
+use crate::facilitator::db::DbManager;
 
 pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 pub const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";

@@ -65,8 +65,9 @@ pub fn scaffold_moneymq_project(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::fs;
+
+    use super::*;
 
     #[test]
     fn test_scaffold_includes_payments_footer() {

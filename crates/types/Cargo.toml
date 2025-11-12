@@ -17,5 +17,6 @@ indexmap = { version = "2.12.0", features = ["serde"] }
 rand = "0.9"
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true }
 thiserror = { workspace = true }

@@ -217,15 +217,17 @@ fn default_catalog_path() -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
+    use moneymq_types::x402::config::constants::DEFAULT_FACILITATOR_PORT;
+    use tempfile::TempDir;
+
     use super::*;
     use crate::manifest::x402::{
         AcceptedNetworkConfig, FacilitatorConfig, NetworkIdentifier, PaymentConfig,
         SandboxFacilitatorConfig, SupportedNetworkConfig, ValidatorConfig, X402PaymentConfig,
         X402SandboxConfig,
     };
-    use moneymq_types::x402::config::constants::DEFAULT_FACILITATOR_PORT;
-    use std::fs;
-    use tempfile::TempDir;
 
     #[test]
     fn test_write_complete_manifest_to_disk() {
