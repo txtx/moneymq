@@ -4,9 +4,9 @@ use solana_client::{rpc_client::RpcClient, rpc_response::RpcVersionInfo};
 use solana_keypair::Pubkey;
 use tracing::{error, info};
 
-#[cfg(feature = "local_validators")]
+#[cfg(feature = "embedded_validator")]
 use surfpool_core::{rpc::minimal::SurfpoolRpcVersionInfo, surfnet::svm::SurfnetSvm};
-#[cfg(feature = "local_validators")]
+#[cfg(feature = "embedded_validator")]
 use surfpool_types::{RpcConfig, SimnetCommand, SimnetConfig, SimnetEvent, SurfpoolConfig};
 
 use crate::{
@@ -26,7 +26,7 @@ pub struct SolanaValidatorConfig {
     pub facilitator_pubkey: Pubkey,
 }
 
-#[cfg(feature = "local_validators")]
+#[cfg(feature = "embedded_validator")]
 /// Checks if a validator is running and if it is a surfnet
 fn check_if_validator_running(rpc_client: &RpcClient) -> (bool, bool) {
     match rpc_client.send::<Value>(
@@ -56,7 +56,7 @@ pub enum SurfpoolError {
     SpawnSurfnetError(#[from] std::io::Error),
 }
 
-#[cfg(feature = "local_validators")]
+#[cfg(feature = "embedded_validator")]
 pub fn start_surfpool(
     config: SolanaValidatorConfig,
     network_config: Option<&SolanaSurfnetConfig>,
@@ -157,7 +157,7 @@ pub fn start_surfpool(
     Ok(Some(simnet_commands_tx))
 }
 
-#[cfg(feature = "local_validators")]
+#[cfg(feature = "embedded_validator")]
 fn fund_facilitator_accounts(
     rpc_client: &RpcClient,
     facilitator_pubkey: Pubkey,

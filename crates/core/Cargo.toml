@@ -71,8 +71,8 @@ diesel_migrations = "2.2.0"
 libsqlite3-sys = { version = "0.28.0", features = ["bundled"], optional = true }
 
 [features]
-default = ["sqlite", "local_validators"]
-local_validators = ["surfpool-core", "surfpool-types"]
+default = ["sqlite", "embedded_validator"]
+embedded_validator = ["surfpool-core", "surfpool-types"]
 sqlite = [
     "diesel/sqlite",
     "diesel/returning_clauses_for_sqlite_3_35",

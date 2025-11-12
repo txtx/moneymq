@@ -45,6 +45,6 @@ urlencoding = "2.1.3"
 tempfile = "3.8"
 
 [features]
-default = ["sqlite", "local_validators"]
-local_validators = ["moneymq-core/local_validators"]
+default = ["sqlite", "embedded_validator"]
+embedded_validator = ["moneymq-core/embedded_validator"]
 sqlite = ["moneymq-core/sqlite"]
