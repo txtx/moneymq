@@ -248,7 +248,6 @@ impl RunCommand {
         }
 
         let networks_config = NetworksConfig::initialize(billing_networks, self.sandbox)
-            .await
             .map_err(RunCommandError::NetworksConfigInitializationError)?;
 
         // Build facilitator config once for sandbox mode

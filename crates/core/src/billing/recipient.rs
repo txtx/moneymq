@@ -39,7 +39,7 @@ impl Recipient {
     /// Instantiates a [Recipient] based on the provided network and optional recipient string
     /// If `recipient_str` is provided, it creates a `UserManaged` recipient.
     /// If not provided, it generates a `MoneyMqManaged` recipient.
-    pub async fn instantiate_with_index(
+    pub fn instantiate_with_index(
         network: &Network,
         recipient_str: Option<&String>,
         is_sandbox: bool,
@@ -64,7 +64,6 @@ impl Recipient {
                 Network::Solana => {
                     let managed_address =
                         MoneyMqManagedRecipient::generate_with_index(is_sandbox, index)
-                            .await
                             .map_err(RecipientError::ManagedAddressGenerationError)?;
                     Ok(Recipient::MoneyMqManaged(managed_address))
                 }
@@ -72,15 +71,15 @@ impl Recipient {
         }
     }
 
-    pub async fn instantiate(
+    pub fn instantiate(
         network: &Network,
         recipient_str: Option<&String>,
         is_sandbox: bool,
     ) -> Result<Recipient, RecipientError> {
-        Self::instantiate_with_index(network, recipient_str, is_sandbox, None).await
+        Self::instantiate_with_index(network, recipient_str, is_sandbox, None)
     }
 
-    pub async fn instantiate_payment_recipient(
+    pub fn instantiate_payment_recipient(
         network: &Network,
         recipient_str: Option<&String>,
         is_sandbox: bool,
@@ -104,7 +103,6 @@ impl Recipient {
                 Network::Solana => {
                     let managed_address =
                         MoneyMqManagedRecipient::generate_payment_recipient(is_sandbox)
-                            .await
                             .map_err(RecipientError::ManagedAddressGenerationError)?;
                     Ok(Recipient::MoneyMqManaged(managed_address))
                 }
@@ -121,13 +119,10 @@ pub enum MoneyMqManagedRecipient {
 }
 
 impl MoneyMqManagedRecipient {
-    pub async fn generate_with_index(
-        is_sandbox: bool,
-        index: Option<usize>,
-    ) -> Result<Self, String> {
+    pub fn generate_with_index(is_sandbox: bool, index: Option<usize>) -> Result<Self, String> {
         match is_sandbox {
             true => {
-                let local = LocalManagedRecipient::generate_with_index(index).await?;
+                let local = LocalManagedRecipient::generate_with_index(index)?;
                 Ok(MoneyMqManagedRecipient::Local(local))
             }
             false => {
@@ -137,14 +132,14 @@ impl MoneyMqManagedRecipient {
         }
     }
 
-    pub async fn generate(is_sandbox: bool) -> Result<Self, String> {
-        Self::generate_with_index(is_sandbox, None).await
+    pub fn generate(is_sandbox: bool) -> Result<Self, String> {
+        Self::generate_with_index(is_sandbox, None)
     }
 
-    pub async fn generate_payment_recipient(is_sandbox: bool) -> Result<Self, String> {
+    pub fn generate_payment_recipient(is_sandbox: bool) -> Result<Self, String> {
         match is_sandbox {
             true => {
-                let local = LocalManagedRecipient::generate_payment_recipient().await?;
+                let local = LocalManagedRecipient::generate_payment_recipient()?;
                 Ok(MoneyMqManagedRecipient::Local(local))
             }
             false => {
@@ -183,7 +178,7 @@ pub struct LocalManagedRecipient {
 impl LocalManagedRecipient {
     /// Generates a new MoneyMQ-managed recipient address
     /// If `index` is provided, generates a deterministic keypair with a label
-    pub async fn generate_with_index(index: Option<usize>) -> Result<Self, String> {
+    pub fn generate_with_index(index: Option<usize>) -> Result<Self, String> {
         let (keypair, label) = match index {
             Some(i) => {
                 // Deterministic keypair generation using a seed derived from index
@@ -210,11 +205,11 @@ impl LocalManagedRecipient {
 
     /// Legacy method for backward compatibility
     pub async fn generate() -> Result<Self, String> {
-        Self::generate_with_index(None).await
+        Self::generate_with_index(None)
     }
 
     /// Generate a deterministic payment recipient
-    pub async fn generate_payment_recipient() -> Result<Self, String> {
+    pub fn generate_payment_recipient() -> Result<Self, String> {
         let seed = Self::generate_seed_for_payment_recipient();
         let keypair = solana_keypair::Keypair::new_from_array(seed);
         let pubkey = keypair.pubkey();

@@ -25,7 +25,7 @@ pub struct NetworksConfig {
 
 impl NetworksConfig {
     /// Initializes the [NetworksConfig] with the provided network configurations
-    pub async fn initialize(
+    pub fn initialize(
         networks_map: IndexMap<
             String,
             (MoneyMqNetwork, Option<String>, Vec<String>, Vec<String>), // (network, payment_recipient, currencies, user_accounts)
@@ -43,9 +43,8 @@ impl NetworksConfig {
             let network: Network = moneymq_network.clone().into();
             let mut currencies = vec![];
             for symbol in currencies_strs {
-                let currency = Currency::from_symbol_and_network(&symbol, &network)
-                    .await
-                    .map_err(|e| {
+                let currency =
+                    Currency::from_symbol_and_network(&symbol, &network).map_err(|e| {
                         NetworksConfigError::InitializationError(network.clone(), e.to_string())
                     })?;
                 currencies.push(currency);
@@ -56,7 +55,6 @@ impl NetworksConfig {
                 payment_recipient_opt.as_ref(),
                 is_sandbox,
             )
-            .await
             .map_err(|e| {
                 NetworksConfigError::InitializationError(network.clone(), e.to_string())
             })?;
@@ -74,7 +72,6 @@ impl NetworksConfig {
                             is_sandbox,
                             Some(i),
                         )
-                        .await
                         .map_err(|e| {
                             NetworksConfigError::InitializationError(network.clone(), e.to_string())
                         })?;

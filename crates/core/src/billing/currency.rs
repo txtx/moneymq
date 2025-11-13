@@ -9,13 +9,13 @@ pub enum Currency {
 }
 
 impl Currency {
-    pub async fn from_symbol_and_network(
+    pub fn from_symbol_and_network(
         symbol: &str,
         network: &moneymq_types::x402::Network,
     ) -> Result<Self, String> {
         match network {
             moneymq_types::x402::Network::Solana => {
-                let solana_currency = SolanaCurrency::from_symbol(symbol).await?;
+                let solana_currency = SolanaCurrency::from_symbol(symbol)?;
                 Ok(Currency::Solana(solana_currency))
             }
         }
@@ -54,7 +54,7 @@ pub struct SolanaCurrency {
 }
 
 impl SolanaCurrency {
-    pub async fn from_symbol(symbol: &str) -> Result<Self, String> {
+    pub fn from_symbol(symbol: &str) -> Result<Self, String> {
         // TODO Placeholder implementation - in real code, this would look up the mint and token program
         Ok(SolanaCurrency {
             symbol: symbol.to_string(),
