@@ -59,7 +59,9 @@ impl DbManager {
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
         debug!("Running database migrations...");
-        run_migrations(&mut pooled_connection)?;
+        if let Err(e) = run_migrations(&mut pooled_connection) {
+            debug!("Migrations failure: {}", e);
+        }
         Ok(Self { conn: pool })
     }
 
