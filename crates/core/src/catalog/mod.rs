@@ -14,7 +14,10 @@ use axum::{
     routing::{get, post},
 };
 use moneymq_studio_ui::serve_studio_static_files;
-use moneymq_types::{Meter, Product, x402::transactions::FacilitatedTransaction};
+use moneymq_types::{
+    Meter, Product,
+    x402::{config::facilitator::ValidatorsConfig, transactions::FacilitatedTransaction},
+};
 use stripe::types::StripePaymentIntent;
 use tower_http::cors::{Any, CorsLayer};
 use url::Url;
@@ -33,7 +36,7 @@ pub struct ProviderState {
     pub catalog_name: Option<String>,
     pub catalog_description: Option<String>,
     pub facilitator_pubkey: Option<String>,
-    pub validator_rpc_url: Option<Url>,
+    pub validators: ValidatorsConfig,
     pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
     pub payment_intents: Arc<Mutex<HashMap<String, StripePaymentIntent>>>,
     pub kora_config: Option<Arc<kora_lib::Config>>,
@@ -45,7 +48,6 @@ pub struct ProviderState {
 pub struct Facilitator {
     pub products: Arc<Vec<Product>>,
     pub meters: Arc<Vec<Meter>>,
-    pub use_sandbox: bool,
 }
 
 impl ProviderState {
@@ -60,7 +62,7 @@ impl ProviderState {
         catalog_name: Option<String>,
         catalog_description: Option<String>,
         facilitator_pubkey: Option<String>,
-        validator_rpc_url: Option<Url>,
+        validators_config: ValidatorsConfig,
         kora_config: Option<Arc<kora_lib::Config>>,
         signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
     ) -> Self {
@@ -74,7 +76,7 @@ impl ProviderState {
             catalog_name,
             catalog_description,
             facilitator_pubkey,
-            validator_rpc_url,
+            validators: validators_config,
             transactions: Arc::new(Mutex::new(Vec::new())),
             payment_intents: Arc::new(Mutex::new(HashMap::new())),
             kora_config,
@@ -101,7 +103,7 @@ pub async fn start_provider(
     catalog_name: Option<String>,
     catalog_description: Option<String>,
     facilitator_pubkey: Option<String>,
-    validator_rpc_url: Option<Url>,
+    validators_config: ValidatorsConfig,
     kora_config: Option<Arc<kora_lib::Config>>,
     signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -115,7 +117,7 @@ pub async fn start_provider(
         catalog_name,
         catalog_description,
         facilitator_pubkey,
-        validator_rpc_url,
+        validators_config,
         kora_config,
         signer_pool,
     );

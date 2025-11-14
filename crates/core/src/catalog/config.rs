@@ -1,7 +1,7 @@
 use std::fs;
 
 use axum::{Json, extract::State, response::IntoResponse};
-use moneymq_types::x402::MixedAddress;
+use moneymq_types::x402::{MixedAddress, Network, config::facilitator::ValidatorNetworkConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solana_pubkey::Pubkey;
@@ -26,7 +26,7 @@ pub struct X402Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub facilitator: Option<FacilitatorConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub validator: Option<ValidatorConfig>,
+    pub validator: Option<ValidatorNetworkConfig>,
 }
 
 /// Account configuration including branding
@@ -71,17 +71,9 @@ pub struct FacilitatorConfig {
     pub url: String,
 }
 
-/// Validator configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ValidatorConfig {
-    pub solana_rpc_url: String,
-    pub solana_ws_url: String,
-    pub network: String,
-}
-
 /// Config endpoint - returns provider configuration including branding and x402 settings
 pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse {
+    let network = Network::Solana;
     // Build account configuration
     let mut account = AccountConfig {
         name: state.catalog_name.clone(),
@@ -202,33 +194,7 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
         None
     };
 
-    let validator = state.validator_rpc_url.as_ref().and_then(|rpc_url| {
-        state
-            .networks_config
-            .configs
-            .iter()
-            .next()
-            .map(|(network_name, _)| {
-                // Convert HTTP RPC URL to WebSocket URL with hardcoded port 8900
-                let mut ws_url = rpc_url.clone();
-                ws_url
-                    .set_scheme(if rpc_url.scheme() == "https" {
-                        "wss"
-                    } else {
-                        "ws"
-                    })
-                    .expect("Failed to set websocket scheme");
-                ws_url
-                    .set_port(Some(8900))
-                    .expect("Failed to set websocket port");
-
-                ValidatorConfig {
-                    solana_rpc_url: rpc_url.to_string(),
-                    solana_ws_url: ws_url.to_string(),
-                    network: network_name.clone(),
-                }
-            })
-    });
+    let validator = state.validators.networks.get(&network.to_string()).cloned();
 
     let x402 = X402Config {
         payout_account,

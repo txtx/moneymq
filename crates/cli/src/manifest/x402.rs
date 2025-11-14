@@ -9,7 +9,8 @@ use moneymq_types::x402::config::{
     },
     facilitator::{
         FacilitatorConfig as FacilitatorRuntimeConfig, FacilitatorNetworkConfig,
-        FacilitatorRpcConfig, SolanaSurfnetFacilitatorConfig,
+        SolanaSurfnetFacilitatorConfig, SurfnetRpcConfig, ValidatorNetworkConfig,
+        ValidatorsConfig as ValidatorRuntimeConfig,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -183,9 +184,9 @@ impl Default for ValidatorConfig {
 
 // Conversion implementations to maintain compatibility with existing code
 
-impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
+impl TryInto<(FacilitatorRuntimeConfig, ValidatorRuntimeConfig)> for &X402SandboxConfig {
     type Error = String;
-    fn try_into(self) -> Result<FacilitatorRuntimeConfig, Self::Error> {
+    fn try_into(self) -> Result<(FacilitatorRuntimeConfig, ValidatorRuntimeConfig), Self::Error> {
         let facilitator_config = match &self.facilitator {
             FacilitatorConfig::Embedded(config) => config,
             FacilitatorConfig::ServiceUrl { service_url } => {
@@ -196,20 +197,23 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
             }
         };
 
-        let mut networks = HashMap::new();
+        let mut facilitators = HashMap::new();
+        let mut validators = HashMap::new();
 
         // Convert supported networks to facilitator network configs
         for (network_id, network_config) in &facilitator_config.supported {
             let validator_config = self.validator.get(network_id).cloned().unwrap_or_default();
+            let validator_rpc_config = SurfnetRpcConfig::from_parts(
+                &validator_config.binding_address,
+                validator_config.rpc_binding_port,
+                validator_config.ws_binding_port,
+            )?;
 
-            let rpc_config = if let Some(ref url) = network_config.rpc_url {
-                FacilitatorRpcConfig::from_url(url)?.with_ws_port(validator_config.ws_binding_port)
+            let rpc_url = if let Some(ref url) = network_config.rpc_url {
+                url.parse::<Url>()
+                    .map_err(|e| format!("Failed to parse RPC URL {}: {}", url, e))?
             } else {
-                FacilitatorRpcConfig::from_parts(
-                    &validator_config.binding_address,
-                    validator_config.rpc_binding_port,
-                    validator_config.ws_binding_port,
-                )?
+                validator_rpc_config.rpc_url.clone()
             };
 
             let payer_pubkey = std::env::var(&SOLANA_KEYPAIR_ENV)
@@ -219,12 +223,16 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
                 });
 
             // For now, all networks are treated as SolanaSurfnet in sandbox
-            networks.insert(
+            facilitators.insert(
                 network_id.to_string(),
                 FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
-                    rpc_config,
+                    rpc_url,
                     payer_pubkey,
                 }),
+            );
+            validators.insert(
+                network_id.to_string(),
+                ValidatorNetworkConfig::SolanaSurfnet(validator_rpc_config),
             );
         }
 
@@ -235,6 +243,14 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
         .parse::<Url>()
         .map_err(|e| format!("Failed to parse facilitator URL: {}", e))?;
 
-        Ok(FacilitatorRuntimeConfig { url, networks })
+        Ok((
+            FacilitatorRuntimeConfig {
+                url,
+                networks: facilitators,
+            },
+            ValidatorRuntimeConfig {
+                networks: validators,
+            },
+        ))
     }
 }

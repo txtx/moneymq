@@ -430,13 +430,13 @@ impl MoneyMqMcp {
         // Build success message with next steps
         let success_msg = if is_stripe {
             format!(
-                "✓ Created {} product(s) in {}\n\nNext steps:\n\n1. Sync to Stripe:\n   moneymq catalog sync\n\n2. Or run MoneyMQ Studio to test:\n   moneymq start",
+                "✓ Created {} product(s) in {}\n\nNext steps:\n\n1. Sync to Stripe:\n   moneymq catalog sync\n\n2. Or run MoneyMQ Studio to test:\n   moneymq run",
                 created_files.len(),
                 products_path.display()
             )
         } else {
             format!(
-                "✓ Created {} product(s) in {}\n\nNext step:\nRun MoneyMQ Studio to test your products:\n   moneymq start --sandbox",
+                "✓ Created {} product(s) in {}\n\nNext step:\nRun MoneyMQ Studio to test your products:\n   moneymq sandbox",
                 created_files.len(),
                 products_path.display()
             )
