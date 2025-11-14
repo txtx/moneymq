@@ -1,4 +1,4 @@
-use axum::{Extension, Json};
+use axum::{Json, extract::State};
 use serde_json::{Value, json};
 
 use crate::{
@@ -9,13 +9,7 @@ use crate::{
 };
 
 /// GET /sandbox/accounts - List local network accounts
-pub async fn list_accounts(
-    Extension(state): Extension<Option<ProviderState>>,
-) -> Result<Json<Value>, Json<Value>> {
-    let Some(state) = state else {
-        return Ok(Json(json!({})));
-    };
-
+pub async fn list_accounts(State(state): State<ProviderState>) -> Result<Json<Value>, Json<Value>> {
     let networks_config = &state.networks_config;
 
     let mut res = json!({});
