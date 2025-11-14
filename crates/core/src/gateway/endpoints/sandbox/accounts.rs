@@ -5,12 +5,12 @@ use crate::{
     billing::recipient::{
         LocalManagedRecipient, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
     },
-    facilitator::FacilitatorState,
+    catalog::ProviderState,
 };
 
 /// GET /sandbox/accounts - List local network accounts
 pub async fn list_accounts(
-    Extension(state): Extension<Option<FacilitatorState>>,
+    Extension(state): Extension<Option<ProviderState>>,
 ) -> Result<Json<Value>, Json<Value>> {
     let Some(state) = state else {
         return Ok(Json(json!({})));

@@ -39,7 +39,6 @@ pub struct FacilitatorState {
     pub db_manager: Arc<db::DbManager>,
     pub kora_config: Arc<Config>,
     pub signer_pool: Arc<SignerPool>,
-    pub networks_config: crate::billing::NetworksConfig,
 }
 
 impl FacilitatorState {
@@ -48,14 +47,12 @@ impl FacilitatorState {
         database_url: &str,
         kora_config: Config,
         signer_pool: SignerPool,
-        networks_config: crate::billing::NetworksConfig,
     ) -> Self {
         Self {
             config: Arc::new(config),
             db_manager: Arc::new(DbManager::new(database_url).unwrap()),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
-            networks_config,
         }
     }
 }
@@ -72,8 +69,6 @@ pub fn create_router(state: FacilitatorState) -> Router {
             "/admin/transactions",
             get(endpoints::admin::list_transactions),
         )
-        // Sandbox dev endpoints
-        .route("/sandbox/accounts", get(endpoints::sandbox::list_accounts))
         .layer(cors_layer)
         .layer(Extension(Some(state)))
 }
@@ -81,7 +76,6 @@ pub fn create_router(state: FacilitatorState) -> Router {
 /// Start the facilitator server
 pub async fn start_facilitator(
     config: FacilitatorConfig,
-    networks_config: crate::billing::NetworksConfig,
     _sandbox: bool,
 ) -> Result<
     JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
@@ -145,7 +139,6 @@ pub async fn start_facilitator(
         format!("sqlite://{}", "payments.sqlite").as_str(),
         kora_config,
         signer_pool,
-        networks_config,
     );
     let app = create_router(state);
 
