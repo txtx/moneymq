@@ -52,17 +52,12 @@ pub const DEFAULT_PAYMENTS_FOOTER: &str = "\
 #           binding_address: 0.0.0.0
 #           binding_port: 8080
 #           supported:
-#             solana:
-#               currencies:
-#                 - USDC
 #               fee: 0
-#               # Optional: Pre-funded test accounts
-#               # user_accounts:
-#               #   - user1_account
-#               #   - user2_account
+#               rpc_url: http://localhost:8899
 #
 #         # Local Solana validator configuration
 #         validator:
-#           binding_address: 0.0.0.0
-#           rpc_binding_port: 8899
-#           ws_binding_port: 8900";
+#           solana:
+#               binding_address: 0.0.0.0
+#               rpc_binding_port: 8899
+#               ws_binding_port: 8900";

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
+use moneymq_core::facilitator::SOLANA_KEYPAIR_ENV;
 use moneymq_types::x402::config::{
     constants::{
         DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT, DEFAULT_SANDBOX,
@@ -12,7 +13,7 @@ use moneymq_types::x402::config::{
     },
 };
 use serde::{Deserialize, Serialize};
-use solana_keypair::{EncodableKey, Keypair};
+use solana_keypair::{Keypair, Signer};
 use url::Url;
 
 /// Payment configuration with protocol as enum tag
@@ -112,8 +113,8 @@ pub struct X402SandboxConfig {
     pub facilitator: FacilitatorConfig,
 
     /// Validator configuration for sandbox
-    #[serde(default)]
-    pub validator: ValidatorConfig,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub validator: IndexMap<NetworkIdentifier, ValidatorConfig>,
 }
 
 /// Sandbox facilitator configuration
@@ -145,28 +146,13 @@ impl Default for SandboxFacilitatorConfig {
 /// Supported network configuration for sandbox
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupportedNetworkConfig {
-    /// Payment recipient address (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipient: Option<String>,
-
-    /// Supported currencies for this network
-    pub currencies: Vec<String>,
-
     /// Fee amount (in smallest unit)
     #[serde(default)]
     pub fee: u64,
 
-    /// Optional payer keypair path for this network
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payer_keypair_path: Option<String>,
-
     /// Optional RPC URL for this network
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rpc_url: Option<String>,
-
-    /// Optional user accounts to fund in sandbox
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub user_accounts: Vec<String>,
 }
 
 /// Validator configuration for sandbox
@@ -214,29 +200,30 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
 
         // Convert supported networks to facilitator network configs
         for (network_id, network_config) in &facilitator_config.supported {
+            let validator_config = self.validator.get(network_id).cloned().unwrap_or_default();
+
             let rpc_config = if let Some(ref url) = network_config.rpc_url {
-                FacilitatorRpcConfig::from_url(url)?.with_ws_port(self.validator.ws_binding_port)
+                FacilitatorRpcConfig::from_url(url)?.with_ws_port(validator_config.ws_binding_port)
             } else {
                 FacilitatorRpcConfig::from_parts(
-                    &self.validator.binding_address,
-                    self.validator.rpc_binding_port,
-                    self.validator.ws_binding_port,
+                    &validator_config.binding_address,
+                    validator_config.rpc_binding_port,
+                    validator_config.ws_binding_port,
                 )?
             };
 
-            let payer_keypair = if let Some(ref path) = network_config.payer_keypair_path {
-                Keypair::read_from_file(path)
-                    .map_err(|e| format!("Failed to read Solana keypair from file: {}", e))?
-            } else {
-                Keypair::new()
-            };
+            let payer_pubkey = std::env::var(&SOLANA_KEYPAIR_ENV)
+                .ok()
+                .map(|payer_keypair_bs58| {
+                    Keypair::from_base58_string(&payer_keypair_bs58).pubkey()
+                });
 
             // For now, all networks are treated as SolanaSurfnet in sandbox
             networks.insert(
                 network_id.to_string(),
                 FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
                     rpc_config,
-                    payer_keypair,
+                    payer_pubkey,
                 }),
             );
         }

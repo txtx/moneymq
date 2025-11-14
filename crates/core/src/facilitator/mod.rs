@@ -24,6 +24,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::facilitator::db::DbManager;
 
+pub const SOLANA_KEYPAIR_ENV: &str = "MONEYMQ_SOLANA_FACILITATOR_KEYPAIR";
 pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 pub const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
 pub const SPL_TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -38,7 +39,6 @@ pub struct FacilitatorState {
     pub db_manager: Arc<db::DbManager>,
     pub kora_config: Arc<Config>,
     pub signer_pool: Arc<SignerPool>,
-    pub networks_config: crate::billing::NetworksConfig,
 }
 
 impl FacilitatorState {
@@ -47,14 +47,12 @@ impl FacilitatorState {
         database_url: &str,
         kora_config: Config,
         signer_pool: SignerPool,
-        networks_config: crate::billing::NetworksConfig,
     ) -> Self {
         Self {
             config: Arc::new(config),
             db_manager: Arc::new(DbManager::new(database_url).unwrap()),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
-            networks_config,
         }
     }
 }
@@ -71,8 +69,6 @@ pub fn create_router(state: FacilitatorState) -> Router {
             "/admin/transactions",
             get(endpoints::admin::list_transactions),
         )
-        // Sandbox dev endpoints
-        .route("/sandbox/accounts", get(endpoints::sandbox::list_accounts))
         .layer(cors_layer)
         .layer(Extension(Some(state)))
 }
@@ -80,7 +76,6 @@ pub fn create_router(state: FacilitatorState) -> Router {
 /// Start the facilitator server
 pub async fn start_facilitator(
     config: FacilitatorConfig,
-    networks_config: crate::billing::NetworksConfig,
     _sandbox: bool,
 ) -> Result<
     JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
@@ -117,22 +112,16 @@ pub async fn start_facilitator(
         .networks
         .iter()
         .filter_map(|(n, c)| match c {
-            FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
-                let key = format!("FACILITATOR_{}_SIGNER_POOL", n);
-                unsafe {
-                    let value = cfg.payer_keypair.to_base58_string();
-                    std::env::set_var(key.clone(), value);
-                }
-                Some(SignerConfig {
-                    name: format!("facilitator-{}-signer", n),
-                    weight: None,
-                    config: SignerTypeConfig::Memory {
-                        config: MemorySignerConfig {
-                            private_key_env: key,
-                        },
+            FacilitatorNetworkConfig::SolanaSurfnet(_) => Some(SignerConfig {
+                name: format!("facilitator-{}-signer", n),
+                weight: None,
+                config: SignerTypeConfig::Memory {
+                    config: MemorySignerConfig {
+                        // Safe to assume the keypair is set here
+                        private_key_env: SOLANA_KEYPAIR_ENV.into(),
                     },
-                })
-            }
+                },
+            }),
             FacilitatorNetworkConfig::SolanaMainnet(_) => None,
         })
         .collect::<Vec<_>>();
@@ -150,7 +139,6 @@ pub async fn start_facilitator(
         format!("sqlite://{}", "payments.sqlite").as_str(),
         kora_config,
         signer_pool,
-        networks_config,
     );
     let app = create_router(state);
 

@@ -27,9 +27,7 @@ use url::Url;
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 use crate::{
     Context,
-    manifest::x402::{
-        FacilitatorConfig as ManifestFacilitatorConfig, NetworkIdentifier, PaymentConfig,
-    },
+    manifest::x402::{NetworkIdentifier, PaymentConfig},
 };
 
 #[derive(Debug, Clone, PartialEq, clap::Args)]
@@ -186,50 +184,21 @@ impl RunCommand {
             .iter()
             .flat_map(|(_name, payment_config)| match payment_config {
                 PaymentConfig::X402(x402_config) => {
-                    if self.sandbox {
-                        // Get networks from sandbox config
-                        x402_config
-                            .sandboxes
-                            .get("default")
-                            .and_then(|sandbox| match &sandbox.facilitator {
-                                ManifestFacilitatorConfig::Embedded(config) => Some(
-                                    config
-                                        .supported
-                                        .iter()
-                                        .map(|(network_id, network)| {
-                                            (
-                                                network_id.to_string(),
-                                                (
-                                                    MoneyMqNetwork::SolanaSurfnet,
-                                                    network.recipient.clone(),
-                                                    network.currencies.clone(),
-                                                    network.user_accounts.clone(),
-                                                ),
-                                            )
-                                        })
-                                        .collect::<Vec<_>>(),
-                                ),
-                                ManifestFacilitatorConfig::ServiceUrl { .. } => None,
-                            })
-                            .unwrap_or_default()
-                    } else {
-                        // Get networks from accepted config
-                        x402_config
-                            .accepted
-                            .iter()
-                            .map(|(network_id, network)| {
+                    // Get networks from accepted config
+                    x402_config
+                        .accepted
+                        .iter()
+                        .map(|(network_id, network)| {
+                            (
+                                network_id.to_string(),
                                 (
-                                    network_id.to_string(),
-                                    (
-                                        MoneyMqNetwork::SolanaSurfnet,
-                                        network.recipient.clone(),
-                                        network.currencies.clone(),
-                                        vec![],
-                                    ),
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                    }
+                                    MoneyMqNetwork::SolanaSurfnet,
+                                    network.recipient.clone(),
+                                    network.currencies.clone(),
+                                ),
+                            )
+                        })
+                        .collect::<Vec<_>>()
                 }
             })
             .collect::<IndexMap<_, _>>();
@@ -242,7 +211,6 @@ impl RunCommand {
                     MoneyMqNetwork::SolanaSurfnet,
                     None,                     // No payment recipient for default config
                     vec!["USDC".to_string()], // Default currency
-                    vec![],                   // No user accounts for default config
                 ),
             );
         }
@@ -400,23 +368,41 @@ type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
 type ValidatorData = IndexMap<Network, url::Url>;
 
 async fn start_facilitator_networks(
-    facilitator_config: FacilitatorConfig,
+    mut facilitator_config: FacilitatorConfig,
     networks_config: &NetworksConfig,
     sandbox: bool,
 ) -> Result<Option<(FacilitatorHandle, ValidatorData, url::Url)>, String> {
     let mut local_validator_handles: IndexMap<Network, Url> = IndexMap::new();
     #[cfg(feature = "embedded_validator")]
-    for (network_name, network_config) in facilitator_config.networks.iter() {
-        match network_config {
-            FacilitatorNetworkConfig::SolanaSurfnet(surfnet_config) => {
+    for (network_name, facilitator_network_config) in facilitator_config.networks.iter_mut() {
+        match facilitator_network_config {
+            FacilitatorNetworkConfig::SolanaSurfnet(surfnet_facilitator_config) => {
                 let network_config = networks_config
                     .configs
                     .get(network_name)
                     .and_then(|c| c.surfnet_config());
 
+                // If the payer pubkey is set, we can assume it came from the env file, so it's already set
+                // If the payer pubkey is not set, generate a new one and set the env var
+                if surfnet_facilitator_config.payer_pubkey.is_none() {
+                    use solana_keypair::Keypair;
+
+                    let new_keypair = Keypair::new();
+                    surfnet_facilitator_config.payer_pubkey = Some(new_keypair.pubkey());
+                    // It needs to be written to the env so Kora can pick it up.
+                    // TODO: remove once Kora can accept Keypair directly
+                    unsafe {
+                        use moneymq_core::facilitator::SOLANA_KEYPAIR_ENV;
+
+                        let value = new_keypair.to_base58_string();
+                        std::env::set_var(SOLANA_KEYPAIR_ENV, value);
+                    }
+                }
                 let validator_config = SolanaValidatorConfig {
-                    rpc_config: surfnet_config.rpc_config.clone(),
-                    facilitator_pubkey: surfnet_config.payer_keypair.pubkey(),
+                    rpc_config: surfnet_facilitator_config.rpc_config.clone(),
+                    facilitator_pubkey: surfnet_facilitator_config
+                        .payer_pubkey
+                        .expect("Facilitator pubkey should be initialized"),
                 };
 
                 let Some(_) =
@@ -430,8 +416,10 @@ async fn start_facilitator_networks(
                 else {
                     continue;
                 };
-                local_validator_handles
-                    .insert(Network::Solana, surfnet_config.rpc_config.rpc_url.clone());
+                local_validator_handles.insert(
+                    Network::Solana,
+                    surfnet_facilitator_config.rpc_config.rpc_url.clone(),
+                );
             }
             FacilitatorNetworkConfig::SolanaMainnet(_) => {
                 // No local validator for mainnet
@@ -440,13 +428,9 @@ async fn start_facilitator_networks(
     }
 
     let url = facilitator_config.url.clone();
-    let handle = moneymq_core::facilitator::start_facilitator(
-        facilitator_config,
-        networks_config.clone(),
-        sandbox,
-    )
-    .await
-    .map_err(|e| format!("Failed to start facilitator: {e}"))?;
+    let handle = moneymq_core::facilitator::start_facilitator(facilitator_config, sandbox)
+        .await
+        .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 
     Ok(Some((handle, local_validator_handles, url)))
 }

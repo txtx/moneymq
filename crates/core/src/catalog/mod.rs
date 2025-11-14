@@ -19,7 +19,7 @@ use stripe::types::StripePaymentIntent;
 use tower_http::cors::{Any, CorsLayer};
 use url::Url;
 
-use crate::{billing::NetworksConfig, facilitator::endpoints::middleware::x402_post};
+use crate::{billing::NetworksConfig, facilitator::endpoints::middleware::x402_post, gateway};
 
 /// Application state
 #[derive(Clone)]
@@ -166,6 +166,11 @@ pub async fn start_provider(
         .route(
             "/v1/subscriptions",
             x402_post(stripe::create_subscription, Some(state.clone())),
+        )
+        // Sandbox dev endpoints
+        .route(
+            "/sandbox/accounts",
+            get(gateway::endpoints::sandbox::list_accounts),
         )
         .fallback(get(serve_studio_static_files))
         .layer(cors_layer)
