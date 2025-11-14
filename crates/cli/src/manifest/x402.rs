@@ -224,12 +224,11 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
                 )?
             };
 
-            let payer_keypair = if let Some(ref path) = network_config.payer_keypair_path {
-                Keypair::read_from_file(path)
-                    .map_err(|e| format!("Failed to read Solana keypair from file: {}", e))?
-            } else {
-                Keypair::new()
-            };
+            let payer_pubkey = std::env::var(&SOLANA_KEYPAIR_ENV)
+                .ok()
+                .map(|payer_keypair_bs58| {
+                    Keypair::from_base58_string(&payer_keypair_bs58).pubkey()
+                });
 
             // For now, all networks are treated as SolanaSurfnet in sandbox
             networks.insert(

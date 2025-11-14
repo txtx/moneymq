@@ -1,4 +1,5 @@
 use solana_keypair::{Keypair, Signer};
+use solana_pubkey::Pubkey;
 use std::{
     collections::HashMap,
     fmt::{self, Display},
@@ -20,7 +21,7 @@ impl FacilitatorConfig {
     pub fn get_facilitator_pubkey(&self, name: &str) -> Option<String> {
         self.networks.get(name).and_then(|config| match config {
             FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
-                Some(cfg.payer_keypair.pubkey().to_string())
+                cfg.payer_pubkey.map(|pk| pk.to_string())
             }
             FacilitatorNetworkConfig::SolanaMainnet(cfg) => {
                 Some(cfg.payer_keypair.pubkey().to_string())
@@ -59,7 +60,7 @@ impl FacilitatorNetworkConfig {
 #[derive(Debug)]
 pub struct SolanaSurfnetFacilitatorConfig {
     pub rpc_config: FacilitatorRpcConfig,
-    pub payer_keypair: Keypair,
+    pub payer_pubkey: Option<Pubkey>,
 }
 
 impl Default for SolanaSurfnetFacilitatorConfig {
@@ -73,7 +74,7 @@ impl Default for SolanaSurfnetFacilitatorConfig {
                 rpc_port: Some(8899),
                 ws_port: Some(8900),
             },
-            payer_keypair: Keypair::new(),
+            payer_pubkey: None,
         }
     }
 }
@@ -116,9 +117,12 @@ impl FacilitatorRpcConfig {
 
 impl SolanaSurfnetFacilitatorConfig {
     pub fn extra(&self) -> Option<SupportedPaymentKindExtra> {
-        Some(SupportedPaymentKindExtra {
-            fee_payer: self.payer_keypair.pubkey().into(),
-        })
+        match self.payer_pubkey {
+            Some(pubkey) => Some(SupportedPaymentKindExtra {
+                fee_payer: pubkey.into(),
+            }),
+            None => None,
+        }
     }
 }
 
@@ -164,7 +168,8 @@ impl Display for SolanaSurfnetFacilitatorConfig {
             f,
             "SolanaSurfnet {{ rpc_url: {}, payer_pubkey: {} }}",
             self.rpc_config.rpc_url,
-            self.payer_keypair.pubkey()
+            self.payer_pubkey
+                .map_or("None".to_string(), |pk| pk.to_string())
         )
     }
 }

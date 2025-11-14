@@ -24,6 +24,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 use crate::facilitator::db::DbManager;
 
+pub const SOLANA_KEYPAIR_ENV: &str = "MONEYMQ_SOLANA_FACILITATOR_KEYPAIR";
 pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";
 pub const COMPUTE_BUDGET_PROGRAM_ID: &str = "ComputeBudget111111111111111111111111111111";
 pub const SPL_TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -117,22 +118,16 @@ pub async fn start_facilitator(
         .networks
         .iter()
         .filter_map(|(n, c)| match c {
-            FacilitatorNetworkConfig::SolanaSurfnet(cfg) => {
-                let key = format!("FACILITATOR_{}_SIGNER_POOL", n);
-                unsafe {
-                    let value = cfg.payer_keypair.to_base58_string();
-                    std::env::set_var(key.clone(), value);
-                }
-                Some(SignerConfig {
-                    name: format!("facilitator-{}-signer", n),
-                    weight: None,
-                    config: SignerTypeConfig::Memory {
-                        config: MemorySignerConfig {
-                            private_key_env: key,
-                        },
+            FacilitatorNetworkConfig::SolanaSurfnet(_) => Some(SignerConfig {
+                name: format!("facilitator-{}-signer", n),
+                weight: None,
+                config: SignerTypeConfig::Memory {
+                    config: MemorySignerConfig {
+                        // Safe to assume the keypair is set here
+                        private_key_env: SOLANA_KEYPAIR_ENV.into(),
                     },
-                })
-            }
+                },
+            }),
             FacilitatorNetworkConfig::SolanaMainnet(_) => None,
         })
         .collect::<Vec<_>>();
