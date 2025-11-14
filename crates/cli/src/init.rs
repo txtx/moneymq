@@ -565,7 +565,7 @@ impl InitCommand {
                     "{}",
                     style("Or run MoneyMQ Studio to perform payment simulations:")
                 );
-                println!("  {}", style("moneymq start").cyan().bold());
+                println!("  {}", style("moneymq sandbox").cyan().bold());
             }
             _ => return Err(format!("Unsupported provider: {}", provider)),
         }

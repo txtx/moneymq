@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use solana_keypair::{Keypair, Signer};
 use solana_pubkey::Pubkey;
 use std::{
@@ -8,7 +9,7 @@ use url::Url;
 
 use crate::x402::{
     Network, SupportedPaymentKindExtra,
-    config::constants::{DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT},
+    config::constants::{DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT, DEFAULT_WS_PORT},
 };
 
 #[derive(Debug)]
@@ -28,6 +29,11 @@ impl FacilitatorConfig {
             }
         })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct ValidatorsConfig {
+    pub networks: HashMap<String, ValidatorNetworkConfig>,
 }
 
 #[derive(Debug)]
@@ -51,42 +57,59 @@ impl FacilitatorNetworkConfig {
     }
     pub fn rpc_url(&self) -> &Url {
         match self {
-            FacilitatorNetworkConfig::SolanaSurfnet(cfg) => &cfg.rpc_config.rpc_url,
-            FacilitatorNetworkConfig::SolanaMainnet(cfg) => &cfg.rpc_config.rpc_url,
+            FacilitatorNetworkConfig::SolanaSurfnet(cfg) => &cfg.rpc_url,
+            FacilitatorNetworkConfig::SolanaMainnet(cfg) => &cfg.rpc_url,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct SolanaSurfnetFacilitatorConfig {
-    pub rpc_config: FacilitatorRpcConfig,
+    pub rpc_url: Url,
     pub payer_pubkey: Option<Pubkey>,
 }
 
 impl Default for SolanaSurfnetFacilitatorConfig {
     fn default() -> Self {
         Self {
-            rpc_config: FacilitatorRpcConfig {
-                rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
-                    .parse::<Url>()
-                    .expect("Failed to parse default RPC URL"),
-                bind_host: Some("0.0.0.0".to_string()),
-                rpc_port: Some(8899),
-                ws_port: Some(8900),
-            },
+            rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
+                .parse::<Url>()
+                .expect("Failed to parse default RPC URL"),
             payer_pubkey: None,
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct FacilitatorRpcConfig {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "network", rename_all = "camelCase")]
+pub enum ValidatorNetworkConfig {
+    #[serde(rename = "solana")]
+    SolanaSurfnet(SurfnetRpcConfig),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SurfnetRpcConfig {
     pub rpc_url: Url,
     pub bind_host: Option<String>,
     pub rpc_port: Option<u16>,
     pub ws_port: Option<u16>,
 }
-impl FacilitatorRpcConfig {
+
+impl Default for SurfnetRpcConfig {
+    fn default() -> Self {
+        Self {
+            rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
+                .parse::<Url>()
+                .expect("Failed to parse default RPC URL"),
+            bind_host: Some(DEFAULT_BINDING_ADDRESS.into()),
+            rpc_port: Some(DEFAULT_RPC_PORT),
+            ws_port: Some(DEFAULT_WS_PORT),
+        }
+    }
+}
+
+impl SurfnetRpcConfig {
     pub fn from_url(url: &str) -> Result<Self, String> {
         let rpc_url = url
             .parse::<Url>()
@@ -128,7 +151,7 @@ impl SolanaSurfnetFacilitatorConfig {
 
 #[derive(Debug)]
 pub struct SolanaMainnetFacilitatorConfig {
-    pub rpc_config: FacilitatorRpcConfig,
+    pub rpc_url: Url,
     pub payer_keypair: Keypair,
 }
 
@@ -167,7 +190,7 @@ impl Display for SolanaSurfnetFacilitatorConfig {
         write!(
             f,
             "SolanaSurfnet {{ rpc_url: {}, payer_pubkey: {} }}",
-            self.rpc_config.rpc_url,
+            self.rpc_url,
             self.payer_pubkey
                 .map_or("None".to_string(), |pk| pk.to_string())
         )
@@ -179,7 +202,7 @@ impl Display for SolanaMainnetFacilitatorConfig {
         write!(
             f,
             "SolanaMainnet {{ rpc_url: {}, payer_pubkey: {} }}",
-            self.rpc_config.rpc_url,
+            self.rpc_url,
             self.payer_keypair.pubkey()
         )
     }

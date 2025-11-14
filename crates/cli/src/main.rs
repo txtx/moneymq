@@ -10,12 +10,15 @@ use moneymq_mcp::{McpOptions, run_server};
 mod catalog;
 mod init;
 mod manifest;
-mod run;
+mod service;
 mod yaml_util;
 
 use manifest::Manifest;
 
-use crate::manifest::{CatalogConfig, x402::PaymentConfig};
+use crate::{
+    manifest::{CatalogConfig, x402::PaymentConfig},
+    service::ServiceCommand,
+};
 
 #[derive(Clone, Debug)]
 pub struct Context {
@@ -92,7 +95,8 @@ enum Command {
         command: CatalogCommand,
     },
     /// Start the local provider server
-    Run(run::RunCommand),
+    Run(service::RunCommand),
+    Sandbox(service::SandboxCommand),
     Mcp,
 }
 
@@ -173,14 +177,14 @@ async fn main() {
             .unwrap_or_else(|| "v1".to_string())
     };
 
+    let sandbox = if matches!(opts.command, Command::Sandbox(_)) {
+        true
+    } else {
+        opts.sandbox
+    };
+
     // Create context with manifest directory, loaded manifest, selected provider, and sandbox flag
-    let ctx = Context::new(
-        manifest_dir,
-        manifest,
-        catalog_name,
-        network_name,
-        opts.sandbox,
-    );
+    let ctx = Context::new(manifest_dir, manifest, catalog_name, network_name, sandbox);
 
     if let Err(e) = handle_command(opts, &ctx).await {
         eprintln!("Error: {}", e);
@@ -213,6 +217,7 @@ async fn handle_command(opts: Opts, ctx: &Context) -> Result<(), String> {
         Command::Init(cmd) => cmd.execute(ctx).await,
         Command::Catalog { command } => handle_catalog_commands(command, ctx).await,
         Command::Run(cmd) => cmd.execute(ctx).await.map_err(|e| e.to_string()),
+        Command::Sandbox(cmd) => cmd.execute(ctx).await.map_err(|e| e.to_string()),
         Command::Mcp => {
             let mcp_opts = McpOptions::default();
             run_server(&mcp_opts).await

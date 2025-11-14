@@ -1,4 +1,4 @@
-use moneymq_types::x402::config::facilitator::FacilitatorRpcConfig;
+use moneymq_types::x402::config::facilitator::SurfnetRpcConfig;
 use serde_json::Value;
 use solana_client::{rpc_client::RpcClient, rpc_response::RpcVersionInfo};
 use solana_pubkey::Pubkey;
@@ -20,7 +20,7 @@ pub const DEFAULT_FACILITATOR_LAMPORTS: u64 = 1_000_000_000;
 
 pub struct SolanaValidatorConfig {
     /// RPC API URL for the local Solana validator
-    pub rpc_config: FacilitatorRpcConfig,
+    pub rpc_config: SurfnetRpcConfig,
     /// Public key of the facilitator account used for funding and transactions
     pub facilitator_pubkey: Pubkey,
 }

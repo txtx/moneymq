@@ -1,5 +1,8 @@
 use indexmap::IndexMap;
-use moneymq_types::x402::{MoneyMqNetwork, Network};
+use moneymq_types::x402::{
+    MoneyMqNetwork, Network,
+    config::facilitator::{ValidatorNetworkConfig, ValidatorsConfig},
+};
 use solana_client::rpc_client::RpcClient;
 use tracing::{debug, info};
 use url::Url;
@@ -99,22 +102,23 @@ impl NetworksConfig {
     }
 
     /// Funds local accounts and MoneyMQ-managed accounts
-    pub async fn fund_accounts(
-        &self,
-        local_validator_rpc_urls: &IndexMap<Network, url::Url>,
-    ) -> Result<(), String> {
+    pub async fn fund_accounts(&self, validators_config: &ValidatorsConfig) -> Result<(), String> {
         for (_, network_config) in self.configs.iter() {
             let recipient = network_config.recipient();
             let address = recipient.address();
             let pubkey = address.pubkey().expect("Expected Solana address");
-            let default_rpc_url = network_config.default_rpc_url();
 
             match network_config {
                 NetworkConfig::SolanaSurfnet(surfnet_cfg) => {
-                    let rpc_url = local_validator_rpc_urls
-                        .get(&Network::Solana)
-                        .cloned()
-                        .unwrap_or(default_rpc_url);
+                    let Some(ValidatorNetworkConfig::SolanaSurfnet(surfnet_rpc_config)) =
+                        validators_config
+                            .networks
+                            .get(&Network::Solana.to_string())
+                            .cloned()
+                    else {
+                        continue;
+                    };
+                    let rpc_url = surfnet_rpc_config.rpc_url;
                     let rpc_client = RpcClient::new(rpc_url.as_str());
 
                     info!(
