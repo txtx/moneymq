@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
+use moneymq_core::facilitator::SOLANA_KEYPAIR_ENV;
 use moneymq_types::x402::config::{
     constants::{
         DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT, DEFAULT_SANDBOX,
@@ -12,7 +13,7 @@ use moneymq_types::x402::config::{
     },
 };
 use serde::{Deserialize, Serialize};
-use solana_keypair::{EncodableKey, Keypair};
+use solana_keypair::{Keypair, Signer};
 use url::Url;
 
 /// Payment configuration with protocol as enum tag
@@ -112,8 +113,8 @@ pub struct X402SandboxConfig {
     pub facilitator: FacilitatorConfig,
 
     /// Validator configuration for sandbox
-    #[serde(default)]
-    pub validator: ValidatorConfig,
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub validator: IndexMap<NetworkIdentifier, ValidatorConfig>,
 }
 
 /// Sandbox facilitator configuration
@@ -199,13 +200,15 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
 
         // Convert supported networks to facilitator network configs
         for (network_id, network_config) in &facilitator_config.supported {
+            let validator_config = self.validator.get(network_id).cloned().unwrap_or_default();
+
             let rpc_config = if let Some(ref url) = network_config.rpc_url {
-                FacilitatorRpcConfig::from_url(url)?.with_ws_port(self.validator.ws_binding_port)
+                FacilitatorRpcConfig::from_url(url)?.with_ws_port(validator_config.ws_binding_port)
             } else {
                 FacilitatorRpcConfig::from_parts(
-                    &self.validator.binding_address,
-                    self.validator.rpc_binding_port,
-                    self.validator.ws_binding_port,
+                    &validator_config.binding_address,
+                    validator_config.rpc_binding_port,
+                    validator_config.ws_binding_port,
                 )?
             };
 
@@ -220,7 +223,7 @@ impl TryInto<FacilitatorRuntimeConfig> for &X402SandboxConfig {
                 network_id.to_string(),
                 FacilitatorNetworkConfig::SolanaSurfnet(SolanaSurfnetFacilitatorConfig {
                     rpc_config,
-                    payer_keypair,
+                    payer_pubkey,
                 }),
             );
         }
