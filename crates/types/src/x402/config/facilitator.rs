@@ -81,11 +81,14 @@ impl Default for SolanaSurfnetFacilitatorConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "network", rename_all = "camelCase")]
 pub enum ValidatorNetworkConfig {
+    #[serde(rename = "solana")]
     SolanaSurfnet(SurfnetRpcConfig),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SurfnetRpcConfig {
     pub rpc_url: Url,
     pub bind_host: Option<String>,
