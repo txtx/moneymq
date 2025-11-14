@@ -277,12 +277,8 @@ mod tests {
         sandbox_facilitator_supported.insert(
             NetworkIdentifier::Solana,
             SupportedNetworkConfig {
-                recipient: None,
-                currencies: vec!["USDC".to_string()],
                 fee: 0,
-                payer_keypair_path: None,
                 rpc_url: None,
-                user_accounts: vec!["user1_account".to_string(), "user2_account".to_string()],
             },
         );
 
@@ -295,11 +291,10 @@ mod tests {
                     binding_port: DEFAULT_FACILITATOR_PORT,
                     supported: sandbox_facilitator_supported,
                 }),
-                validator: ValidatorConfig {
-                    binding_address: "0.0.0.0".to_string(),
-                    rpc_binding_port: 8899,
-                    ws_binding_port: 8900,
-                },
+                validator: IndexMap::from([(
+                    NetworkIdentifier::Solana,
+                    ValidatorConfig::default(),
+                )]),
             },
         );
 

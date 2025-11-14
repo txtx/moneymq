@@ -28,17 +28,15 @@ impl NetworksConfig {
     pub fn initialize(
         networks_map: IndexMap<
             String,
-            (MoneyMqNetwork, Option<String>, Vec<String>, Vec<String>), // (network, payment_recipient, currencies, user_accounts)
+            (MoneyMqNetwork, Option<String>, Vec<String>), // (network, payment_recipient, currencies)
         >,
         is_sandbox: bool,
     ) -> Result<Self, NetworksConfigError> {
         let mut configs = IndexMap::new();
         let mut lookup = IndexMap::new();
 
-        for (
-            network_name,
-            (moneymq_network, payment_recipient_opt, currencies_strs, user_accounts_strs),
-        ) in networks_map.into_iter()
+        for (network_name, (moneymq_network, payment_recipient_opt, currencies_strs)) in
+            networks_map.into_iter()
         {
             let network: Network = moneymq_network.clone().into();
             let mut currencies = vec![];
@@ -61,20 +59,18 @@ impl NetworksConfig {
 
             let network_config = match moneymq_network {
                 MoneyMqNetwork::SolanaSurfnet => {
-                    let cap = 10.max(user_accounts_strs.len());
+                    let cap = 10;
                     let mut user_accounts = Vec::with_capacity(cap);
-                    info!("Initializing {} user accounts", user_accounts_strs.len());
+                    info!("Initializing {} pre-funded accounts", user_accounts.len());
                     for i in 0..cap {
-                        let some_provided_account = user_accounts_strs.get(i);
-                        let recipient = Recipient::instantiate_with_index(
-                            &network,
-                            some_provided_account,
-                            is_sandbox,
-                            Some(i),
-                        )
-                        .map_err(|e| {
-                            NetworksConfigError::InitializationError(network.clone(), e.to_string())
-                        })?;
+                        let recipient =
+                            Recipient::instantiate_with_index(&network, None, is_sandbox, Some(i))
+                                .map_err(|e| {
+                                    NetworksConfigError::InitializationError(
+                                        network.clone(),
+                                        e.to_string(),
+                                    )
+                                })?;
                         debug!("User account {}: {:?}", i, recipient);
 
                         user_accounts.push(recipient);

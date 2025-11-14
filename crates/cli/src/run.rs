@@ -186,50 +186,21 @@ impl RunCommand {
             .iter()
             .flat_map(|(_name, payment_config)| match payment_config {
                 PaymentConfig::X402(x402_config) => {
-                    if self.sandbox {
-                        // Get networks from sandbox config
-                        x402_config
-                            .sandboxes
-                            .get("default")
-                            .and_then(|sandbox| match &sandbox.facilitator {
-                                ManifestFacilitatorConfig::Embedded(config) => Some(
-                                    config
-                                        .supported
-                                        .iter()
-                                        .map(|(network_id, network)| {
-                                            (
-                                                network_id.to_string(),
-                                                (
-                                                    MoneyMqNetwork::SolanaSurfnet,
-                                                    network.recipient.clone(),
-                                                    network.currencies.clone(),
-                                                    network.user_accounts.clone(),
-                                                ),
-                                            )
-                                        })
-                                        .collect::<Vec<_>>(),
-                                ),
-                                ManifestFacilitatorConfig::ServiceUrl { .. } => None,
-                            })
-                            .unwrap_or_default()
-                    } else {
-                        // Get networks from accepted config
-                        x402_config
-                            .accepted
-                            .iter()
-                            .map(|(network_id, network)| {
+                    // Get networks from accepted config
+                    x402_config
+                        .accepted
+                        .iter()
+                        .map(|(network_id, network)| {
+                            (
+                                network_id.to_string(),
                                 (
-                                    network_id.to_string(),
-                                    (
-                                        MoneyMqNetwork::SolanaSurfnet,
-                                        network.recipient.clone(),
-                                        network.currencies.clone(),
-                                        vec![],
-                                    ),
-                                )
-                            })
-                            .collect::<Vec<_>>()
-                    }
+                                    MoneyMqNetwork::SolanaSurfnet,
+                                    network.recipient.clone(),
+                                    network.currencies.clone(),
+                                ),
+                            )
+                        })
+                        .collect::<Vec<_>>()
                 }
             })
             .collect::<IndexMap<_, _>>();
@@ -242,7 +213,6 @@ impl RunCommand {
                     MoneyMqNetwork::SolanaSurfnet,
                     None,                     // No payment recipient for default config
                     vec!["USDC".to_string()], // Default currency
-                    vec![],                   // No user accounts for default config
                 ),
             );
         }

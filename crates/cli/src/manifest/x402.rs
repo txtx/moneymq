@@ -145,28 +145,13 @@ impl Default for SandboxFacilitatorConfig {
 /// Supported network configuration for sandbox
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SupportedNetworkConfig {
-    /// Payment recipient address (optional)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub recipient: Option<String>,
-
-    /// Supported currencies for this network
-    pub currencies: Vec<String>,
-
     /// Fee amount (in smallest unit)
     #[serde(default)]
     pub fee: u64,
 
-    /// Optional payer keypair path for this network
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub payer_keypair_path: Option<String>,
-
     /// Optional RPC URL for this network
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rpc_url: Option<String>,
-
-    /// Optional user accounts to fund in sandbox
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub user_accounts: Vec<String>,
 }
 
 /// Validator configuration for sandbox
