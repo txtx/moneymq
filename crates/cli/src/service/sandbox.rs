@@ -15,7 +15,7 @@ use moneymq_types::x402::{
         },
     },
 };
-use solana_keypair::Signer;
+use solana_keypair::{Pubkey, Signer};
 use url::Url;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
@@ -97,30 +97,30 @@ impl ServiceCommand for SandboxCommand {
         &self,
         payments: &IndexMap<String, PaymentConfig>,
         networks_config: &NetworksConfig,
-    ) -> Result<(Url, Option<String>, ValidatorsConfig), RunCommandError> {
-        let (facilitator_config, validators_config) = build_facilitator_config(&payments)
+    ) -> Result<(Url, String, ValidatorsConfig), RunCommandError> {
+        let (facilitator_config, validators_config) = build_facilitator_config(payments)
             .await
             .map_err(RunCommandError::StartFacilitatorNetworks)?;
 
-        let facilitator_pubkey =
-            facilitator_config.get_facilitator_pubkey(&NetworkIdentifier::Solana.to_string());
-
-        println!();
-        println!(
-            "# {}{}{}",
-            style("Payment API (protocol: ").dim(),
-            style("x402").green(),
-            style(")").dim()
-        );
-        println!(" {} {}supported", Self::get(), facilitator_config.url);
-        println!(" {} {}verify", Self::post(), facilitator_config.url);
-        println!(" {} {}settle", Self::post(), facilitator_config.url);
-
         // Only start local facilitator server in sandbox mode
-        let (_facilitator_handle, facilitator_url) =
+        // This will generate the facilitator keypair if needed
+        let (_facilitator_handle, facilitator_url, facilitator_pubkey) =
             start_facilitator_networks(facilitator_config, &validators_config, &networks_config)
                 .await
                 .map_err(RunCommandError::StartFacilitatorNetworks)?;
+
+        println!();
+        println!(
+            "# {}{}{}{}{}",
+            style("Payment API (protocol: ").dim(),
+            style("x402").green(),
+            style(", paying with ").dim(),
+            style(facilitator_pubkey.to_string()).green(),
+            style(")").dim()
+        );
+        println!(" {} {}supported", Self::get(), facilitator_url);
+        println!(" {} {}verify", Self::post(), facilitator_url);
+        println!(" {} {}settle", Self::post(), facilitator_url);
 
         networks_config
             .fund_accounts(&validators_config)
@@ -138,7 +138,7 @@ async fn start_facilitator_networks(
     mut facilitator_config: FacilitatorConfig,
     validators_config: &ValidatorsConfig,
     networks_config: &NetworksConfig,
-) -> Result<(FacilitatorHandle, url::Url), String> {
+) -> Result<(FacilitatorHandle, url::Url, String), String> {
     #[cfg(feature = "embedded_validator")]
     for (network_name, facilitator_network_config) in facilitator_config.networks.iter_mut() {
         match facilitator_network_config {
@@ -156,11 +156,20 @@ async fn start_facilitator_networks(
                 };
 
                 // If the payer pubkey is set, we can assume it came from the env file, so it's already set
-                // If the payer pubkey is not set, generate a new one and set the env var
+                // If the payer pubkey is not set, generate a deterministic one for sandbox
                 if surfnet_facilitator_config.payer_pubkey.is_none() {
+                    use sha2::{Digest, Sha256};
                     use solana_keypair::Keypair;
 
-                    let new_keypair = Keypair::new();
+                    // Generate deterministic keypair from a fixed seed for sandbox
+                    // This ensures the same fee payer address across restarts
+                    let seed_phrase = "moneymq-sandbox-facilitator-fee-payer-v1";
+                    let mut hasher = Sha256::new();
+                    hasher.update(seed_phrase.as_bytes());
+                    let seed = hasher.finalize();
+
+                    let seed_array: [u8; 32] = seed[..32].try_into().unwrap();
+                    let new_keypair = Keypair::new_from_array(seed_array);
                     surfnet_facilitator_config.payer_pubkey = Some(new_keypair.pubkey());
                     // It needs to be written to the env so Kora can pick it up.
                     // TODO: remove once Kora can accept Keypair directly
@@ -198,11 +207,17 @@ async fn start_facilitator_networks(
     }
 
     let url = facilitator_config.url.clone();
+
+    // Extract the facilitator pubkey before the config is consumed
+    let facilitator_pubkey = facilitator_config
+        .get_facilitator_pubkey(&"solana".to_string())
+        .expect("Facilitator pubkey should be initialized");
+
     let handle = moneymq_core::facilitator::start_facilitator(facilitator_config, true)
         .await
         .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 
-    Ok((handle, url))
+    Ok((handle, url, facilitator_pubkey))
 }
 
 async fn build_facilitator_config(

@@ -1,10 +1,11 @@
-use serde::{Deserialize, Serialize};
-use solana_keypair::{Keypair, Signer};
-use solana_pubkey::Pubkey;
 use std::{
     collections::HashMap,
     fmt::{self, Display},
 };
+
+use serde::{Deserialize, Serialize};
+use solana_keypair::{Keypair, Signer};
+use solana_pubkey::Pubkey;
 use url::Url;
 
 use crate::x402::{

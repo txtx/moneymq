@@ -91,7 +91,7 @@ impl DbManager {
             } else {
                 None
             };
-            (customer_id, Some(extra_ctx.product), extra_ctx.currency)
+            (customer_id, extra_ctx.product, extra_ctx.currency)
         } else {
             (None, None, None)
         };
@@ -139,7 +139,7 @@ impl DbManager {
             &mut conn,
             extra_ctx
                 .as_ref()
-                .and_then(|ctx| Some(ctx.product.clone()))
+                .and_then(|ctx| ctx.product.clone())
                 .as_deref(),
             customer_id,
             amount,

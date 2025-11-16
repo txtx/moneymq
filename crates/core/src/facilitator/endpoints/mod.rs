@@ -12,7 +12,8 @@ pub mod verify;
 #[serde(rename_all = "camelCase")]
 pub struct FacilitatorExtraContext {
     pub fee_payer: String,
-    pub product: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customer_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

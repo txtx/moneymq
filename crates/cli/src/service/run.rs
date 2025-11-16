@@ -96,7 +96,7 @@ impl ServiceCommand for RunCommand {
     ) -> Result<
         (
             Url,
-            Option<String>,
+            String,
             moneymq_types::x402::config::facilitator::ValidatorsConfig,
         ),
         super::RunCommandError,

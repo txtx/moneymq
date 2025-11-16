@@ -69,7 +69,7 @@ pub trait ServiceCommand {
         &self,
         payments: &IndexMap<String, PaymentConfig>,
         networks_config: &NetworksConfig,
-    ) -> Result<(Url, Option<String>, ValidatorsConfig), RunCommandError>;
+    ) -> Result<(Url, String, ValidatorsConfig), RunCommandError>;
 
     async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
         // Get catalog path from first catalog (or default to "billing/v1")
