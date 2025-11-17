@@ -106,10 +106,17 @@ pub async fn handler(
     let verify_response_base64 = serialize_to_base64(&response);
     let payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
     let extra = match request.payment_requirements.extra.as_ref() {
-        Some(extra) => {
-            let extra: FacilitatorExtraContext = serde_json::from_value(extra.clone()).unwrap();
-            Some(extra)
-        }
+        Some(extra) => match serde_json::from_value::<FacilitatorExtraContext>(extra.clone()) {
+            Ok(ctx) => Some(ctx),
+            Err(e) => {
+                tracing::warn!(
+                    "Failed to parse extra context: {}. Extra data: {:?}",
+                    e,
+                    extra
+                );
+                None
+            }
+        },
         None => None,
     };
 

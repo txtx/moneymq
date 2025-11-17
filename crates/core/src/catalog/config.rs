@@ -147,7 +147,7 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
             });
 
     // Build facilitator configuration
-    let facilitator = if let Some(payer_pubkey_str) = state.facilitator_pubkey.as_ref() {
+    let facilitator = {
         // Parse the payer pubkey and compute its ATA
         let in_account =
             state
@@ -159,7 +159,7 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
                     let currency = network_config.currencies().first()?;
 
                     // Parse the facilitator's pubkey (the payer)
-                    let payer_pubkey = payer_pubkey_str.parse::<Pubkey>().ok()?;
+                    let payer_pubkey = state.facilitator_pubkey.parse::<Pubkey>().ok()?;
 
                     match currency.address() {
                         MixedAddress::Solana(mint) => {
@@ -185,13 +185,11 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
 
         in_account.map(|in_acc| FacilitatorConfig {
             operator_account: OperatorAccountConfig {
-                out: payer_pubkey_str.clone(),
+                out: state.facilitator_pubkey.clone(),
                 in_account: in_acc,
             },
             url: state.facilitator_url.to_string(),
         })
-    } else {
-        None
     };
 
     let validator = state.validators.networks.get(&network.to_string()).cloned();

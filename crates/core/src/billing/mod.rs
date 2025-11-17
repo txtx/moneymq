@@ -17,6 +17,9 @@ use crate::{
 pub mod currency;
 pub mod recipient;
 
+/// Initial USDC token amount for user accounts in local surfnet (2000 USDC with 6 decimals)
+const INITIAL_USER_USDC_AMOUNT: u64 = 2_000_000_000;
+
 /// Manages billing configurations across multiple networks
 #[derive(Debug, Clone)]
 pub struct NetworksConfig {
@@ -146,7 +149,11 @@ impl NetworksConfig {
 
                     for address in all_addresses {
                         let is_pay_to = address.eq(pubkey);
-                        let token_amount = if is_pay_to { 0 } else { 500_000_000_000 };
+                        let token_amount = if is_pay_to {
+                            0
+                        } else {
+                            INITIAL_USER_USDC_AMOUNT
+                        };
 
                         surfnet_set_account(
                             &rpc_client,
