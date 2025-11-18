@@ -140,12 +140,17 @@ async fn main() {
         match Manifest::load(&opts.manifest_path) {
             Ok(manifest) => manifest,
             Err(e) => {
-                println!(
-                    "{}: using default configuration ({})",
-                    style("warning:").yellow(),
-                    e
-                );
-                println!();
+                // If there's no manifest file and the user is running the sandbox command, suppress the warning
+                // to let the user have a nice "out of the box" experience
+                if !(matches!(e, manifest::LoadManifestError::FileNotFound(_))
+                    && matches!(opts.command, Command::Sandbox(_)))
+                {
+                    println!(
+                        "{}: using default configuration ({})",
+                        style("warning:").yellow(),
+                        e
+                    );
+                    println!();
                 Manifest::default()
             }
         }
