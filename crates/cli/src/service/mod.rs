@@ -71,7 +71,7 @@ pub trait ServiceCommand {
         networks_config: &NetworksConfig,
     ) -> Result<(Url, String, ValidatorsConfig), RunCommandError>;
 
-    async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
+    fn load_catalog(&self, ctx: &Context) -> Result<(Vec<Product>, Vec<Meter>), RunCommandError> {
         // Get catalog path from first catalog (or default to "billing/v1")
         let catalog_base_path = ctx
             .manifest
@@ -170,7 +170,6 @@ pub trait ServiceCommand {
                 println!("{}", style(format!("✓ {} meters", meters.len())).green());
             }
         }
-
         println!();
 
         println!(
@@ -179,6 +178,7 @@ pub trait ServiceCommand {
             style("stripe").green(),
             style(")").dim()
         );
+
         println!(
             " {} http://localhost:{}/v1/products",
             Self::get(),
@@ -190,6 +190,18 @@ pub trait ServiceCommand {
             self.port()
         );
         println!(" {}", style(" ...").dim());
+
+        Ok((products, meters))
+    }
+
+    async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
+        // If we're using the default manifest, there are no products/meters configured,
+        // so the associated warnings are noisy and not helpful. Skip loading catalog in that case.
+        let (products, meters) = if !ctx.is_default_manifest {
+            self.load_catalog(ctx)?
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         // Initialize tracing
         tracing_subscriber::fmt::init();

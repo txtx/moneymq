@@ -27,6 +27,7 @@ pub struct Context {
     pub catalog_name: String,
     pub network_name: String,
     pub use_sandbox: bool,
+    pub is_default_manifest: bool,
 }
 
 impl Context {
@@ -36,6 +37,7 @@ impl Context {
         catalog_name: String,
         network_name: String,
         use_sandbox: bool,
+        is_default_manifest: bool,
     ) -> Self {
         Context {
             manifest_path,
@@ -43,6 +45,7 @@ impl Context {
             catalog_name,
             network_name,
             use_sandbox,
+            is_default_manifest,
         }
     }
 
@@ -134,11 +137,11 @@ async fn main() {
     }
 
     // Load manifest from file (skip for init command)
-    let manifest = if is_init_command {
-        Manifest::default()
+    let (manifest, is_default_manifest) = if is_init_command {
+        (Manifest::default(), true)
     } else {
         match Manifest::load(&opts.manifest_path) {
-            Ok(manifest) => manifest,
+            Ok(manifest) => (manifest, false),
             Err(e) => {
                 // If there's no manifest file and the user is running the sandbox command, suppress the warning
                 // to let the user have a nice "out of the box" experience
@@ -151,7 +154,8 @@ async fn main() {
                         e
                     );
                     println!();
-                Manifest::default()
+                }
+                (Manifest::default(), true)
             }
         }
     };
@@ -189,7 +193,14 @@ async fn main() {
     };
 
     // Create context with manifest directory, loaded manifest, selected provider, and sandbox flag
-    let ctx = Context::new(manifest_dir, manifest, catalog_name, network_name, sandbox);
+    let ctx = Context::new(
+        manifest_dir,
+        manifest,
+        catalog_name,
+        network_name,
+        sandbox,
+        is_default_manifest,
+    );
 
     if let Err(e) = handle_command(opts, &ctx).await {
         eprintln!("Error: {}", e);
