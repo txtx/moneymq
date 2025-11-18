@@ -16,6 +16,7 @@
     "x402-express": "^0.7.1"
   },
   "devDependencies": {
+    "@types/express": "^5.0.5",
     "@types/node": "^24.5.2",
     "tsx": "^4.20.5"
   }

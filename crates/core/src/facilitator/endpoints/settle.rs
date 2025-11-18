@@ -12,7 +12,7 @@ use tracing::{error, info};
 
 use crate::facilitator::{
     FacilitatorState,
-    endpoints::{FacilitatorExtraContext, serialize_to_base64},
+    endpoints::serialize_to_base64,
     networks,
 };
 
@@ -115,14 +115,6 @@ pub async fn handler(
     let settle_response_base64 = serialize_to_base64(&response);
     let x402_payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
 
-    let extra = match request.payment_requirements.extra.as_ref() {
-        Some(extra) => {
-            let extra: FacilitatorExtraContext = serde_json::from_value(extra.clone()).unwrap();
-            Some(extra)
-        }
-        None => None,
-    };
-
     let status = if response.success {
         "completed".into()
     } else {
@@ -132,17 +124,12 @@ pub async fn handler(
         .transaction
         .as_ref()
         .map(|tx_hash| tx_hash.to_string());
-    let amount = request
-        .payment_requirements
-        .max_amount_required
-        .0
-        .to_string();
 
-    match state.db_manager.find_transaction_id_for_settlement_update(
-        &amount,
-        &x402_payment_requirement_base64,
-        extra,
-    ) {
+    // Find transaction by payment_hash for idempotent settlement updates
+    match state
+        .db_manager
+        .find_transaction_id_by_payment_hash(&x402_payment_requirement_base64)
+    {
         Ok(Some(tx_id)) => {
             if let Err(e) = state.db_manager.update_transaction_after_settlement(
                 tx_id,
@@ -151,14 +138,30 @@ pub async fn handler(
                 Some(settle_request_base64),
                 Some(settle_response_base64),
             ) {
-                error!("{}", e);
+                error!("Failed to update transaction after settlement: {}", e);
             }
         }
         Ok(None) => {
-            error!("No matching transaction found to update after settlement");
+            // Check if transaction is already settled (idempotent behavior)
+            match state
+                .db_manager
+                .is_transaction_already_settled(&x402_payment_requirement_base64)
+            {
+                Ok(true) => {
+                    tracing::debug!(
+                        "Transaction already settled for payment_hash (idempotent settle request)"
+                    );
+                }
+                Ok(false) => {
+                    error!("No matching transaction found to update after settlement");
+                }
+                Err(e) => {
+                    error!("Error checking if transaction is settled: {}", e);
+                }
+            }
         }
         Err(e) => {
-            error!("{}", e);
+            error!("Error finding transaction for settlement: {}", e);
         }
     }
 

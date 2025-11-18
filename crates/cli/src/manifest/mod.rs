@@ -23,23 +23,33 @@ pub struct Manifest {
     pub payments: IndexMap<String, PaymentConfig>,
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum LoadManifestError {
+    #[error("{} not found at {}. Please create a {} file in your project root.",
+        moneymq_types::MANIFEST_FILE_NAME,
+        .0.display(),
+        moneymq_types::MANIFEST_FILE_NAME)]
+    FileNotFound(std::path::PathBuf),
+    #[error("Failed to read {}: {}", .0.display(), .1)]
+    ReadError(std::path::PathBuf, std::io::Error),
+    #[error("Failed to parse {}: {}", .0.display(), .1)]
+    ParseError(std::path::PathBuf, serde_yml::Error),
+}
+
 impl Manifest {
     /// Load manifest from the specified file path
-    pub fn load(manifest_file_path: &Path) -> Result<Self, String> {
+    pub fn load(manifest_file_path: &Path) -> Result<Self, LoadManifestError> {
         if !manifest_file_path.exists() {
-            return Err(format!(
-                "{} not found at {}. Please create a {} file in your project root.",
-                moneymq_types::MANIFEST_FILE_NAME,
-                manifest_file_path.display(),
-                moneymq_types::MANIFEST_FILE_NAME
+            return Err(LoadManifestError::FileNotFound(
+                manifest_file_path.to_path_buf(),
             ));
         }
 
         let content = fs::read_to_string(manifest_file_path)
-            .map_err(|e| format!("Failed to read {}: {}", manifest_file_path.display(), e))?;
+            .map_err(|e| LoadManifestError::ReadError(manifest_file_path.to_path_buf(), e))?;
 
         let manifest: Manifest = serde_yml::from_str(&content)
-            .map_err(|e| format!("Failed to parse {}: {}", manifest_file_path.display(), e))?;
+            .map_err(|e| LoadManifestError::ParseError(manifest_file_path.to_path_buf(), e))?;
 
         Ok(manifest)
     }

@@ -105,24 +105,10 @@ pub async fn handler(
     let verify_request_base64 = serialize_to_base64(&request);
     let verify_response_base64 = serialize_to_base64(&response);
     let payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
-    let extra = match request.payment_requirements.extra.as_ref() {
-        Some(extra) => match serde_json::from_value::<FacilitatorExtraContext>(extra.clone()) {
-            Ok(ctx) => Some(ctx),
-            Err(e) => {
-                tracing::warn!(
-                    "Failed to parse extra context: {}. Extra data: {:?}",
-                    e,
-                    extra
-                );
-                None
-            }
-        },
-        None => None,
-    };
 
     if let Err(e) = state.db_manager.insert_transaction(
-        extra,
-        request.payment_requirements.max_amount_required.0.clone(),
+        &request,
+        &response,
         payment_requirement_base64,
         verify_request_base64,
         verify_response_base64,
