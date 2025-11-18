@@ -107,8 +107,10 @@ async function main() {
           debug("Error message:", error.message);
           debug("Error stack:", error.stack);
           try {
+            // @ts-ignore - accessing cause property
             debug("Error cause:", safeStringify(error.cause));
           } catch {
+            // @ts-ignore - accessing cause property
             debug("Error cause:", error.cause);
           }
         }
