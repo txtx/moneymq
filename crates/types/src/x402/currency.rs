@@ -1,4 +1,4 @@
-use moneymq_types::x402::MixedAddress;
+use crate::x402::{MixedAddress, Network};
 use solana_pubkey::Pubkey;
 
 /// Represents a currency used for billing across different blockchains
@@ -9,12 +9,9 @@ pub enum Currency {
 }
 
 impl Currency {
-    pub fn from_symbol_and_network(
-        symbol: &str,
-        network: &moneymq_types::x402::Network,
-    ) -> Result<Self, String> {
+    pub fn from_symbol_and_network(symbol: &str, network: &Network) -> Result<Self, String> {
         match network {
-            moneymq_types::x402::Network::Solana => {
+            Network::Solana => {
                 let solana_currency = SolanaCurrency::from_symbol(symbol)?;
                 Ok(Currency::Solana(solana_currency))
             }

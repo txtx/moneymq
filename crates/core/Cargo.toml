@@ -26,10 +26,10 @@ moneymq-types = { path = "../types" }
 reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-sha2 = "0.10"
 async-stripe = { version = "0.41", default-features = false, features = [
     "runtime-tokio-hyper",
 ] }
+sha2 = { workspace = true }
 surfpool-core = { workspace = true, optional = true }
 surfpool-types = { workspace = true, optional = true }
 thiserror = { workspace = true }
@@ -52,7 +52,6 @@ solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-transaction = "3.0.1"
 spl-token-2022-interface = { workspace = true }
-spl-token-interface = { workspace = true }
 spl-associated-token-account = "8.0.0"
 
 # DB deps

@@ -1,7 +1,7 @@
 use axum::{Json, extract::State, response::IntoResponse};
 use moneymq_types::Product;
 
-use crate::catalog::{
+use crate::api::catalog::{
     ProviderState,
     stripe::types::{ListParams, ListResponse, StripePrice},
 };

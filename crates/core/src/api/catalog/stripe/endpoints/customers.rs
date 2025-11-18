@@ -6,7 +6,7 @@ use axum::{
     response::IntoResponse,
 };
 
-use crate::catalog::{
+use crate::api::catalog::{
     ProviderState,
     stripe::{
         types::{CreateCustomerRequest, StripeCustomer},

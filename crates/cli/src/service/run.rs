@@ -1,36 +1,13 @@
-use std::{fs, path::PathBuf};
-
-use console::style;
 use indexmap::IndexMap;
-use moneymq_core::{
-    billing::{NetworksConfig, NetworksConfigError},
-    validator::SolanaValidatorConfig,
-};
+use moneymq_core::gateway::NetworksConfig;
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
-use moneymq_types::Meter;
-use moneymq_types::{
-    Product,
-    x402::{
-        MoneyMqNetwork, Network,
-        config::{
-            constants::DEFAULT_FACILITATOR_PORT,
-            facilitator::{
-                FacilitatorConfig, FacilitatorNetworkConfig, SolanaSurfnetFacilitatorConfig,
-            },
-        },
-    },
-};
-use solana_keypair::Signer;
+use moneymq_types::x402::MoneyMqNetwork;
 use url::Url;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 use crate::{
-    Context,
-    manifest::{
-        Manifest,
-        x402::{NetworkIdentifier, PaymentConfig},
-    },
+    manifest::{Manifest, x402::PaymentConfig},
     service::{BillingNetworksMap, ServiceCommand},
 };
 
@@ -51,7 +28,7 @@ impl ServiceCommand for RunCommand {
         &self,
         manifest: &Manifest,
     ) -> Result<BillingNetworksMap, super::RunCommandError> {
-        let mut billing_networks = manifest
+        let billing_networks = manifest
             .payments
             .iter()
             .flat_map(|(_name, payment_config)| match payment_config {
@@ -84,15 +61,15 @@ impl ServiceCommand for RunCommand {
 
     fn networks_config(
         &self,
-        billing_networks: BillingNetworksMap,
+        _billing_networks: BillingNetworksMap,
     ) -> Result<NetworksConfig, super::RunCommandError> {
         todo!()
     }
 
     async fn setup_facilitator(
         &self,
-        payments: &IndexMap<String, PaymentConfig>,
-        networks_config: &NetworksConfig,
+        _payments: &IndexMap<String, PaymentConfig>,
+        _networks_config: &NetworksConfig,
     ) -> Result<
         (
             Url,

@@ -3,7 +3,7 @@ use moneymq_types::x402::transactions::TransactionCustomer;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::facilitator::db::{PooledConnection, schema::*};
+use crate::api::payment::db::{PooledConnection, schema::*};
 
 pub fn find_customer_by_address(
     conn: &mut PooledConnection,

@@ -190,15 +190,16 @@ impl InitCommand {
             "stripe" => {
                 // Fetch account information to validate production key
                 let account_info =
-                    moneymq_core::catalog::stripe::iac::get_account_info(&production_key)
+                    moneymq_core::api::catalog::stripe::iac::get_account_info(&production_key)
                         .await
                         .map_err(|e| format!("Failed to fetch account info: {}", e))?;
 
                 let sandbox_account_info = if let Some(ref sandbox_key_value) = sandbox_key {
-                    let info =
-                        moneymq_core::catalog::stripe::iac::get_account_info(sandbox_key_value)
-                            .await
-                            .ok();
+                    let info = moneymq_core::api::catalog::stripe::iac::get_account_info(
+                        sandbox_key_value,
+                    )
+                    .await
+                    .ok();
                     info
                 } else {
                     None
@@ -327,7 +328,7 @@ impl InitCommand {
                 println!("\nFetching products and meters...");
                 let _ = dotenvy::from_path(&env_path);
 
-                let mut catalog = moneymq_core::catalog::stripe::iac::download_catalog(
+                let mut catalog = moneymq_core::api::catalog::stripe::iac::download_catalog(
                     &production_key,
                     &provider,
                     true,
@@ -337,7 +338,7 @@ impl InitCommand {
 
                 // If sandbox key is provided, fetch sandbox catalog and match products
                 if let Some(ref sandbox_key_value) = sandbox_key {
-                    match moneymq_core::catalog::stripe::iac::download_catalog(
+                    match moneymq_core::api::catalog::stripe::iac::download_catalog(
                         sandbox_key_value,
                         &provider,
                         false,
@@ -448,17 +449,18 @@ impl InitCommand {
                 }
 
                 // Fetch and save meters
-                let mut meter_collection = moneymq_core::catalog::stripe::iac::download_meters(
-                    &production_key,
-                    &provider_name,
-                    true,
-                )
-                .await
-                .map_err(|e| format!("Failed to fetch meters: {}", e))?;
+                let mut meter_collection =
+                    moneymq_core::api::catalog::stripe::iac::download_meters(
+                        &production_key,
+                        &provider_name,
+                        true,
+                    )
+                    .await
+                    .map_err(|e| format!("Failed to fetch meters: {}", e))?;
 
                 // If sandbox key is provided, fetch sandbox meters and match
                 if let Some(ref sandbox_key_value) = sandbox_key {
-                    match moneymq_core::catalog::stripe::iac::download_meters(
+                    match moneymq_core::api::catalog::stripe::iac::download_meters(
                         sandbox_key_value,
                         &format!("{}_sandbox", provider_name),
                         false,
@@ -1167,7 +1169,7 @@ fn configure_claude_config_file(config_path: &Path, moneymq_path: &str) -> Resul
 /// Generate a catalog version slug from account info (kebab-case for paths)
 /// Format: <company-slug> or "v1" if no business name
 fn generate_catalog_version(
-    account_info: &moneymq_core::catalog::stripe::iac::AccountInfo,
+    account_info: &moneymq_core::api::catalog::stripe::iac::AccountInfo,
 ) -> String {
     // Try to use business name first, then display name
     let name = account_info
@@ -1200,7 +1202,7 @@ fn generate_catalog_version(
 /// Generate a provider name from account info (snake_case for YAML keys)
 /// Format: <company_slug> or "v1" if no business name
 fn generate_provider_name(
-    account_info: &moneymq_core::catalog::stripe::iac::AccountInfo,
+    account_info: &moneymq_core::api::catalog::stripe::iac::AccountInfo,
     _provider_type: &str,
 ) -> String {
     let catalog_version = generate_catalog_version(account_info);
@@ -1244,7 +1246,9 @@ fn save_env_file(
 }
 
 /// Helper to extract account name from account info
-fn extract_account_name(account_info: &moneymq_core::catalog::stripe::iac::AccountInfo) -> &str {
+fn extract_account_name(
+    account_info: &moneymq_core::api::catalog::stripe::iac::AccountInfo,
+) -> &str {
     account_info
         .display_name
         .as_deref()
@@ -1278,7 +1282,7 @@ async fn download_image(url: &str, path: &Path) -> Result<(), String> {
 /// Save style information (colors) to a JSON file
 fn save_style_json(
     path: &Path,
-    account_info: &moneymq_core::catalog::stripe::iac::AccountInfo,
+    account_info: &moneymq_core::api::catalog::stripe::iac::AccountInfo,
 ) -> Result<(), String> {
     let mut style = serde_json::Map::new();
 

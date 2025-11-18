@@ -37,6 +37,7 @@ surfpool-types = { git = "https://github.com/txtx/surfpool.git", branch = "main"
 thiserror = "2.0"
 tokio = "1"
 url = { version = "2.5", features = ["serde"] }
+sha2 = "0.10"
 
 # Solana deps
 solana-client = "3.0.8"

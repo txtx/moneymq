@@ -22,7 +22,7 @@ use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNet
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 
-use crate::facilitator::db::DbManager;
+use crate::api::payment::db::DbManager;
 
 pub const SOLANA_KEYPAIR_ENV: &str = "MONEYMQ_SOLANA_FACILITATOR_KEYPAIR";
 pub const SYSTEM_PROGRAM_ID: &str = "11111111111111111111111111111111";

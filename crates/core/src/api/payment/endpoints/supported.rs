@@ -1,7 +1,7 @@
 use axum::{Extension, Json, response::IntoResponse};
 use moneymq_types::x402::{SupportedPaymentKind, SupportedResponse};
 
-use crate::facilitator::FacilitatorState;
+use crate::api::payment::FacilitatorState;
 
 /// GET /supported endpoint - returns supported payment kinds
 pub async fn handler(Extension(state): Extension<Option<FacilitatorState>>) -> impl IntoResponse {

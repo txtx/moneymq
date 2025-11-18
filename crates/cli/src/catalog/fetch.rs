@@ -1,7 +1,7 @@
 use std::env;
 
 use clap::Parser;
-use moneymq_core::catalog::stripe::iac::download_catalog;
+use moneymq_core::api::catalog::stripe::iac::download_catalog;
 
 use crate::Context;
 

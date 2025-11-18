@@ -1,12 +1,5 @@
-pub mod config;
-pub mod stripe;
-
-use std::{
-    collections::HashMap,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
-
+use crate::api::payment::endpoints::middleware::x402_post;
+use crate::gateway::{self, NetworksConfig};
 use axum::{
     Router,
     http::StatusCode,
@@ -18,11 +11,17 @@ use moneymq_types::{
     Meter, Product,
     x402::{config::facilitator::ValidatorsConfig, transactions::FacilitatedTransaction},
 };
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use stripe::types::StripePaymentIntent;
 use tower_http::cors::{Any, CorsLayer};
 use url::Url;
 
-use crate::{billing::NetworksConfig, facilitator::endpoints::middleware::x402_post, gateway};
+pub mod config;
+pub mod stripe;
 
 /// Application state
 #[derive(Clone)]

@@ -9,11 +9,7 @@ use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, Verify
 use solana_client::nonblocking::rpc_client::RpcClient;
 use tracing::{debug, error};
 
-use crate::facilitator::{
-    FacilitatorState,
-    endpoints::{FacilitatorExtraContext, serialize_to_base64},
-    networks,
-};
+use crate::api::payment::{FacilitatorState, endpoints::serialize_to_base64, networks};
 
 /// POST /verify endpoint - verify a payment payload
 pub async fn handler(

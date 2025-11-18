@@ -4,7 +4,7 @@ use clap::Parser;
 use console::style;
 use dialoguer::Confirm;
 use indicatif::{ProgressBar, ProgressStyle};
-use moneymq_core::catalog::stripe;
+use moneymq_core::api::catalog::stripe;
 use moneymq_types::Product;
 
 use crate::Context;

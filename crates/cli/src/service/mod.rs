@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use console::{StyledObject, style};
 use indexmap::IndexMap;
-use moneymq_core::billing::{NetworksConfig, NetworksConfigError};
+use moneymq_core::gateway::{NetworksConfig, NetworksConfigError};
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::{Meter, x402::config::facilitator::ValidatorsConfig};
@@ -246,7 +246,7 @@ pub trait ServiceCommand {
             .unwrap_or((None, None, ctx.manifest_path.clone()));
 
         // Start the server
-        moneymq_core::catalog::start_provider(
+        moneymq_core::api::catalog::start_provider(
             products,
             meters,
             facilitator_url,

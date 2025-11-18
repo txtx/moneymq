@@ -3,7 +3,7 @@ use moneymq_types::x402::transactions::FacilitatedTransaction;
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
-use crate::facilitator::db::{PooledConnection, models::TransactionCustomerModel, schema::*};
+use crate::api::payment::db::{PooledConnection, models::TransactionCustomerModel, schema::*};
 
 /// Check if a transaction with payment_hash exists and is already settled
 /// Returns true if transaction exists and has both settle_request and settle_response
@@ -126,13 +126,15 @@ impl FacilitatedTransactionWithCustomer {
     ) -> QueryResult<(Vec<FacilitatedTransactionWithCustomer>, bool)> {
         let raw_limit = (limit + 1) as i64;
 
-        let mut rows: Vec<(FacilitatedTransactionModel, Option<TransactionCustomerModel>)> =
-            facilitated_transactions::table
-                .left_join(transaction_customers::table)
-                .filter(facilitated_transactions::id.gt(starting_after.unwrap_or(0)))
-                .order(facilitated_transactions::id.asc())
-                .limit(raw_limit)
-                .load(conn)?;
+        let mut rows: Vec<(
+            FacilitatedTransactionModel,
+            Option<TransactionCustomerModel>,
+        )> = facilitated_transactions::table
+            .left_join(transaction_customers::table)
+            .filter(facilitated_transactions::id.gt(starting_after.unwrap_or(0)))
+            .order(facilitated_transactions::id.asc())
+            .limit(raw_limit)
+            .load(conn)?;
 
         let has_more = rows.len() > limit;
         if has_more {

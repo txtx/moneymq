@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use indexmap::IndexMap;
-use moneymq_core::facilitator::SOLANA_KEYPAIR_ENV;
+use moneymq_core::api::payment::SOLANA_KEYPAIR_ENV;
 use moneymq_types::x402::config::{
     constants::{
         DEFAULT_BINDING_ADDRESS, DEFAULT_FACILITATOR_PORT, DEFAULT_RPC_PORT, DEFAULT_SANDBOX,

@@ -2,14 +2,16 @@ use diesel::r2d2::{ConnectionManager, Pool};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 use moneymq_types::x402::transactions::FacilitatedTransaction;
 use sha2::{Digest, Sha256};
+use solana_keypair::{Keypair, Signer};
+use std::str::FromStr;
 use tracing::debug;
 
-use crate::facilitator::endpoints::FacilitatorExtraContext;
+use crate::api::payment::endpoints::FacilitatorExtraContext;
 
 mod models;
 pub mod schema;
 
-pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/facilitator/db/migrations");
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!("./src/api/payment/db/migrations");
 
 #[cfg(feature = "sqlite")]
 type DbConnection = diesel::sqlite::SqliteConnection;
@@ -70,11 +72,6 @@ fn map_spl_token_to_symbol(mint_address: &str) -> String {
 
 /// Resolve sandbox account addresses to friendly labels (alice, bob, etc.)
 fn resolve_sandbox_account_label(address: &str) -> Option<String> {
-    use crate::billing::recipient::LocalManagedRecipient;
-    use sha2::{Digest, Sha256};
-    use solana_keypair::{Keypair, Signer};
-    use std::str::FromStr;
-
     // Try to parse the address
     let target_pubkey = solana_pubkey::Pubkey::from_str(address).ok()?;
 
@@ -140,7 +137,7 @@ impl DbManager {
         let customer_address = match &verify_request.payment_payload.payload {
             moneymq_types::x402::ExactPaymentPayload::Solana(payload) => {
                 // Decode and extract the customer (payer) from the transaction
-                use crate::facilitator::networks::solana::extract_customer_from_transaction;
+                use crate::api::payment::networks::solana::extract_customer_from_transaction;
                 extract_customer_from_transaction(&payload.transaction)
                     .ok()
                     .map(|pubkey| pubkey.to_string())
@@ -225,10 +222,7 @@ impl DbManager {
     }
 
     /// Check if a transaction with this payment_requirement is already settled
-    pub fn is_transaction_already_settled(
-        &self,
-        x402_payment_requirement: &str,
-    ) -> DbResult<bool> {
+    pub fn is_transaction_already_settled(&self, x402_payment_requirement: &str) -> DbResult<bool> {
         let mut conn = self
             .conn
             .get()

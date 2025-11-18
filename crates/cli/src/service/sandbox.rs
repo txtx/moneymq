@@ -1,6 +1,6 @@
 use console::style;
 use indexmap::IndexMap;
-use moneymq_core::{billing::NetworksConfig, validator::SolanaValidatorConfig};
+use moneymq_core::{gateway::NetworksConfig, validator::SolanaValidatorConfig};
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::x402::config::facilitator::{
@@ -15,7 +15,7 @@ use moneymq_types::x402::{
         },
     },
 };
-use solana_keypair::{Pubkey, Signer};
+use solana_keypair::Signer;
 use url::Url;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
@@ -174,7 +174,7 @@ async fn start_facilitator_networks(
                     // It needs to be written to the env so Kora can pick it up.
                     // TODO: remove once Kora can accept Keypair directly
                     unsafe {
-                        use moneymq_core::facilitator::SOLANA_KEYPAIR_ENV;
+                        use moneymq_core::api::payment::SOLANA_KEYPAIR_ENV;
 
                         let value = new_keypair.to_base58_string();
                         std::env::set_var(SOLANA_KEYPAIR_ENV, value);
@@ -213,7 +213,7 @@ async fn start_facilitator_networks(
         .get_facilitator_pubkey(&"solana".to_string())
         .expect("Facilitator pubkey should be initialized");
 
-    let handle = moneymq_core::facilitator::start_facilitator(facilitator_config, true)
+    let handle = moneymq_core::api::payment::start_facilitator(facilitator_config, true)
         .await
         .map_err(|e| format!("Failed to start facilitator: {e}"))?;
 

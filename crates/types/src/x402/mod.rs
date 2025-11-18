@@ -8,7 +8,14 @@ use solana_pubkey::Pubkey;
 use url::Url;
 
 pub mod config;
+mod currency;
+mod recipient;
 pub mod transactions;
+
+pub use currency::{Currency, SolanaCurrency};
+pub use recipient::{
+    LocalManagedRecipient, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
+};
 
 /// X402 protocol version
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

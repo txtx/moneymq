@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use moneymq_types::x402::{MixedAddress, Network};
+use crate::x402::{MixedAddress, Network};
 use solana_keypair::Signer;
 use solana_pubkey::Pubkey;
 

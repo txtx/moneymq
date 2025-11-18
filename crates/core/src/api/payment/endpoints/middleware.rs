@@ -1,3 +1,14 @@
+use crate::api::{
+    catalog::{
+        ProviderState,
+        stripe::endpoints::{
+            billing::BillingMeterEventRequest, subscriptions::SubscriptionRequest,
+        },
+    },
+    payment::{
+        endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
+    },
+};
 use axum::{
     body::Body,
     extract::State,
@@ -14,18 +25,6 @@ use moneymq_types::x402::{
 };
 use serde_json::json;
 use tracing::{debug, error, info, warn};
-
-use crate::{
-    catalog::{
-        ProviderState,
-        stripe::endpoints::{
-            billing::BillingMeterEventRequest, subscriptions::SubscriptionRequest,
-        },
-    },
-    facilitator::{
-        endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
-    },
-};
 
 #[derive(thiserror::Error, Debug)]
 pub enum X402FacilitatorRequestError {
@@ -600,7 +599,7 @@ pub async fn payment_middleware(
 ///
 /// # Example
 /// ```
-/// use crate::facilitator::endpoints::middleware::x402_post;
+/// use crate::api::payment::endpoints::middleware::x402_post;
 ///
 /// let route = x402_post(my_handler, state.clone());
 /// ```

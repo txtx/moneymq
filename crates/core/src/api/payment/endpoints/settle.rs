@@ -10,11 +10,7 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{error, info};
 
-use crate::facilitator::{
-    FacilitatorState,
-    endpoints::serialize_to_base64,
-    networks,
-};
+use crate::api::payment::{FacilitatorState, endpoints::serialize_to_base64, networks};
 
 /// POST /settle endpoint - settle a payment on-chain
 pub async fn handler(

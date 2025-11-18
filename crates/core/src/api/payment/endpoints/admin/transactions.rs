@@ -1,9 +1,8 @@
-use axum::{Extension, Json, response::IntoResponse};
-
-use crate::{
+use crate::api::{
     catalog::stripe::types::{ListParams, ListResponse},
-    facilitator::FacilitatorState,
+    payment::FacilitatorState,
 };
+use axum::{Extension, Json, response::IntoResponse};
 
 /// GET /v1/transactions - List transactions
 ///
