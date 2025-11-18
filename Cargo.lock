@@ -4024,7 +4024,7 @@ dependencies = [
 [[package]]
 name = "kora-lib"
 version = "1.0.3"
-source = "git+https://github.com/txtx/kora.git?branch=fix%2Flimit-singletons-access#2b1be92ac411dcad556f657694625a131c25d25b"
+source = "git+https://github.com/txtx/kora.git?branch=fix%2Flimit-singletons-access#d2bae89c01865e5fcabf2bd6af55aefa7c7d6124"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -12410,7 +12410,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
