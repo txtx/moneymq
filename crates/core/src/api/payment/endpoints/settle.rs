@@ -109,7 +109,6 @@ pub async fn handler(
 
     let settle_request_base64 = serialize_to_base64(&request);
     let settle_response_base64 = serialize_to_base64(&response);
-    let x402_payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
 
     let status = if response.success {
         "completed".into()
@@ -121,10 +120,15 @@ pub async fn handler(
         .as_ref()
         .map(|tx_hash| tx_hash.to_string());
 
+    // Extract transaction for payment_hash lookup
+    let transaction_str = match &request.payment_payload.payload {
+        moneymq_types::x402::ExactPaymentPayload::Solana(payload) => &payload.transaction,
+    };
+
     // Find transaction by payment_hash for idempotent settlement updates
     match state
         .db_manager
-        .find_transaction_id_by_payment_hash(&x402_payment_requirement_base64)
+        .find_transaction_id_by_payment_hash(transaction_str)
     {
         Ok(Some(tx_id)) => {
             if let Err(e) = state.db_manager.update_transaction_after_settlement(
@@ -141,7 +145,7 @@ pub async fn handler(
             // Check if transaction is already settled (idempotent behavior)
             match state
                 .db_manager
-                .is_transaction_already_settled(&x402_payment_requirement_base64)
+                .is_transaction_already_settled(transaction_str)
             {
                 Ok(true) => {
                     tracing::debug!(

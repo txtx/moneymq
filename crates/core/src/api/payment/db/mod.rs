@@ -52,13 +52,20 @@ fn run_migrations(conn: &mut PooledConnection) -> Result<(), DbError> {
     Ok(())
 }
 
-/// Calculate SHA256 hash of payment requirement for idempotency
+/// Calculate SHA256 hash of transaction message (without signatures) for idempotency
 /// Returns a hex-encoded hash string
-fn calculate_payment_hash(payment_requirement_base64: &str) -> String {
+/// For Solana, this hashes just the transaction message (instructions, accounts, blockhash)
+/// excluding signatures, so verify and settle operations can be matched
+fn calculate_payment_hash(transaction: &str) -> Result<String, String> {
+    use crate::api::payment::networks::solana::extract_transaction_message_bytes;
+
+    let message_bytes = extract_transaction_message_bytes(transaction)
+        .map_err(|e| format!("Failed to extract transaction message: {}", e))?;
+
     let mut hasher = Sha256::new();
-    hasher.update(payment_requirement_base64.as_bytes());
+    hasher.update(&message_bytes);
     let result = hasher.finalize();
-    format!("{:x}", result)
+    Ok(format!("{:x}", result))
 }
 
 /// Map SPL token mint addresses to currency symbols
@@ -190,8 +197,19 @@ impl DbManager {
             None
         };
 
-        // Calculate payment hash for idempotency
-        let payment_hash = Some(calculate_payment_hash(&payment_requirement_base64));
+        // Calculate payment hash for idempotency based on the transaction message (without signatures)
+        // This ensures verify and settle operations can be matched even if signatures differ
+        let payment_hash = match &verify_request.payment_payload.payload {
+            moneymq_types::x402::ExactPaymentPayload::Solana(payload) => {
+                match calculate_payment_hash(&payload.transaction) {
+                    Ok(hash) => Some(hash),
+                    Err(e) => {
+                        debug!("Failed to calculate payment hash: {}", e);
+                        None
+                    }
+                }
+            }
+        };
 
         // Extract amount from payment requirements
         let amount = verify_request
@@ -225,14 +243,15 @@ impl DbManager {
         }
     }
 
-    /// Check if a transaction with this payment_requirement is already settled
-    pub fn is_transaction_already_settled(&self, x402_payment_requirement: &str) -> DbResult<bool> {
+    /// Check if a transaction with this transaction payload is already settled
+    pub fn is_transaction_already_settled(&self, x402_transaction: &str) -> DbResult<bool> {
         let mut conn = self
             .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
-        let payment_hash = calculate_payment_hash(x402_payment_requirement);
+        let payment_hash = calculate_payment_hash(x402_transaction)
+            .map_err(|e| DbError::ConnectionError(e))?;
 
         models::facilitated_transaction::is_transaction_already_settled(&mut conn, &payment_hash)
             .map_err(DbError::FindTxError)
@@ -242,14 +261,15 @@ impl DbManager {
     /// This is the preferred method for finding transactions to settle
     pub fn find_transaction_id_by_payment_hash(
         &self,
-        x402_payment_requirement: &str,
+        x402_transaction: &str,
     ) -> DbResult<Option<i32>> {
         let mut conn = self
             .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
-        let payment_hash = calculate_payment_hash(x402_payment_requirement);
+        let payment_hash = calculate_payment_hash(x402_transaction)
+            .map_err(|e| DbError::ConnectionError(e))?;
 
         models::facilitated_transaction::find_transaction_id_by_payment_hash(
             &mut conn,

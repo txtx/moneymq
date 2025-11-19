@@ -15,6 +15,36 @@ use solana_pubkey::Pubkey;
 use solana_transaction::{Transaction, versioned::VersionedTransaction};
 use tracing::info;
 
+/// Helper function to extract transaction message (without signatures) for hashing
+/// This ensures verify and settle operations can be matched even if signatures differ
+pub fn extract_transaction_message_bytes(transaction_str: &str) -> Result<Vec<u8>> {
+    // Try base64 first (common format), then fall back to base58
+    use base64::Engine;
+    let transaction_bytes =
+        if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(transaction_str) {
+            bytes
+        } else if let Ok(bytes) = bs58::decode(transaction_str).into_vec() {
+            bytes
+        } else {
+            return Err(anyhow::anyhow!(
+                "Failed to decode transaction: not valid base64 or base58"
+            ));
+        };
+
+    // Try to deserialize as VersionedTransaction first, then fall back to legacy Transaction
+    if let Ok(versioned_tx) = bincode::deserialize::<VersionedTransaction>(&transaction_bytes) {
+        // Serialize just the message part
+        bincode::serialize(&versioned_tx.message)
+            .context("Failed to serialize versioned transaction message")
+    } else {
+        let legacy_tx: Transaction = bincode::deserialize(&transaction_bytes)
+            .context("Failed to deserialize transaction")?;
+        // Serialize just the message part
+        bincode::serialize(&legacy_tx.message)
+            .context("Failed to serialize legacy transaction message")
+    }
+}
+
 /// Helper function to decode and extract payer from transaction
 pub fn extract_customer_from_transaction(transaction_str: &str) -> Result<Pubkey> {
     info!("Decoding transaction of length: {}", transaction_str.len());
