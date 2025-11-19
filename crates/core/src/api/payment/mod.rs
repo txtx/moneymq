@@ -42,7 +42,7 @@ pub struct FacilitatorState {
 }
 
 impl FacilitatorState {
-    pub fn new(
+    pub fn local(
         config: FacilitatorConfig,
         database_url: &str,
         kora_config: Config,
@@ -50,7 +50,7 @@ impl FacilitatorState {
     ) -> Self {
         Self {
             config: Arc::new(config),
-            db_manager: Arc::new(DbManager::new(database_url).unwrap()),
+            db_manager: Arc::new(DbManager::local(database_url).unwrap()),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
         }
@@ -134,7 +134,7 @@ pub async fn start_facilitator(
     };
     let signer_pool = SignerPool::from_config(signer_pool_config).await?;
 
-    let state = FacilitatorState::new(
+    let state = FacilitatorState::local(
         config,
         format!("sqlite://{}", "payments.sqlite").as_str(),
         kora_config,

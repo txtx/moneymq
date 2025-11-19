@@ -24,7 +24,8 @@ pub type DbPool = Pool<ConnectionManager<DbConnection>>;
 
 #[derive(Debug)]
 pub struct DbManager {
-    conn: DbPool,
+    control_db_conn: DbPool,
+    payment_db_conn: DbPool,
 }
 
 pub type DbResult<T> = Result<T, DbError>;
@@ -100,7 +101,7 @@ fn resolve_sandbox_account_label(address: &str) -> Option<String> {
 }
 
 impl DbManager {
-    pub fn new(database_url: &str) -> DbResult<Self> {
+    pub fn local(database_url: &str) -> DbResult<Self> {
         debug!("Establishing connection to database at {}", database_url);
         let manager = ConnectionManager::<DbConnection>::new(database_url);
         let pool = Pool::builder().build(manager).unwrap();
@@ -113,7 +114,10 @@ impl DbManager {
         if let Err(e) = run_migrations(&mut pooled_connection) {
             debug!("Migrations failure: {}", e);
         }
-        Ok(Self { conn: pool })
+        Ok(Self {
+            control_db_conn: pool.clone(),
+            payment_db_conn: pool,
+        })
     }
 
     pub fn insert_transaction(
@@ -125,7 +129,7 @@ impl DbManager {
         verify_response_base64: String,
     ) -> DbResult<()> {
         let mut conn = self
-            .conn
+            .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
@@ -224,7 +228,7 @@ impl DbManager {
     /// Check if a transaction with this payment_requirement is already settled
     pub fn is_transaction_already_settled(&self, x402_payment_requirement: &str) -> DbResult<bool> {
         let mut conn = self
-            .conn
+            .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
@@ -241,7 +245,7 @@ impl DbManager {
         x402_payment_requirement: &str,
     ) -> DbResult<Option<i32>> {
         let mut conn = self
-            .conn
+            .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
@@ -262,7 +266,7 @@ impl DbManager {
         extra_ctx: Option<FacilitatorExtraContext>,
     ) -> DbResult<Option<i32>> {
         let mut conn = self
-            .conn
+            .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
@@ -301,7 +305,7 @@ impl DbManager {
         settle_response_base64: Option<String>,
     ) -> DbResult<()> {
         let mut conn = self
-            .conn
+            .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
@@ -324,7 +328,7 @@ impl DbManager {
         starting_after: Option<i32>,
     ) -> DbResult<(Vec<FacilitatedTransaction>, bool)> {
         let mut conn = self
-            .conn
+            .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
