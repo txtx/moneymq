@@ -15,6 +15,7 @@ diesel::table! {
         x402_settle_request -> Nullable<Text>,
         x402_settle_response -> Nullable<Text>,
         payment_hash -> Nullable<Text>,
+        transaction_id -> Nullable<Text>,
     }
 }
 

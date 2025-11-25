@@ -72,6 +72,9 @@ pub async fn handler(
     }
 
     // Delegate to network-specific verification
+    // generate unique transaction ID for linking verify and settle 
+    let transaction_id = uuid::Uuid::new_v4().to_string();
+    
     let (status, response) = match network_config.network() {
         Network::Solana => {
             let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
@@ -80,6 +83,7 @@ pub async fn handler(
                 &rpc_client,
                 &state.kora_config,
                 &state.signer_pool,
+                transaction_id.clone(),
             )
             .await
             {
@@ -104,10 +108,10 @@ pub async fn handler(
 
     if let Err(e) = state.db_manager.insert_transaction(
         &request,
-        &response,
         payment_requirement_base64,
         verify_request_base64,
         verify_response_base64,
+        Some(transaction_id),
     ) {
         error!("Failed to log transaction to database: {}", e);
     };

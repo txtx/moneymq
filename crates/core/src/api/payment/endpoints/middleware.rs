@@ -224,7 +224,7 @@ async fn verify_payment_with_facilitator(
 
     // Check if payment is valid
     match verify_response {
-        VerifyResponse::Valid { payer } => Ok(payer),
+        VerifyResponse::Valid { payer, .. } => Ok(payer),
         VerifyResponse::Invalid { reason, .. } => Err(
             X402FacilitatorRequestError::PaymentVerificationFailed(reason),
         ),
@@ -239,11 +239,12 @@ async fn settle_payment_with_facilitator(
 ) -> Result<(), X402FacilitatorRequestError> {
     use moneymq_types::x402::{SettleRequest, SettleResponse, X402Version};
 
-    // Construct the settle request (identical structure to verify request)
+    // Construct the settle request with no transaction_id (middleware doesn't track it)
     let settle_request = SettleRequest {
         x402_version: X402Version::V1,
         payment_payload: payment_payload.clone(),
         payment_requirements: payment_requirements.clone(),
+        transaction_id: None, // Middleware uses payment_hash fallback
     };
 
     // Build the facilitator settle URL

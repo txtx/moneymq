@@ -295,8 +295,17 @@ pub struct VerifyRequest {
     pub payment_requirements: PaymentRequirements,
 }
 
-/// Settle request - identical to verify request
-pub type SettleRequest = VerifyRequest;
+/// Settle request - includes transaction ID for linking with verify operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettleRequest {
+    pub x402_version: X402Version,
+    pub payment_payload: PaymentPayload,
+    pub payment_requirements: PaymentRequirements,
+    /// Optional transaction ID from verify response for explicit linking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<String>,
+}
 
 /// Facilitator error reasons
 #[derive(Debug, Clone, Serialize, Deserialize, thiserror::Error)]
@@ -327,6 +336,7 @@ pub enum FacilitatorErrorReason {
 pub enum VerifyResponse {
     Valid {
         payer: MixedAddress,
+        transaction_id: String,
     },
     Invalid {
         reason: FacilitatorErrorReason,
@@ -340,14 +350,15 @@ impl Serialize for VerifyResponse {
         S: Serializer,
     {
         let mut s = match self {
-            VerifyResponse::Valid { .. } => serializer.serialize_struct("VerifyResponse", 2)?,
+            VerifyResponse::Valid { .. } => serializer.serialize_struct("VerifyResponse", 3)?,
             VerifyResponse::Invalid { .. } => serializer.serialize_struct("VerifyResponse", 3)?,
         };
 
         match self {
-            VerifyResponse::Valid { payer } => {
+            VerifyResponse::Valid { payer, transaction_id } => {
                 s.serialize_field("isValid", &true)?;
                 s.serialize_field("payer", payer)?;
+                s.serialize_field("transactionId", transaction_id)?;
             }
             VerifyResponse::Invalid { reason, payer } => {
                 s.serialize_field("isValid", &false)?;
@@ -375,16 +386,21 @@ impl<'de> Deserialize<'de> for VerifyResponse {
             payer: Option<MixedAddress>,
             #[serde(default)]
             invalid_reason: Option<FacilitatorErrorReason>,
+            #[serde(default)]
+            transaction_id: Option<String>,
         }
 
         let raw = Raw::deserialize(deserializer)?;
 
         match (raw.is_valid, raw.invalid_reason) {
-            (true, None) => match raw.payer {
-                None => Err(serde::de::Error::custom(
+            (true, None) => match (raw.payer, raw.transaction_id) {
+                (None, _) => Err(serde::de::Error::custom(
                     "`payer` must be present when `isValid` is true",
                 )),
-                Some(payer) => Ok(VerifyResponse::Valid { payer }),
+                (Some(_), None) => Err(serde::de::Error::custom(
+                    "`transactionId` must be present when `isValid` is true",
+                )),
+                (Some(payer), Some(transaction_id)) => Ok(VerifyResponse::Valid { payer, transaction_id }),
             },
             (false, Some(reason)) => Ok(VerifyResponse::Invalid {
                 payer: raw.payer,
@@ -451,6 +467,121 @@ mod tests {
         // Test deserialization
         let parsed: Network = serde_json::from_str(r#""solana""#).unwrap();
         assert_eq!(parsed, Network::Solana);
+    }
+
+    #[test]
+    fn test_verify_response_valid_with_transaction_id() {
+        use std::str::FromStr;
+        
+        let pubkey = Pubkey::from_str("11111111111111111111111111111112").unwrap();
+        let transaction_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
+        
+        let response = VerifyResponse::Valid {
+            payer: MixedAddress::Solana(pubkey),
+            transaction_id: transaction_id.clone(),
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"isValid\":true"));
+        assert!(json.contains("\"transactionId\""));
+        assert!(json.contains(&transaction_id));
+        let parsed: VerifyResponse = serde_json::from_str(&json).unwrap();
+        match parsed {
+            VerifyResponse::Valid { payer: _, transaction_id: tid } => {
+                assert_eq!(tid, transaction_id);
+            }
+            _ => panic!("Expected Valid response"),
+        }
+    }
+
+    #[test]
+    fn test_verify_response_invalid_without_transaction_id() {
+        let json = r#"{
+            "isValid": true,
+            "payer": "11111111111111111111111111111112"
+        }"#;
+
+            let result: Result<VerifyResponse, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_settle_request_with_transaction_id() {
+        use std::str::FromStr;
+        
+        let pubkey = Pubkey::from_str("11111111111111111111111111111112").unwrap();
+        let transaction_id = "550e8400-e29b-41d4-a716-446655440000".to_string();
+
+        let settle_request = SettleRequest {
+            x402_version: X402Version::V1,
+            payment_payload: PaymentPayload {
+                x402_version: X402Version::V1,
+                scheme: Scheme::Exact,
+                network: Network::Solana,
+                payload: ExactPaymentPayload::Solana(ExactSolanaPayload {
+                    transaction: "test".to_string(),
+                }),
+            },
+            payment_requirements: PaymentRequirements {
+                scheme: Scheme::Exact,
+                network: Network::Solana,
+                max_amount_required: TokenAmount("1000000".to_string()),
+                resource: url::Url::parse("https://example.com").unwrap(),
+                description: "Test".to_string(),
+                mime_type: "application/json".to_string(),
+                output_schema: None,
+                pay_to: MixedAddress::Solana(pubkey),
+                max_timeout_seconds: 300,
+                asset: MixedAddress::Solana(pubkey),
+                extra: None,
+            },
+            transaction_id: Some(transaction_id.clone()),
+        };
+
+            let json = serde_json::to_string(&settle_request).unwrap();
+        assert!(json.contains("\"transactionId\""));
+        assert!(json.contains(&transaction_id));
+        let parsed: SettleRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.transaction_id, Some(transaction_id));
+    }
+
+    #[test]
+    fn test_settle_request_without_transaction_id() {
+        use std::str::FromStr;
+        
+        let pubkey = Pubkey::from_str("11111111111111111111111111111112").unwrap();
+
+        let settle_request = SettleRequest {
+            x402_version: X402Version::V1,
+            payment_payload: PaymentPayload {
+                x402_version: X402Version::V1,
+                scheme: Scheme::Exact,
+                network: Network::Solana,
+                payload: ExactPaymentPayload::Solana(ExactSolanaPayload {
+                    transaction: "test".to_string(),
+                }),
+            },
+            payment_requirements: PaymentRequirements {
+                scheme: Scheme::Exact,
+                network: Network::Solana,
+                max_amount_required: TokenAmount("1000000".to_string()),
+                resource: url::Url::parse("https://example.com").unwrap(),
+                description: "Test".to_string(),
+                mime_type: "application/json".to_string(),
+                output_schema: None,
+                pay_to: MixedAddress::Solana(pubkey),
+                max_timeout_seconds: 300,
+                asset: MixedAddress::Solana(pubkey),
+                extra: None,
+            },
+            transaction_id: None,
+        };
+
+        let json = serde_json::to_string(&settle_request).unwrap();
+        assert!(!json.contains("transactionId"));
+
+        let parsed: SettleRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.transaction_id, None);
     }
 }
 

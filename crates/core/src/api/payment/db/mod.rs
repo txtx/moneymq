@@ -130,10 +130,10 @@ impl DbManager {
     pub fn insert_transaction(
         &self,
         verify_request: &moneymq_types::x402::VerifyRequest,
-        verify_response: &moneymq_types::x402::VerifyResponse,
         payment_requirement_base64: String,
         verify_request_base64: String,
         verify_response_base64: String,
+        transaction_id: Option<String>,
     ) -> DbResult<()> {
         let mut conn = self
             .payment_db_conn
@@ -227,16 +227,17 @@ impl DbManager {
             Some(verify_request_base64),
             Some(verify_response_base64),
             payment_hash,
+            transaction_id,
         );
 
-        // Handle idempotent inserts - if payment_hash already exists, treat as success
+        // Handle idempotent inserts - if payment_hash or transaction_id already exists, treat as success
         match new_transaction.insert(&mut conn) {
             Ok(_) => Ok(()),
             Err(diesel::result::Error::DatabaseError(
                 diesel::result::DatabaseErrorKind::UniqueViolation,
                 _,
             )) => {
-                debug!("Transaction with payment_hash already exists (idempotent insert)");
+                debug!("Transaction with payment_hash or transaction_id already exists (idempotent insert)");
                 Ok(())
             }
             Err(e) => Err(DbError::InsertTxError(e)),
@@ -257,8 +258,26 @@ impl DbManager {
             .map_err(DbError::FindTxError)
     }
 
-    /// Find transaction ID by payment_hash for settlement updates
+    /// Find transaction ID by transaction_id for settlement updates
     /// This is the preferred method for finding transactions to settle
+    pub fn find_transaction_id_by_transaction_id(
+        &self,
+        transaction_id: &str,
+    ) -> DbResult<Option<i32>> {
+        let mut conn = self
+            .payment_db_conn
+            .get()
+            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+
+        models::facilitated_transaction::find_transaction_id_by_transaction_id(
+            &mut conn,
+            transaction_id,
+        )
+        .map_err(DbError::FindTxError)
+    }
+
+    /// Find transaction ID by payment_hash for settlement updates
+    /// This is a fallback method for backward compatibility
     pub fn find_transaction_id_by_payment_hash(
         &self,
         x402_transaction: &str,

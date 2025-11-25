@@ -21,8 +21,25 @@ pub fn is_transaction_already_settled(
         .map(|result| result.is_some())
 }
 
+/// Find transaction by transaction_id for settlement updates
+/// Returns the transaction ID if found and not yet settled
+/// This is the preferred method for linking verify and settle operations
+pub fn find_transaction_id_by_transaction_id(
+    conn: &mut PooledConnection,
+    transaction_id: &str,
+) -> QueryResult<Option<i32>> {
+    facilitated_transactions::table
+        .filter(facilitated_transactions::transaction_id.eq(transaction_id))
+        .filter(facilitated_transactions::x402_settle_request.is_null())
+        .filter(facilitated_transactions::x402_settle_response.is_null())
+        .select(facilitated_transactions::id)
+        .first::<i32>(conn)
+        .optional()
+}
+
 /// Find transaction by payment_hash for settlement updates
 /// Returns the transaction ID if found and not yet settled
+/// This is a fallback method for backward compatibility
 pub fn find_transaction_id_by_payment_hash(
     conn: &mut PooledConnection,
     payment_hash: &str,
@@ -110,6 +127,8 @@ pub struct FacilitatedTransactionModel {
     pub x402_settle_response: Option<String>,
     /// SHA256 hash of x402_payment_requirement for idempotency
     pub payment_hash: Option<String>,
+    /// Unique transaction ID for linking verify and settle operations
+    pub transaction_id: Option<String>,
 }
 
 #[derive(Debug, Queryable)]
@@ -189,6 +208,7 @@ pub struct NewFacilitatedTransaction {
     pub x402_verify_request: Option<String>,
     pub x402_verify_response: Option<String>,
     pub payment_hash: Option<String>,
+    pub transaction_id: Option<String>,
 }
 
 impl NewFacilitatedTransaction {
@@ -201,6 +221,7 @@ impl NewFacilitatedTransaction {
         x402_verify_request: Option<String>,
         x402_verify_response: Option<String>,
         payment_hash: Option<String>,
+        transaction_id: Option<String>,
     ) -> Self {
         let timestamp = chrono::Utc::now().timestamp_millis();
         Self {
@@ -214,6 +235,7 @@ impl NewFacilitatedTransaction {
             x402_verify_request,
             x402_verify_response,
             payment_hash,
+            transaction_id,
         }
     }
     pub fn insert(&self, conn: &mut PooledConnection) -> QueryResult<usize> {

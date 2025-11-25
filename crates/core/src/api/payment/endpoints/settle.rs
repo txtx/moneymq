@@ -125,11 +125,40 @@ pub async fn handler(
         moneymq_types::x402::ExactPaymentPayload::Solana(payload) => &payload.transaction,
     };
 
-    // Find transaction by payment_hash for idempotent settlement updates
-    match state
-        .db_manager
-        .find_transaction_id_by_payment_hash(transaction_str)
-    {
+    // validate transaction_id if provided
+    if let Some(ref tid) = request.transaction_id {
+        if uuid::Uuid::parse_str(tid).is_err() {
+            error!("Invalid transaction_id format: {}", tid);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(SettleResponse {
+                    success: false,
+                    error_reason: Some(FacilitatorErrorReason::FreeForm(
+                        "Invalid transaction_id format. Expected UUID.".to_string(),
+                    )),
+                    payer: request.payment_requirements.pay_to.clone(),
+                    transaction: None,
+                    network: request.payment_requirements.network.clone(),
+                }),
+            );
+        }
+    }
+
+    // Find transaction using transaction_id if available, otherwise fall back to payment_hash
+    let tx_id_result = if let Some(ref transaction_id) = request.transaction_id {
+        info!("Looking up transaction by transaction_id: {}", transaction_id);
+        state
+            .db_manager
+            .find_transaction_id_by_transaction_id(transaction_id)
+    } else {
+        info!("No transaction_id provided, falling back to payment_hash lookup");
+        state
+            .db_manager
+            .find_transaction_id_by_payment_hash(transaction_str)
+    };
+
+    // Find transaction by payment_hash or transaction_id for idempotent settlement updates
+    match tx_id_result {
         Ok(Some(tx_id)) => {
             if let Err(e) = state.db_manager.update_transaction_after_settlement(
                 tx_id,

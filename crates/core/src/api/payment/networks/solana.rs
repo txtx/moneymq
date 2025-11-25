@@ -95,6 +95,7 @@ pub async fn verify_solana_payment(
     rpc_client: &Arc<RpcClient>,
     kora_config: &Arc<Config>,
     signer_pool: &Arc<SignerPool>,
+    transaction_id: String,
 ) -> Result<VerifyResponse> {
     info!("Verifying Solana payment");
     let solana_payload = match &request.payment_payload.payload {
@@ -120,7 +121,7 @@ pub async fn verify_solana_payment(
 
     let payer = MixedAddress::Solana(meta_signer.signer.pubkey());
     info!("Payment verified successfully");
-    Ok(VerifyResponse::Valid { payer })
+    Ok(VerifyResponse::Valid { payer, transaction_id })
 }
 
 /// Settle a Solana payment on-chain using Kora SDK
