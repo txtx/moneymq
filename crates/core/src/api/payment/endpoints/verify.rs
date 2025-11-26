@@ -7,6 +7,7 @@ use axum::{
 };
 use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, VerifyResponse};
 use solana_client::nonblocking::rpc_client::RpcClient;
+use solana_commitment_config::CommitmentConfig;
 use tracing::{debug, error};
 
 use crate::api::payment::{FacilitatorState, endpoints::serialize_to_base64, networks};
@@ -74,7 +75,10 @@ pub async fn handler(
     // Delegate to network-specific verification
     let (status, response) = match network_config.network() {
         Network::Solana => {
-            let rpc_client = Arc::new(RpcClient::new(network_config.rpc_url().to_string()));
+            let rpc_client = Arc::new(RpcClient::new_with_commitment(
+                network_config.rpc_url().to_string(),
+                CommitmentConfig::confirmed(),
+            ));
             match networks::solana::verify_solana_payment(
                 &request,
                 &rpc_client,
