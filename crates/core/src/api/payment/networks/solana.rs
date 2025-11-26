@@ -115,10 +115,10 @@ pub async fn verify_solana_payment(
     .await?;
 
     let _ = resolved_transaction
-        .sign_transaction(&kora_config, &Arc::clone(&meta_signer.signer), rpc_client)
+        .sign_transaction(&kora_config, &Arc::clone(&meta_signer), rpc_client)
         .await?;
 
-    let payer = MixedAddress::Solana(meta_signer.signer.pubkey());
+    let payer = MixedAddress::Solana(meta_signer.pubkey());
     info!("Payment verified successfully");
     Ok(VerifyResponse::Valid { payer })
 }
@@ -150,7 +150,7 @@ pub async fn settle_solana_payment(
     .await?;
 
     let (signature, _encoded_transaction) = resolved_transaction
-        .sign_and_send_transaction(kora_config, &Arc::clone(&meta_signer.signer), rpc_client)
+        .sign_and_send_transaction(kora_config, &Arc::clone(&meta_signer), rpc_client)
         .await?;
 
     let signature_bytes: [u8; 64] = bs58::decode(&signature)
@@ -159,7 +159,7 @@ pub async fn settle_solana_payment(
         .try_into()
         .map_err(|_| anyhow::anyhow!("Invalid signature length"))?;
 
-    let signer_pubkey = meta_signer.signer.pubkey();
+    let signer_pubkey = meta_signer.pubkey();
     let payer = MixedAddress::Solana(signer_pubkey);
 
     let tx_hash = TransactionHash::Solana(signature_bytes);

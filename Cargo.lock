@@ -4023,8 +4023,8 @@ dependencies = [
 
 [[package]]
 name = "kora-lib"
-version = "1.0.3"
-source = "git+https://github.com/txtx/kora.git?branch=fix%2Flimit-singletons-access#d2bae89c01865e5fcabf2bd6af55aefa7c7d6124"
+version = "2.0.1"
+source = "git+https://github.com/solana-foundation/kora.git?branch=main#2632c24b8a4bccf449410c3e2b04f9263cd2b3be"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -4068,11 +4068,11 @@ dependencies = [
  "solana-client",
  "solana-commitment-config",
  "solana-compute-budget-interface",
+ "solana-keychain",
  "solana-message 3.0.1",
  "solana-program 3.0.0",
  "solana-program-pack 3.0.0",
  "solana-sdk",
- "solana-signers",
  "solana-system-interface 2.0.0",
  "solana-transaction-status",
  "solana-transaction-status-client-types",
@@ -8297,6 +8297,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-keychain"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "faa9363d1a3687053cb219c364ea846f7b6b645bb0288e769a724a6e3a2e7379"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bincode",
+ "bs58",
+ "chrono",
+ "hex",
+ "log",
+ "p256",
+ "reqwest 0.12.24",
+ "serde",
+ "serde_json",
+ "solana-sdk",
+ "thiserror 2.0.17",
+ "tokio",
+]
+
+[[package]]
 name = "solana-keypair"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9721,27 +9743,6 @@ dependencies = [
  "solana-pubkey 3.0.0",
  "solana-signature",
  "solana-transaction-error 3.0.0",
-]
-
-[[package]]
-name = "solana-signers"
-version = "0.1.0"
-source = "git+https://github.com/solana-foundation/solana-signers#f98cf96fd451ea4da38c6a425364147a4731fd4d"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "bincode",
- "bs58",
- "chrono",
- "hex",
- "log",
- "p256",
- "reqwest 0.12.24",
- "serde",
- "serde_json",
- "solana-sdk",
- "thiserror 2.0.17",
- "tokio",
 ]
 
 [[package]]
