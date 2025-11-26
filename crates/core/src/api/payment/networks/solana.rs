@@ -101,6 +101,15 @@ pub async fn verify_solana_payment(
         ExactPaymentPayload::Solana(payload) => payload,
     };
     let transaction = TransactionUtil::decode_b64_transaction(&solana_payload.transaction)?;
+    info!(
+        "Decoded transaction with {} signatures",
+        transaction.signatures.len()
+    );
+    info!(
+        "Transaction blockhash: {:?}",
+        transaction.message.recent_blockhash()
+    );
+    info!("Verifying with rpc client: {}", rpc_client.url());
 
     // TODO: Check usage limit for transaction sender
     // UsageTracker::check_transaction_usage_limit(&config, &transaction).await?;
@@ -136,7 +145,15 @@ pub async fn settle_solana_payment(
         ExactPaymentPayload::Solana(payload) => payload,
     };
     let transaction = TransactionUtil::decode_b64_transaction(&solana_payload.transaction)?;
-
+    info!(
+        "Decoded transaction with {} signatures",
+        transaction.signatures.len()
+    );
+    info!(
+        "Transaction blockhash: {:?}",
+        transaction.message.recent_blockhash()
+    );
+    info!("Settling with rpc client: {}", rpc_client.url());
     // TODO: Check usage limit for transaction sender
     // UsageTracker::check_transaction_usage_limit(&config, &transaction).await?;
 
