@@ -22,7 +22,6 @@ hiro-system-kit = { version = "0.3.4", default-features = false, features = [
 ] }
 indexmap = { version = "2.12.0", features = ["serde"] }
 kora-lib = { git = "https://github.com/txtx/kora.git", branch = "fix/limit-singletons-access" }
-moneymq-types = { path = "../types" }
 reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
@@ -44,6 +43,8 @@ base64 = "0.22.1"
 
 # MoneyMQ deps
 moneymq-studio-ui = { path = "../studio" }
+moneymq-types = { path = "../types" }
+moneymq-wallet = { path = "../wallet" }
 
 # Solana deps
 solana-client = { workspace = true }

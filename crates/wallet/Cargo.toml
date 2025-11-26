@@ -1,0 +1,50 @@
+[package]
+name = "moneymq-wallet"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+anyhow = "1.0"
+bs58 = "0.5"
+indexmap = { version = "2.12.0", features = ["serde"] }
+moneymq-types = { path = "../types" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+base64 = "0.22.1"
+# swig-sdk = { git = "https://github.com/anagrambuild/swig-wallet", branch = "wuh/solana-v3" }
+swig-sdk = { path = "../../../swig-wallet/rust-sdk" }
+
+
+# Solana deps
+solana-client = { workspace = true }
+solana-keypair = { workspace = true }
+solana-message = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-transaction = { workspace = true }
+solana-system-interface = { workspace = true }
+
+
+[patch.crates-io]
+
+
+[dev-dependencies]
+axum = { workspace = true }
+crossbeam = { workspace = true }
+crossbeam-channel = { workspace = true }
+futures = "0.3"
+hiro-system-kit = { version = "0.3.4", default-features = false, features = [
+    "tokio_helpers",
+] }
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+surfpool-core = { workspace = true }
+surfpool-types = { workspace = true }
+tokio = { workspace = true, features = ["full"] }

@@ -488,3 +488,10 @@ impl MeterCollection {
         }
     }
 }
+
+pub enum RecurringScheme {
+    PerUnit,
+    Weekly(u8),  // every N weeks
+    Monthly(u8), // every N months
+    Yearly(u8),  // every N years
+}
