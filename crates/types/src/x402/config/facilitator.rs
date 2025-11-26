@@ -4,7 +4,6 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use solana_keypair::{Keypair, Signer};
 use solana_pubkey::Pubkey;
 use url::Url;
 
@@ -26,7 +25,7 @@ impl FacilitatorConfig {
                 cfg.payer_pubkey.map(|pk| pk.to_string())
             }
             FacilitatorNetworkConfig::SolanaMainnet(cfg) => {
-                Some(cfg.payer_keypair.pubkey().to_string())
+                cfg.payer_pubkey.map(|pk| pk.to_string())
             }
         })
     }
@@ -153,14 +152,17 @@ impl SolanaSurfnetFacilitatorConfig {
 #[derive(Debug)]
 pub struct SolanaMainnetFacilitatorConfig {
     pub rpc_url: Url,
-    pub payer_keypair: Keypair,
+    pub payer_pubkey: Option<Pubkey>,
 }
 
 impl SolanaMainnetFacilitatorConfig {
     pub fn extra(&self) -> Option<SupportedPaymentKindExtra> {
-        Some(SupportedPaymentKindExtra {
-            fee_payer: self.payer_keypair.pubkey().into(),
-        })
+        match self.payer_pubkey {
+            Some(pubkey) => Some(SupportedPaymentKindExtra {
+                fee_payer: pubkey.into(),
+            }),
+            None => None,
+        }
     }
 }
 
@@ -204,7 +206,8 @@ impl Display for SolanaMainnetFacilitatorConfig {
             f,
             "SolanaMainnet {{ rpc_url: {}, payer_pubkey: {} }}",
             self.rpc_url,
-            self.payer_keypair.pubkey()
+            self.payer_pubkey
+                .map_or("None".to_string(), |pk| pk.to_string())
         )
     }
 }
