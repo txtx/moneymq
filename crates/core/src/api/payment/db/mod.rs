@@ -134,6 +134,8 @@ impl DbManager {
         payment_requirement_base64: String,
         verify_request_base64: String,
         verify_response_base64: String,
+        facilitator_id: &str,
+        is_sandbox: bool,
     ) -> DbResult<()> {
         let mut conn = self
             .payment_db_conn
@@ -227,6 +229,8 @@ impl DbManager {
             Some(verify_request_base64),
             Some(verify_response_base64),
             payment_hash,
+            facilitator_id.to_string(),
+            is_sandbox,
         );
 
         // Handle idempotent inserts - if payment_hash already exists, treat as success
@@ -346,6 +350,8 @@ impl DbManager {
         &self,
         limit: usize,
         starting_after: Option<i32>,
+        facilitator_id: &str,
+        is_sandbox: bool,
     ) -> DbResult<(Vec<FacilitatedTransaction>, bool)> {
         let mut conn = self
             .payment_db_conn
@@ -356,6 +362,8 @@ impl DbManager {
             &mut conn,
             limit,
             starting_after,
+            facilitator_id,
+            is_sandbox,
         )
         .map_err(DbError::ListTxError)
         .map(|(txs_with_customer, has_more)| {

@@ -39,6 +39,8 @@ pub struct FacilitatorState {
     pub db_manager: Arc<db::DbManager>,
     pub kora_config: Arc<Config>,
     pub signer_pool: Arc<SignerPool>,
+    pub facilitator_id: String,
+    pub is_sandbox: bool,
 }
 
 impl FacilitatorState {
@@ -48,11 +50,39 @@ impl FacilitatorState {
         kora_config: Config,
         signer_pool: SignerPool,
     ) -> Self {
+        // Extract facilitator_id from the URL's subdomain
+        let facilitator_id = config
+            .url
+            .host_str()
+            .and_then(|host| host.split('.').next())
+            .unwrap_or("local")
+            .to_string();
+
         Self {
             config: Arc::new(config),
             db_manager: Arc::new(DbManager::local(database_url).unwrap()),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
+            facilitator_id,
+            is_sandbox: true, // Local mode defaults to sandbox
+        }
+    }
+
+    pub fn new(
+        config: FacilitatorConfig,
+        db_manager: db::DbManager,
+        kora_config: Config,
+        signer_pool: SignerPool,
+        facilitator_id: String,
+        is_sandbox: bool,
+    ) -> Self {
+        Self {
+            config: Arc::new(config),
+            db_manager: Arc::new(db_manager),
+            kora_config: Arc::new(kora_config),
+            signer_pool: Arc::new(signer_pool),
+            facilitator_id,
+            is_sandbox,
         }
     }
 }

@@ -38,4 +38,8 @@ pub struct FacilitatedTransaction {
     pub x402_settle_request: Option<String>, // Base64-encoded settle request to facilitator
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x402_settle_response: Option<String>, // Base64-encoded settle response from facilitator
+
+    // Facilitator context
+    pub facilitator_id: String, // The facilitator ID (subdomain) that processed this transaction
+    pub is_sandbox: bool,       // Whether this transaction was processed in sandbox mode
 }

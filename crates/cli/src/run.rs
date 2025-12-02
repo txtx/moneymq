@@ -264,7 +264,7 @@ impl RunCommand {
                 "# {}{}{}{}{}",
                 style("Payment API (protocol: ").dim(),
                 style("x402").green(),
-                style(", paying with ").dim()
+                style(", facilitator public key: ").dim()
                 style(facilitator_pubkey.to_string()).green(),
                 style(")").dim()
             );

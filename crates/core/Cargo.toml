@@ -61,6 +61,7 @@ diesel = { version = "2.2.11", default-features = false, features = [
     "serde_json",
     "uuid",
     "r2d2",
+    "32-column-tables",
 ] }
 diesel_derives = { version = "2.2.6" }
 diesel-dynamic-schema = { version = "0.2.3" }

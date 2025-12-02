@@ -112,6 +112,8 @@ pub async fn handler(
         payment_requirement_base64,
         verify_request_base64,
         verify_response_base64,
+        &state.facilitator_id,
+        state.is_sandbox,
     ) {
         error!("Failed to log transaction to database: {}", e);
     };

@@ -30,7 +30,7 @@ pub async fn list_transactions(
 
     let (transactions, has_more) = state
         .db_manager
-        .list_transactions(limit, Some(start_idx))
+        .list_transactions(limit, Some(start_idx), &state.facilitator_id, state.is_sandbox)
         .unwrap_or((vec![], false));
 
     Json(ListResponse {
