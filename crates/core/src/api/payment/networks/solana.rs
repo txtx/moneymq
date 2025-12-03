@@ -108,28 +108,6 @@ pub async fn verify_solana_payment(
     );
     let recent_blockhash = transaction.message.recent_blockhash();
     info!("Transaction blockhash: {:?}", recent_blockhash);
-
-    let is_blockhash_valid_finalized = rpc_client
-        .is_blockhash_valid(recent_blockhash, CommitmentConfig::finalized())
-        .await?;
-    info!(
-        "Is blockhash valid at finalized commitment level: {}",
-        is_blockhash_valid_finalized
-    );
-    let is_blockhash_valid_confirmed = rpc_client
-        .is_blockhash_valid(recent_blockhash, CommitmentConfig::confirmed())
-        .await?;
-    info!(
-        "Is blockhash valid at confirmed commitment level: {}",
-        is_blockhash_valid_confirmed
-    );
-    let is_blockhash_valid_processed = rpc_client
-        .is_blockhash_valid(recent_blockhash, CommitmentConfig::processed())
-        .await?;
-    info!(
-        "Is blockhash valid at processed commitment level: {}",
-        is_blockhash_valid_processed
-    );
     info!("Verifying with rpc client: {}", rpc_client.url());
 
     // TODO: Check usage limit for transaction sender
@@ -172,29 +150,6 @@ pub async fn settle_solana_payment(
     );
     let recent_blockhash = transaction.message.recent_blockhash();
     info!("Transaction blockhash: {:?}", recent_blockhash);
-
-    let is_blockhash_valid_finalized = rpc_client
-        .is_blockhash_valid(recent_blockhash, CommitmentConfig::finalized())
-        .await?;
-    info!(
-        "Is blockhash valid at finalized commitment level: {}",
-        is_blockhash_valid_finalized
-    );
-    let is_blockhash_valid_confirmed = rpc_client
-        .is_blockhash_valid(recent_blockhash, CommitmentConfig::confirmed())
-        .await?;
-    info!(
-        "Is blockhash valid at confirmed commitment level: {}",
-        is_blockhash_valid_confirmed
-    );
-    let is_blockhash_valid_processed = rpc_client
-        .is_blockhash_valid(recent_blockhash, CommitmentConfig::processed())
-        .await?;
-    info!(
-        "Is blockhash valid at processed commitment level: {}",
-        is_blockhash_valid_processed
-    );
-
     info!("Settling with rpc client: {}", rpc_client.url());
     // TODO: Check usage limit for transaction sender
     // UsageTracker::check_transaction_usage_limit(&config, &transaction).await?;
