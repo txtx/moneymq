@@ -15,6 +15,7 @@ const PROTECTED_API_URL =
   process.env.PROTECTED_API_URL || "http://localhost:4021/protected";
 const NETWORK = process.env.NETWORK || "solana";
 const DEBUG = process.env.DEBUG === "true";
+const RPC_URL = process.env.RPC_URL || "http://localhost:8899";
 
 // Debug logging helper
 function debug(...args: any[]) {
@@ -60,7 +61,7 @@ async function main() {
     console.log("  ✓ Signer initialized");
 
     debug("Creating fetchWithPayment wrapper");
-    debug("Config:", { svmConfig: { rpcUrl: "http://localhost:8899" } });
+    debug("Config:", { svmConfig: { rpcUrl: RPC_URL } });
 
     const baseFetchWithPayment = wrapFetchWithPayment(
       fetch,
@@ -68,7 +69,7 @@ async function main() {
       undefined,
       undefined,
       {
-        svmConfig: { rpcUrl: "http://localhost:8899" },
+        svmConfig: { rpcUrl: RPC_URL },
       },
     );
 
@@ -79,6 +80,23 @@ async function main() {
       debug("Method:", init?.method || "GET");
       debug("Headers:", init?.headers);
       debug("Body:", init?.body);
+
+      const latest_blockhash = await fetch(RPC_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "getLatestBlockhash",
+          params: [
+            { commitment: "finalized" }
+          ]
+        }),
+      })
+        .then((res) => res.json())
+        .then((data) => data.result.value.blockhash);
+
+      debug("Fetched recent blockhash:", latest_blockhash);
 
       const startTime = Date.now();
       try {
