@@ -69,6 +69,10 @@ impl<'a> MoneyMqWallet<'a> {
         Ok(self.swig.display_swig()?)
     }
 
+    pub fn get_balance(&mut self) -> WalletResult<u64> {
+        Ok(self.swig.get_balance()?)
+    }
+
     pub fn get_sub_account(&mut self) -> WalletResult<Option<Pubkey>> {
         Ok(self.swig.get_sub_account()?)
     }
@@ -119,7 +123,12 @@ impl<'a> MoneyMqWallet<'a> {
             RecurringScheme::Yearly(n) => Some(RecurringConfig::new(SLOTS_PER_YEAR * n as u64)),
         };
 
-        let mut permissions = vec![Permission::ManageAuthority];
+        let mut permissions = vec![
+            Permission::ManageAuthority,
+            Permission::SubAccount {
+                sub_account: [0; 32], // Blank subaccount - will be populated on creation
+            },
+        ];
         permissions.append(
             &mut supported_currencies
                 .into_iter()

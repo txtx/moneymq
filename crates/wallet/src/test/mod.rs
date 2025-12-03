@@ -25,6 +25,7 @@ fn start_surfpool(airdrop_addresses: &Vec<solana_pubkey::Pubkey>) -> String {
     let bind_port = 8899;
     let config = SurfpoolConfig {
         simnets: vec![SimnetConfig {
+            slot_time: 50,
             airdrop_addresses: airdrop_addresses.clone(),
             airdrop_token_amount: 1_000_000_000,
             // block_production_mode: BlockProductionMode::Transaction,
@@ -80,6 +81,7 @@ fn start_surfpool(airdrop_addresses: &Vec<solana_pubkey::Pubkey>) -> String {
 fn test_create_swig_wallet() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
+        println!("================ Starting test_create_swig_wallet ================");
         let remote_authority = RemoteSigner::new(1111);
         remote_authority.start_service().await.unwrap();
         let authority_pubkey = remote_authority.get_pubkey().await;
@@ -103,42 +105,50 @@ fn test_create_swig_wallet() {
         )
         .unwrap();
 
-        let mut tx = wallet.get_create_sub_account_transaction().unwrap();
-        println!("Create sub-account transaction before signing: {:?}", tx);
-        partial_sign_transaction(&[&remote_fee_payer], &mut tx);
-        println!(
-            "Create sub-account transaction after wallet signing: {:?}",
-            tx
-        );
-        let sig = rpc_client.send_and_confirm_transaction(&tx).unwrap();
-        println!("Create sub-account transaction signature: {}", sig);
-
-        let sub_account = wallet.get_sub_account().unwrap().unwrap();
-        println!("Sub-account pubkey: {}", sub_account);
+        // Initialize authority permissions
+        {
+            println!("\n\n========= Initializing authority permissions =========");
+            let mut initialize_authority_tx = wallet
+                .get_set_permissions_transaction(
+                    vec![Currency::from_symbol_and_network("USDC", &Network::Solana).unwrap()],
+                    RecurringScheme::Monthly(1),
+                    1_000_000,
+                    None,
+                )
+                .unwrap();
+            println!(
+                "\nInitialize authority transaction before signing: {:?}",
+                initialize_authority_tx
+            );
+            partial_sign_transaction(&[&remote_fee_payer], &mut initialize_authority_tx);
+            println!(
+                "\nInitialize authority transaction after wallet signing: {:?}",
+                initialize_authority_tx
+            );
+            let sig = rpc_client
+                .send_and_confirm_transaction(&initialize_authority_tx)
+                .unwrap();
+            println!("\nInitialize authority transaction signature: {}", sig);
+        }
 
         wallet.display_swig().unwrap();
 
-        let mut initialize_authority_tx = wallet
-            .get_set_permissions_transaction(
-                vec![Currency::from_symbol_and_network("USDC", &Network::Solana).unwrap()],
-                RecurringScheme::Monthly(1),
-                1_000_000,
-                None,
-            )
-            .unwrap();
-        println!(
-            "Initialize authority transaction before signing: {:?}",
-            initialize_authority_tx
-        );
-        partial_sign_transaction(&[&remote_fee_payer], &mut initialize_authority_tx);
-        println!(
-            "Initialize authority transaction after wallet signing: {:?}",
-            initialize_authority_tx
-        );
-        let sig = rpc_client
-            .send_and_confirm_transaction(&initialize_authority_tx)
-            .unwrap();
-        println!("Initialize authority transaction signature: {}", sig);
+        // Create sub-account
+        {
+            println!("\n\n========= Creating sub-account =========");
+            let mut tx = wallet.get_create_sub_account_transaction().unwrap();
+            println!("\nCreate sub-account transaction before signing: {:?}", tx);
+            partial_sign_transaction(&[&remote_fee_payer], &mut tx);
+            println!(
+                "\nCreate sub-account transaction after wallet signing: {:?}",
+                tx
+            );
+            let sig = rpc_client.send_and_confirm_transaction(&tx).unwrap();
+            println!("\nCreate sub-account transaction signature: {}", sig);
+        }
+
+        let sub_account = wallet.get_sub_account().unwrap().unwrap();
+        println!("Sub-account pubkey: {}", sub_account);
 
         wallet.display_swig().unwrap();
 
@@ -148,29 +158,53 @@ fn test_create_swig_wallet() {
             .request_airdrop(&sub_account, 2_000_000_000)
             .unwrap();
 
-        // // Sign with internal fee payer
-        // println!("Account balance: {}", wallet.get_balance().unwrap());
-        // println!(
-        //     "Sub-account balance: {}",
-        //     rpc_client.get_balance(&sub_account).unwrap()
-        // );
+        // Transfer lamports from sub-account to receiver
+        {
+            println!("\n\n========= Initiating Transfer =========");
 
-        // let transfer = transfer(&sub_account, &receiver_pubkey, 1);
-        // wallet.sign_with_sub_account(vec![transfer], None).unwrap();
+            println!(
+                "Swig wallet balance before: {}",
+                wallet.get_balance().unwrap()
+            );
+            println!(
+                "Sub-account balance before: {}",
+                rpc_client.get_balance(&sub_account).unwrap()
+            );
+            println!(
+                "Receiver balance before: {}",
+                rpc_client.get_balance(&receiver_pubkey).unwrap()
+            );
 
-        // Sign with external fee payer
-        let mut transfer_tx = wallet
-            .get_transfer_tx(&sub_account, &receiver_pubkey, 1_000_000)
-            .unwrap();
+            // let transfer = transfer(&sub_account, &receiver_pubkey, 1);
+            // wallet.sign_with_sub_account(vec![transfer], None).unwrap();
 
-        println!("Partially signed transaction: {:?}", transfer_tx);
-        partial_sign_transaction(&[&remote_fee_payer], &mut transfer_tx);
+            // Sign with external fee payer
+            let mut transfer_tx = wallet
+                .get_transfer_tx(&sub_account, &receiver_pubkey, 1_000_000_000)
+                .unwrap();
 
-        println!("\nTransaction: {:?}", transfer_tx);
-        let sig = rpc_client
-            .send_and_confirm_transaction(&transfer_tx)
-            .unwrap();
-        println!("Transaction signature: {}", sig);
+            println!("\nPartially signed transaction: {:?}", transfer_tx);
+            partial_sign_transaction(&[&remote_fee_payer], &mut transfer_tx);
+
+            println!("\nTransaction: {:?}", transfer_tx);
+            let sig = rpc_client
+                .send_and_confirm_transaction(&transfer_tx)
+                .unwrap();
+            println!("\nTransaction signature: {}", sig);
+
+            println!(
+                "\nSwig wallet balance after: {}",
+                wallet.get_balance().unwrap()
+            );
+            println!(
+                "Sub-account balance after: {}",
+                rpc_client.get_balance(&sub_account).unwrap()
+            );
+            println!(
+                "Receiver balance after: {}",
+                rpc_client.get_balance(&receiver_pubkey).unwrap()
+            );
+        }
     }); // end rt.block_on
 } // end test function
 
