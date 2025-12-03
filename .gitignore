@@ -30,3 +30,4 @@ facilitator.db
 payments.sqlite
 examples/x402/api/node_modules
 examples/x402/client/node_modules
+node_modules
