@@ -264,27 +264,6 @@ fn test_create_swig_wallet() {
 
         wallet.display_swig().unwrap();
 
-        // Create sub-account
-        // {
-        //     println!("\n\n========= Creating sub-account =========");
-        //     let mut tx = wallet.get_create_sub_account_transaction().unwrap();
-        //     println!("\nCreate sub-account transaction before signing: {:?}", tx);
-        //     partial_sign_transaction(&[&remote_fee_payer], &mut tx);
-        //     println!(
-        //         "\nCreate sub-account transaction after wallet signing: {:?}",
-        //         tx
-        //     );
-        //     let sig = rpc_client.send_and_confirm_transaction(&tx).unwrap();
-        //     println!("\nCreate sub-account transaction signature: {}", sig);
-        // let sub_account = wallet.get_sub_account().unwrap().unwrap();
-        // println!("Sub-account pubkey: {}", sub_account);
-        // rpc_client
-        //     .request_airdrop(&sub_account, 2_000_000_000)
-        //     .unwrap();
-
-        // wallet.display_swig().unwrap();
-        // }
-
         let receiver_pubkey = Pubkey::new_unique();
         println!("Receiver pubkey: {}", receiver_pubkey);
 
@@ -301,10 +280,6 @@ fn test_create_swig_wallet() {
                 "Swig wallet balance before: {}",
                 wallet.get_balance().unwrap()
             );
-            // println!(
-            //     "Sub-account balance before: {}",
-            //     rpc_client.get_balance(&sub_account).unwrap()
-            // );
             println!(
                 "Swig wallet address balance before: {}",
                 rpc_client.get_balance(&swig_wallet_address).unwrap()
@@ -313,9 +288,6 @@ fn test_create_swig_wallet() {
                 "Receiver balance before: {}",
                 rpc_client.get_balance(&receiver_pubkey).unwrap()
             );
-
-            // let transfer = transfer(&sub_account, &receiver_pubkey, 1);
-            // wallet.sign_with_sub_account(vec![transfer], None).unwrap();
 
             // Sign with external fee payer
             let mut transfer_tx = wallet
@@ -339,10 +311,6 @@ fn test_create_swig_wallet() {
                 "\nSwig wallet balance after: {}",
                 wallet.get_balance().unwrap()
             );
-            // println!(
-            //     "Sub-account balance after: {}",
-            //     rpc_client.get_balance(&sub_account).unwrap()
-            // );
             println!(
                 "Swig wallet address balance after: {}",
                 rpc_client.get_balance(&swig_wallet_address).unwrap()
