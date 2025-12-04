@@ -65,6 +65,10 @@ impl<'a> MoneyMqWallet<'a> {
         })
     }
 
+    pub fn get_swig_wallet_address(&self) -> WalletResult<Pubkey> {
+        Ok(self.swig.get_swig_wallet_address()?)
+    }
+
     pub fn display_swig(&self) -> WalletResult<()> {
         Ok(self.swig.display_swig()?)
     }
@@ -91,9 +95,30 @@ impl<'a> MoneyMqWallet<'a> {
         to: &Pubkey,
         lamports: u64,
     ) -> WalletResult<VersionedTransaction> {
+        let transfer_tx = self.get_transaction(vec![transfer(from, to, lamports)])?;
+        Ok(transfer_tx)
+    }
+
+    pub fn get_transfer_sub_account_tx(
+        &mut self,
+        from: &Pubkey,
+        to: &Pubkey,
+        lamports: u64,
+    ) -> WalletResult<VersionedTransaction> {
         let transfer_tx =
             self.get_transaction_with_sub_account(vec![transfer(from, to, lamports)])?;
         Ok(transfer_tx)
+    }
+
+    pub fn get_transaction(
+        &mut self,
+        instructions: Vec<solana_transaction::Instruction>,
+    ) -> WalletResult<VersionedTransaction> {
+        let instructions = self
+            .swig
+            .get_sign_v2_instructions(instructions)
+            .map_err(WalletError::SwigInstructionError)?;
+        self.create_tx(instructions)
     }
 
     pub fn get_transaction_with_sub_account(
@@ -125,8 +150,15 @@ impl<'a> MoneyMqWallet<'a> {
 
         let mut permissions = vec![
             Permission::ManageAuthority,
+            Permission::Sol {
+                amount: 100_000_000_000,
+                recurring: None,
+            },
+            Permission::Program {
+                program_id: solana_system_interface::program::id(),
+            },
             Permission::SubAccount {
-                sub_account: [0; 32], // Blank subaccount - will be populated on creation
+                sub_account: [0; 32], // Blank sub account - will be populated on creation
             },
         ];
         permissions.append(
