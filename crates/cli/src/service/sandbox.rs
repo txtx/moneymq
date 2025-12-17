@@ -1,6 +1,9 @@
 use console::style;
 use indexmap::IndexMap;
-use moneymq_core::{gateway::NetworksConfig, validator::SolanaValidatorConfig};
+use moneymq_core::{
+    api::{NetworksConfig, payment::FacilitatorState},
+    validator::SolanaValidatorConfig,
+};
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::x402::config::facilitator::{
@@ -97,15 +100,15 @@ impl ServiceCommand for SandboxCommand {
         &self,
         payments: &IndexMap<String, PaymentConfig>,
         networks_config: &NetworksConfig,
-    ) -> Result<(Url, String, ValidatorsConfig), RunCommandError> {
+    ) -> Result<(Url, String, ValidatorsConfig, Option<FacilitatorState>), RunCommandError> {
         let (facilitator_config, validators_config) = build_facilitator_config(payments)
             .await
             .map_err(RunCommandError::StartFacilitatorNetworks)?;
 
-        // Only start local facilitator server in sandbox mode
+        // Setup local validator and create facilitator state
         // This will generate the facilitator keypair if needed
-        let (_facilitator_handle, facilitator_url, facilitator_pubkey) =
-            start_facilitator_networks(facilitator_config, &validators_config, &networks_config)
+        let (facilitator_url, facilitator_pubkey, facilitator_state) =
+            setup_facilitator_networks(facilitator_config, &validators_config, networks_config)
                 .await
                 .map_err(RunCommandError::StartFacilitatorNetworks)?;
 
@@ -118,27 +121,42 @@ impl ServiceCommand for SandboxCommand {
             style(facilitator_pubkey.to_string()).green(),
             style(")").dim()
         );
-        println!(" {} {}supported", Self::get(), facilitator_url);
-        println!(" {} {}verify", Self::post(), facilitator_url);
-        println!(" {} {}settle", Self::post(), facilitator_url);
+        println!(
+            " {} http://localhost:{}/payment/v1/supported",
+            Self::get(),
+            self.port
+        );
+        println!(
+            " {} http://localhost:{}/payment/v1/verify",
+            Self::post(),
+            self.port
+        );
+        println!(
+            " {} http://localhost:{}/payment/v1/settle",
+            Self::post(),
+            self.port
+        );
 
         networks_config
             .fund_accounts(&validators_config)
             .await
             .map_err(RunCommandError::FundLocalAccountsError)?;
 
-        Ok((facilitator_url, facilitator_pubkey, validators_config))
+        Ok((
+            facilitator_url,
+            facilitator_pubkey,
+            validators_config,
+            Some(facilitator_state),
+        ))
     }
 }
 
-type Error = Box<dyn std::error::Error + Send + Sync>;
-type FacilitatorHandle = tokio::task::JoinHandle<Result<(), Error>>;
-
-async fn start_facilitator_networks(
+/// Setup the facilitator networks (starts validators, creates facilitator state)
+async fn setup_facilitator_networks(
     mut facilitator_config: FacilitatorConfig,
     validators_config: &ValidatorsConfig,
     networks_config: &NetworksConfig,
-) -> Result<(FacilitatorHandle, url::Url, String), String> {
+) -> Result<(url::Url, String, FacilitatorState), String> {
     #[cfg(feature = "embedded_validator")]
     for (network_name, facilitator_network_config) in facilitator_config.networks.iter_mut() {
         match facilitator_network_config {
@@ -213,11 +231,13 @@ async fn start_facilitator_networks(
         .get_facilitator_pubkey(&"solana".to_string())
         .expect("Facilitator pubkey should be initialized");
 
-    let handle = moneymq_core::api::payment::start_facilitator(facilitator_config, true)
-        .await
-        .map_err(|e| format!("Failed to start facilitator: {e}"))?;
+    // Create the facilitator state (instead of starting a separate server)
+    let facilitator_state =
+        moneymq_core::api::payment::create_facilitator_state(facilitator_config, true)
+            .await
+            .map_err(|e| format!("Failed to create facilitator state: {e}"))?;
 
-    Ok((handle, url, facilitator_pubkey))
+    Ok((url, facilitator_pubkey, facilitator_state))
 }
 
 async fn build_facilitator_config(

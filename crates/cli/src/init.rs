@@ -41,7 +41,7 @@ impl InitCommand {
         );
 
         // Step 1: Choose how to begin
-        let setup_options = vec!["Import from Stripe", "Create new catalog"];
+        let setup_options = vec!["Import from Stripe", "New project"];
         let setup_selection = Select::with_theme(&ColorfulTheme::default())
             .with_prompt("Choose how to begin")
             .items(&setup_options)

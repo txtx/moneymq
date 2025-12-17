@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use console::{StyledObject, style};
 use indexmap::IndexMap;
-use moneymq_core::gateway::{NetworksConfig, NetworksConfigError};
+use moneymq_core::api::{NetworksConfig, NetworksConfigError, payment::FacilitatorState};
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::{Meter, x402::config::facilitator::ValidatorsConfig};
@@ -69,7 +69,7 @@ pub trait ServiceCommand {
         &self,
         payments: &IndexMap<String, PaymentConfig>,
         networks_config: &NetworksConfig,
-    ) -> Result<(Url, String, ValidatorsConfig), RunCommandError>;
+    ) -> Result<(Url, String, ValidatorsConfig, Option<FacilitatorState>), RunCommandError>;
 
     fn load_catalog(&self, ctx: &Context) -> Result<(Vec<Product>, Vec<Meter>), RunCommandError> {
         // Get catalog path from first catalog (or default to "billing/v1")
@@ -180,12 +180,12 @@ pub trait ServiceCommand {
         );
 
         println!(
-            " {} http://localhost:{}/v1/products",
+            " {} http://localhost:{}/catalog/v1/products",
             Self::get(),
             self.port()
         );
         println!(
-            " {} http://localhost:{}/v1/billing/meters",
+            " {} http://localhost:{}/catalog/v1/billing/meters",
             Self::post(),
             self.port()
         );
@@ -211,7 +211,7 @@ pub trait ServiceCommand {
         let networks_config = self.networks_config(billing_networks)?;
 
         // Build facilitator config once for sandbox mode
-        let (facilitator_url, facilitator_pubkey, validator_rpc_urls) = self
+        let (_facilitator_url, facilitator_pubkey, validator_rpc_urls, facilitator_state) = self
             .setup_facilitator(&ctx.manifest.payments, &networks_config)
             .await?;
 
@@ -245,13 +245,16 @@ pub trait ServiceCommand {
             })
             .unwrap_or((None, None, ctx.manifest_path.clone()));
 
-        // Start the server
-        moneymq_core::api::catalog::start_provider(
+        // Create the catalog provider state
+        // Use the consolidated API URL for the facilitator (same port, /payment/v1/ path)
+        let consolidated_facilitator_url = format!("http://localhost:{}/payment/v1/", self.port())
+            .parse::<url::Url>()
+            .expect("Failed to parse consolidated facilitator URL");
+        let catalog_state = moneymq_core::api::catalog::ProviderState::new(
             products,
             meters,
-            facilitator_url,
-            self.port(),
             Self::SANDBOX,
+            consolidated_facilitator_url,
             networks_config,
             catalog_path,
             catalog_name,
@@ -260,9 +263,12 @@ pub trait ServiceCommand {
             validator_rpc_urls,
             None, // kora_config
             None, // signer_pool
-        )
-        .await
-        .map_err(RunCommandError::ProviderStartError)?;
+        );
+
+        // Start the combined server with both catalog and payment APIs
+        moneymq_core::api::start_server(catalog_state, facilitator_state, self.port())
+            .await
+            .map_err(RunCommandError::ProviderStartError)?;
 
         Ok(())
     }

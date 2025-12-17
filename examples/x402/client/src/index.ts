@@ -15,6 +15,7 @@ const PROTECTED_API_URL =
   process.env.PROTECTED_API_URL || "http://localhost:4021/protected";
 const NETWORK = process.env.NETWORK || "solana";
 const DEBUG = process.env.DEBUG === "true";
+const VALIDATOR_URL = process.env.VALIDATOR_URL || "http://localhost:8899";
 const RPC_URL = process.env.RPC_URL || "http://localhost:8899";
 
 // Debug logging helper
@@ -28,7 +29,8 @@ function debug(...args: any[]) {
 function safeStringify(obj: any, indent = 2): string {
   return JSON.stringify(
     obj,
-    (key, value) => (typeof value === "bigint" ? value.toString() + "n" : value),
+    (key, value) =>
+      typeof value === "bigint" ? value.toString() + "n" : value,
     indent,
   );
 }
@@ -217,10 +219,7 @@ async function main() {
       console.log("\nTransaction signature:");
       console.log(decodedPaymentResponse.transaction);
       console.log("\nView on explorer:");
-      const explorerUrl =
-        NETWORK === "solana-devnet"
-          ? `https://explorer.solana.com/tx/${decodedPaymentResponse.transaction}?cluster=devnet`
-          : `https://explorer.solana.com/tx/${decodedPaymentResponse.transaction}?cluster=custom&customUrl=http%3A%2F%2Flocalhost%3A8899`;
+      const explorerUrl = `https://explorer.solana.com/tx/${decodedPaymentResponse.transaction}?cluster=custom&customUrl=${encodeURIComponent(VALIDATOR_URL)}`;
       console.log(explorerUrl);
     }
 

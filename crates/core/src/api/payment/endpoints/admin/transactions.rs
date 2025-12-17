@@ -1,8 +1,9 @@
+use axum::{Extension, Json, response::IntoResponse};
+
 use crate::api::{
     catalog::stripe::types::{ListParams, ListResponse},
     payment::FacilitatorState,
 };
-use axum::{Extension, Json, response::IntoResponse};
 
 /// GET /v1/transactions - List transactions
 ///
@@ -30,7 +31,12 @@ pub async fn list_transactions(
 
     let (transactions, has_more) = state
         .db_manager
-        .list_transactions(limit, Some(start_idx), &state.facilitator_id, state.is_sandbox)
+        .list_transactions(
+            limit,
+            Some(start_idx),
+            &state.facilitator_id,
+            state.is_sandbox,
+        )
         .unwrap_or((vec![], false));
 
     Json(ListResponse {

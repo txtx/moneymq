@@ -1,14 +1,3 @@
-use crate::api::{
-    catalog::{
-        ProviderState,
-        stripe::endpoints::{
-            billing::BillingMeterEventRequest, subscriptions::SubscriptionRequest,
-        },
-    },
-    payment::{
-        endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
-    },
-};
 use axum::{
     body::Body,
     extract::State,
@@ -25,6 +14,18 @@ use moneymq_types::x402::{
 };
 use serde_json::json;
 use tracing::{debug, error, info, warn};
+
+use crate::api::{
+    catalog::{
+        ProviderState,
+        stripe::endpoints::{
+            billing::BillingMeterEventRequest, subscriptions::SubscriptionRequest,
+        },
+    },
+    payment::{
+        endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
+    },
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum X402FacilitatorRequestError {
@@ -291,12 +292,24 @@ async fn settle_payment_with_facilitator(
 /// Returns (amount_in_cents, description)
 fn extract_payment_details(state: &ProviderState, req_path: &str) -> Option<(i64, String)> {
     // Check if this is a payment intent confirm request
-    if req_path.starts_with("/v1/payment_intents/") && req_path.ends_with("/confirm") {
-        // Extract payment intent ID from path: /v1/payment_intents/{id}/confirm
-        let parts: Vec<&str> = req_path.split('/').collect();
-        if parts.len() >= 4 {
-            let payment_intent_id = parts[3];
+    // Support both /payment_intents/{id}/confirm (nested under /catalog/v1)
+    // and /v1/payment_intents/{id}/confirm (legacy)
+    let is_confirm_request = req_path.ends_with("/confirm")
+        && (req_path.starts_with("/payment_intents/")
+            || req_path.starts_with("/v1/payment_intents/"));
 
+    if is_confirm_request {
+        // Extract payment intent ID from path
+        let parts: Vec<&str> = req_path.split('/').collect();
+        // For /payment_intents/{id}/confirm -> parts = ["", "payment_intents", "{id}", "confirm"]
+        // For /v1/payment_intents/{id}/confirm -> parts = ["", "v1", "payment_intents", "{id}", "confirm"]
+        let payment_intent_id = if req_path.starts_with("/v1/") {
+            parts.get(3).copied()
+        } else {
+            parts.get(2).copied()
+        };
+
+        if let Some(payment_intent_id) = payment_intent_id {
             // Look up the payment intent from state
             if let Ok(payment_intents) = state.payment_intents.lock() {
                 if let Some(intent) = payment_intents.get(payment_intent_id) {

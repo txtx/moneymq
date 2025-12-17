@@ -17,7 +17,10 @@ pub async fn handler(
     Extension(state): Extension<Option<FacilitatorState>>,
     Json(request): Json<VerifyRequest>,
 ) -> impl IntoResponse {
+    debug!("Verify endpoint called");
+
     let Some(state) = state else {
+        error!("Verify endpoint: FacilitatorState is None!");
         return (
             StatusCode::NOT_FOUND,
             Json(VerifyResponse::Invalid {
@@ -26,6 +29,11 @@ pub async fn handler(
             }),
         );
     };
+
+    debug!(
+        "Verify endpoint: FacilitatorState loaded, facilitator_id={}",
+        state.facilitator_id
+    );
 
     debug!(
         "Received verify request for network: {:?}",
@@ -106,7 +114,7 @@ pub async fn handler(
     let verify_response_base64 = serialize_to_base64(&response);
     let payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
 
-    if let Err(e) = state.db_manager.insert_transaction(
+    match state.db_manager.insert_transaction(
         &request,
         &response,
         payment_requirement_base64,
@@ -115,7 +123,12 @@ pub async fn handler(
         &state.facilitator_id,
         state.is_sandbox,
     ) {
-        error!("Failed to log transaction to database: {}", e);
+        Ok(_) => {
+            debug!("Transaction inserted successfully into database");
+        }
+        Err(e) => {
+            error!("Failed to log transaction to database: {}", e);
+        }
     };
 
     (status, Json(response))

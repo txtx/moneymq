@@ -1,3 +1,10 @@
+//! Sandbox module for local development and testing
+//!
+//! This module provides:
+//! - Network configuration management for sandbox environments
+//! - Pre-funded user accounts for testing
+//! - Sandbox-specific API endpoints
+
 use indexmap::IndexMap;
 use moneymq_types::x402::{
     Currency, MoneyMqNetwork, Network, Recipient,
@@ -11,18 +18,25 @@ use crate::validator::surfnet_utils::{
     SetAccountRequest, SetTokenAccountRequest, surfnet_set_account, surfnet_set_token_account,
 };
 
-pub mod endpoints;
+mod accounts;
+pub use accounts::list_accounts;
 
 /// Initial USDC token amount for user accounts in local surfnet (2000 USDC with 6 decimals)
 const INITIAL_USER_USDC_AMOUNT: u64 = 2_000_000_000;
 
-/// Manages billing configurations across multiple networks
+/// Manages network configurations across multiple networks
 #[derive(Debug, Clone)]
 pub struct NetworksConfig {
-    /// Mapping of network names to their billing configurations
+    /// Mapping of network names to their configurations
     pub configs: IndexMap<String, NetworkConfig>,
     /// Mapping of networks to their names
     pub lookup: IndexMap<Network, String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum NetworksConfigError {
+    #[error("Failed to initialize network {0}: {1}")]
+    InitializationError(Network, String),
 }
 
 impl NetworksConfig {
@@ -74,7 +88,6 @@ impl NetworksConfig {
                                     )
                                 })?;
                         debug!("User account {}: {:?}", i, recipient);
-
                         user_accounts.push(recipient);
                     }
 
@@ -93,7 +106,6 @@ impl NetworksConfig {
             };
 
             lookup.insert(network, network_name.clone());
-
             configs.insert(network_name, network_config);
         }
 
@@ -133,8 +145,8 @@ impl NetworksConfig {
                         .user_accounts
                         .iter()
                         .map(|recipient| {
-                            let user_address = recipient.address();
-                            user_address
+                            recipient
+                                .address()
                                 .pubkey()
                                 .expect("Expected Solana address")
                                 .clone()
@@ -186,18 +198,20 @@ impl NetworksConfig {
         Ok(())
     }
 
-    /// Retrieves the billing configuration for the specified network
+    /// Retrieves the configuration for the specified network
     pub fn get_config_for_network(&self, network: &Network) -> Option<&NetworkConfig> {
         self.lookup
             .get(network)
             .and_then(|name| self.configs.get(name))
     }
 
+    /// Gets the MoneyMQ network type for a given network name
     pub fn get_network_for_name(&self, name: &str) -> Option<MoneyMqNetwork> {
         self.configs.get(name).map(|config| config.network())
     }
 }
 
+/// Network-specific configuration
 #[derive(Debug, Clone)]
 pub enum NetworkConfig {
     SolanaSurfnet(SolanaSurfnetConfig),
@@ -211,12 +225,14 @@ impl NetworkConfig {
             NetworkConfig::SolanaMainnet(cfg) => &cfg.payment_recipient,
         }
     }
+
     pub fn currencies(&self) -> &Vec<Currency> {
         match self {
             NetworkConfig::SolanaSurfnet(cfg) => &cfg.currencies,
             NetworkConfig::SolanaMainnet(cfg) => &cfg.currencies,
         }
     }
+
     pub fn default_rpc_url(&self) -> Url {
         match self {
             NetworkConfig::SolanaSurfnet(_) => "http://localhost:8899".parse().unwrap(),
@@ -225,18 +241,21 @@ impl NetworkConfig {
             }
         }
     }
+
     pub fn surfnet_config(&self) -> Option<&SolanaSurfnetConfig> {
         match self {
             NetworkConfig::SolanaSurfnet(cfg) => Some(cfg),
             _ => None,
         }
     }
+
     pub fn network(&self) -> MoneyMqNetwork {
         match self {
             NetworkConfig::SolanaSurfnet(_) => MoneyMqNetwork::SolanaSurfnet,
             NetworkConfig::SolanaMainnet(_) => MoneyMqNetwork::SolanaMainnet,
         }
     }
+
     pub fn user_accounts(&self) -> Vec<Recipient> {
         match self {
             NetworkConfig::SolanaSurfnet(cfg) => cfg.user_accounts.clone(),
@@ -245,6 +264,7 @@ impl NetworkConfig {
     }
 }
 
+/// Configuration for Solana Surfnet (local development network)
 #[derive(Debug, Clone)]
 pub struct SolanaSurfnetConfig {
     pub payment_recipient: Recipient,
@@ -252,14 +272,9 @@ pub struct SolanaSurfnetConfig {
     pub user_accounts: Vec<Recipient>,
 }
 
+/// Configuration for Solana Mainnet
 #[derive(Debug, Clone)]
 pub struct SolanaMainnetConfig {
     pub payment_recipient: Recipient,
     pub currencies: Vec<Currency>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum NetworksConfigError {
-    #[error("Failed to initialize network {0}: {1}")]
-    InitializationError(Network, String),
 }

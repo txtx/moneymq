@@ -1,9 +1,10 @@
+use std::str::FromStr;
+
 use diesel::r2d2::{ConnectionManager, Pool};
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 use moneymq_types::x402::transactions::FacilitatedTransaction;
 use sha2::{Digest, Sha256};
 use solana_keypair::{Keypair, Signer};
-use std::str::FromStr;
 use tracing::debug;
 
 use crate::api::payment::endpoints::FacilitatorExtraContext;
@@ -254,8 +255,8 @@ impl DbManager {
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
-        let payment_hash = calculate_payment_hash(x402_transaction)
-            .map_err(|e| DbError::ConnectionError(e))?;
+        let payment_hash =
+            calculate_payment_hash(x402_transaction).map_err(|e| DbError::ConnectionError(e))?;
 
         models::facilitated_transaction::is_transaction_already_settled(&mut conn, &payment_hash)
             .map_err(DbError::FindTxError)
@@ -272,8 +273,8 @@ impl DbManager {
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
-        let payment_hash = calculate_payment_hash(x402_transaction)
-            .map_err(|e| DbError::ConnectionError(e))?;
+        let payment_hash =
+            calculate_payment_hash(x402_transaction).map_err(|e| DbError::ConnectionError(e))?;
 
         models::facilitated_transaction::find_transaction_id_by_payment_hash(
             &mut conn,

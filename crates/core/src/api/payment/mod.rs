@@ -103,16 +103,11 @@ pub fn create_router(state: FacilitatorState) -> Router {
         .layer(Extension(Some(state)))
 }
 
-/// Start the facilitator server
-pub async fn start_facilitator(
+/// Create a FacilitatorState from a FacilitatorConfig without starting a server
+pub async fn create_facilitator_state(
     config: FacilitatorConfig,
     _sandbox: bool,
-) -> Result<
-    JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
-    Box<dyn std::error::Error>,
-> {
-    let url = config.url.clone();
-
+) -> Result<FacilitatorState, Box<dyn std::error::Error>> {
     let kora_config = Config {
         validation: ValidationConfig {
             max_allowed_lamports: 100_000_000, // 0.1 SOL
@@ -170,6 +165,20 @@ pub async fn start_facilitator(
         kora_config,
         signer_pool,
     );
+
+    Ok(state)
+}
+
+/// Start the facilitator server
+pub async fn start_facilitator(
+    config: FacilitatorConfig,
+    sandbox: bool,
+) -> Result<
+    JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
+    Box<dyn std::error::Error>,
+> {
+    let url = config.url.clone();
+    let state = create_facilitator_state(config, sandbox).await?;
     let app = create_router(state);
 
     let addr = format!("0.0.0.0:{}", url.port().expect("URL must have a port"));

@@ -1,5 +1,6 @@
-use crate::x402::{MixedAddress, Network};
 use solana_pubkey::Pubkey;
+
+use crate::x402::{MixedAddress, Network};
 
 /// Represents a currency used for billing across different blockchains
 #[derive(Debug, Clone)]

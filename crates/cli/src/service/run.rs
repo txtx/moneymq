@@ -1,8 +1,9 @@
 use indexmap::IndexMap;
-use moneymq_core::gateway::NetworksConfig;
+use moneymq_core::api::{NetworksConfig, payment::FacilitatorState};
 // TODO: Re-enable when refactoring X402 facilitator
 // use moneymq_core::{facilitator::FacilitatorConfig, validator};
 use moneymq_types::x402::MoneyMqNetwork;
+use moneymq_types::x402::config::facilitator::ValidatorsConfig;
 use url::Url;
 
 // use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
@@ -70,14 +71,9 @@ impl ServiceCommand for RunCommand {
         &self,
         _payments: &IndexMap<String, PaymentConfig>,
         _networks_config: &NetworksConfig,
-    ) -> Result<
-        (
-            Url,
-            String,
-            moneymq_types::x402::config::facilitator::ValidatorsConfig,
-        ),
-        super::RunCommandError,
-    > {
-        todo!()
+    ) -> Result<(Url, String, ValidatorsConfig, Option<FacilitatorState>), super::RunCommandError>
+    {
+        // In non-sandbox mode, use external facilitator (no local FacilitatorState)
+        todo!("Non-sandbox mode not yet implemented")
     }
 }

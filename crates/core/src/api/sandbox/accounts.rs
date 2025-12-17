@@ -1,10 +1,13 @@
-use crate::api::catalog::ProviderState;
+//! Sandbox accounts endpoint
+
 use axum::{Json, extract::State};
 use moneymq_types::x402::{
     LocalManagedRecipient, MixedAddress, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
 };
 use serde_json::{Value, json};
 use solana_pubkey::Pubkey;
+
+use crate::api::catalog::ProviderState;
 
 /// GET /sandbox/accounts - List local network accounts
 pub async fn list_accounts(State(state): State<ProviderState>) -> Result<Json<Value>, Json<Value>> {
@@ -13,7 +16,7 @@ pub async fn list_accounts(State(state): State<ProviderState>) -> Result<Json<Va
     let mut res = json!({});
     for (network_name, config) in &networks_config.configs {
         let network = networks_config
-            .get_network_for_name(&network_name)
+            .get_network_for_name(network_name)
             .expect("expected network to be configured");
         let address = config.recipient().address();
 
@@ -75,6 +78,7 @@ pub async fn list_accounts(State(state): State<ProviderState>) -> Result<Json<Va
                 account_json
             })
             .collect::<Vec<_>>();
+
         res[network_name] = json!({
             "network": network,
             "payTo": address,

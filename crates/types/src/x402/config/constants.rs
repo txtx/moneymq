@@ -15,15 +15,13 @@ pub const DEFAULT_SANDBOX: &str = "default";
 
 /// Header comment for payments configuration section in manifest files
 pub const PAYMENTS_CONFIG_HEADER: &str = "\
-# Payment configuration for accepting crypto payments via x402 protocol
-# Learn more: https://docs.moneymq.co/payments
-# Uncomment and configure to enable payments:";
+# Default configuration will use the following settings, uncomment for customization.
+# Learn more: https://docs.moneymq.co/payments";
 
 /// Complete default payments footer for manifest files
 pub const DEFAULT_PAYMENTS_FOOTER: &str = "\
-# Payment configuration for accepting crypto payments via x402 protocol
+# Payment configuration for accepting crypto payments
 # Learn more: https://docs.moneymq.co/payments
-# Uncomment and configure to enable payments:
 # payments:
 #   stablecoins:
 #     # Protocol: x402 (HTTP 402 Payment Required)
