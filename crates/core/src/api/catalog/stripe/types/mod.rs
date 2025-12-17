@@ -7,9 +7,13 @@ pub mod prices;
 pub mod products;
 pub mod subscriptions;
 
-// Re-export commonly used types
-pub use billing::{StripeBillingMeter, StripeMeterEvent};
-pub use common::{ListParams, ListResponse};
+// Re-export common catalog types from moneymq-types
+pub use moneymq_types::stripe::{
+    ListParams, ListResponse, StripeBillingMeter, StripePrice, StripeProduct, StripeRecurring,
+};
+
+// Re-export types specific to moneymq-core (not in moneymq-types)
+pub use billing::StripeMeterEvent;
 pub use customers::{CreateCustomerRequest, StripeCustomer};
 pub use payment_intents::{
     ConfirmPaymentIntentRequest, CreatePaymentIntentRequest, PaymentIntentStatus,
@@ -18,8 +22,6 @@ pub use payment_intents::{
 pub use payment_methods::{
     AttachPaymentMethodRequest, CreatePaymentMethodRequest, StripeCard, StripePaymentMethod,
 };
-pub use prices::StripePrice;
-pub use products::StripeProduct;
 pub use subscriptions::{
     StripeSubscription, SubscriptionItemData, SubscriptionItems, SubscriptionPrice,
 };

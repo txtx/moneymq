@@ -3,6 +3,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
+pub mod stripe;
 pub mod x402;
 
 /// Default manifest file name
