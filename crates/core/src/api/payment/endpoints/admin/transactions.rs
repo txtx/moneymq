@@ -34,7 +34,7 @@ pub async fn list_transactions(
         .list_transactions(
             limit,
             Some(start_idx),
-            &state.facilitator_id,
+            &state.payment_stack_id,
             state.is_sandbox,
         )
         .unwrap_or((vec![], false));

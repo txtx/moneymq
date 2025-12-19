@@ -14,7 +14,7 @@ axum = { version = "0.8", features = ["macros"] }
 bs58 = "0.5"
 convert_case = { workspace = true }
 indexmap = "2.7"
-moneymq-types = { path = "../types" }
+moneymq-types = { path = "../types", features = ["schemars"] }
 moneymq-core = { path = "../core" }
 pretty_yaml = "0.5.1"
 rmcp = { version = "0.8.0", features = ["server", "macros", "transport-io"] }

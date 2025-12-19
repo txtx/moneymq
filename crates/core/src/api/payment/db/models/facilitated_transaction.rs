@@ -110,8 +110,8 @@ pub struct FacilitatedTransactionModel {
     pub x402_settle_response: Option<String>,
     /// SHA256 hash of x402_payment_requirement for idempotency
     pub payment_hash: Option<String>,
-    /// The facilitator ID (subdomain) that processed this transaction
-    pub facilitator_id: String,
+    /// The payment stack ID (subdomain) that processed this transaction
+    pub payment_stack_id: String,
     /// Whether this transaction was processed in sandbox mode
     pub is_sandbox: bool,
 }
@@ -127,7 +127,7 @@ impl FacilitatedTransactionWithCustomer {
         conn: &mut PooledConnection,
         limit: usize,
         starting_after: Option<i32>,
-        facilitator_id: &str,
+        payment_stack_id: &str,
         is_sandbox: bool,
     ) -> QueryResult<(Vec<FacilitatedTransactionWithCustomer>, bool)> {
         let raw_limit = (limit + 1) as i64;
@@ -138,7 +138,7 @@ impl FacilitatedTransactionWithCustomer {
         )> = facilitated_transactions::table
             .left_join(transaction_customers::table)
             .filter(facilitated_transactions::id.gt(starting_after.unwrap_or(0)))
-            .filter(facilitated_transactions::facilitator_id.eq(facilitator_id))
+            .filter(facilitated_transactions::payment_stack_id.eq(payment_stack_id))
             .filter(facilitated_transactions::is_sandbox.eq(is_sandbox))
             .order(facilitated_transactions::id.asc())
             .limit(raw_limit)
@@ -180,7 +180,7 @@ impl Into<FacilitatedTransaction> for FacilitatedTransactionWithCustomer {
             x402_verify_response: self.facilitated.x402_verify_response,
             x402_settle_request: self.facilitated.x402_settle_request,
             x402_settle_response: self.facilitated.x402_settle_response,
-            facilitator_id: self.facilitated.facilitator_id,
+            payment_stack_id: self.facilitated.payment_stack_id,
             is_sandbox: self.facilitated.is_sandbox,
         }
     }
@@ -199,7 +199,7 @@ pub struct NewFacilitatedTransaction {
     pub x402_verify_request: Option<String>,
     pub x402_verify_response: Option<String>,
     pub payment_hash: Option<String>,
-    pub facilitator_id: String,
+    pub payment_stack_id: String,
     pub is_sandbox: bool,
 }
 
@@ -213,7 +213,7 @@ impl NewFacilitatedTransaction {
         x402_verify_request: Option<String>,
         x402_verify_response: Option<String>,
         payment_hash: Option<String>,
-        facilitator_id: String,
+        payment_stack_id: String,
         is_sandbox: bool,
     ) -> Self {
         let timestamp = chrono::Utc::now().timestamp_millis();
@@ -228,7 +228,7 @@ impl NewFacilitatedTransaction {
             x402_verify_request,
             x402_verify_response,
             payment_hash,
-            facilitator_id,
+            payment_stack_id,
             is_sandbox,
         }
     }

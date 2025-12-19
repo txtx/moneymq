@@ -92,7 +92,7 @@ mod tests {
         assert!(content.contains("v1:"));
 
         // Verify payments footer is present
-        assert!(content.contains("# Payment configuration for accepting crypto payments"));
+        assert!(content.contains("# Payment configuration for accepting stablecoin payments"));
         assert!(content.contains("# payments:"));
         assert!(content.contains("#   stablecoins:"));
         assert!(content.contains("#     protocol: x402"));

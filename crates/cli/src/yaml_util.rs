@@ -1,5 +1,4 @@
 /// Helper functions for YAML serialization with pretty formatting
-use moneymq_types::x402::config::constants::DEFAULT_PAYMENTS_FOOTER;
 use serde::Serialize;
 
 /// Serialize a value to a pretty-formatted YAML string with Kubernetes-style header
@@ -60,9 +59,4 @@ pub fn to_pretty_yaml_with_header_and_footer<T: Serialize>(
     }
 
     Ok(output)
-}
-
-/// Get the default payments section footer for manifests
-pub fn get_default_payments_footer() -> String {
-    format!("\n{}", DEFAULT_PAYMENTS_FOOTER)
 }

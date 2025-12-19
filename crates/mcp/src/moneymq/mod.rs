@@ -1,8 +1,7 @@
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{fs, path::PathBuf};
 
-use convert_case::{Case, Casing};
 use indexmap::IndexMap;
-use moneymq_types::{Price, Product};
+use moneymq_types::iac::{PriceSchema, ProductSchema, ValidationDiagnostic, ValidationResult};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
     handler::server::{
@@ -19,7 +18,10 @@ use serde_json::json;
 
 use crate::yaml_util::to_pretty_yaml_with_header;
 
-// Minimal manifest types for reading catalog path
+// ============================================================================
+// Manifest types for reading catalog configuration
+// ============================================================================
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Manifest {
     #[serde(default)]
@@ -42,216 +44,180 @@ fn default_source_type() -> String {
     "none".to_string()
 }
 
+// ============================================================================
+// MCP Server
+// ============================================================================
+
 #[derive(Clone)]
 pub struct MoneyMqMcp {
     tool_router: ToolRouter<MoneyMqMcp>,
     prompt_router: PromptRouter<MoneyMqMcp>,
 }
 
+// ============================================================================
+// Request Types using ProductSchema
+// ============================================================================
+
+/// Request to add products to the catalog
 #[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-#[schemars(example = r#"{
-    "project_root_dir": "/path/to/user/project",
-    "products": [
-        {
-            "name": "Premium Subscription",
-            "description": "Access to premium features",
-            "features": [
-                {
-                    "name": "Number of Networks",
-                    "description": "The number of networks you can run in the cloud",
-                    "feature_group": "Network Features",
-                    "value": "5 networks",
-                },
-                {
-                    "name": "Number of Requests",
-                    "description": "The number of requests that can be made",
-                    "feature_group": "Network Features",
-                    "value": "100 requests",
-                },
-                {
-                    "name": "Email Support",
-                    "description": "Email support available",
-                    "feature_group": "Support Features",
-                    "value": "Yes",
-                },
-                {
-                    "name": "Community Support",
-                    "description": "Community support available on Discord",
-                    "feature_group": "Support Features",
-                    "value": "Yes",
-                }
-            ],
-            "product_type": "service",
-            "statement_descriptor": "Moneymq Premium",
-            "unit_label": "per month",
-            "amount": 999,
-            "currency": "usd",
-            "interval": "month",
-            "interval_count": 1,
-            "pricing_type": "recurring"
-        }
-    ]
-}"#)]
 pub struct CatalogRequest {
-    #[schemars(
-        description = "The root directory of the user's project where the catalogs directory will be created",
-        example = "/path/to/user/project"
-    )]
+    /// The root directory of the user's project where the catalogs directory will be created
+    #[schemars(example = "/path/to/user/project")]
     pub project_root_dir: String,
-    #[schemars(
-        description = "List of products to create in the catalog",
-        example = r#"[{
-            "name": "Premium Subscription",
-            "description": "Access to premium features",
-            "product_type": "service",
-            "statement_descriptor": "Moneymq Premium",
-            "unit_label": "per month",
-            "amount": 999,
-            "currency": "usd",
-            "interval": "month",
-            "interval_count": 1,
-            "pricing_type": "recurring"
-        }]"#
-    )]
-    pub products: Vec<ProductRequest>,
+
+    /// List of products to create in the catalog using ProductSchema
+    pub products: Vec<ProductSchema>,
 }
 
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-pub struct ProductRequest {
-    #[schemars(description = "The name of the product")]
-    pub name: Option<String>,
-    #[schemars(description = "The description of the product")]
-    pub description: Option<String>,
-    #[schemars(
-        description = "List of features that is associated with the product.",
-        example = r#"[
-            {
-                "name": "Number of Networks",
-                "description": "The number of networks you can run in the cloud",
-                "feature_group": "Network Features",
-                "value": "5 networks",
-            },
-            {
-                "name": "Number of Requests",
-                "description": "The number of requests that can be made",
-                "feature_group": "Network Features",
-                "value": "100 requests",
-            },
-            {
-                "name": "Email Support",
-                "description": "Email support available",
-                "feature_group": "Support Features",
-                "value": "Yes",
-            },
-            {
-                "name": "Community Support",
-                "description": "Community support available on Discord",
-                "feature_group": "Support Features",
-                "value": "Yes",
-            }
-        ]"#
-    )]
-    pub features: Vec<ProductFeature>,
-    #[schemars(description = "The type of the product")]
-    pub product_type: Option<String>,
-    #[schemars(
-        description = "Statement descriptor that appears on a customer's credit card statement"
-    )]
-    pub statement_descriptor: Option<String>,
-    #[schemars(description = "The unit label for the product (e.g., 'per user', 'per month')")]
-    pub unit_label: Option<String>,
-    #[schemars(
-        description = "The amount to be charged in the smallest currency unit (e.g., cents)"
-    )]
-    pub amount: Option<i64>,
-    #[schemars(description = "The currency code (e.g., 'usd')", example = &"usd")]
-    pub currency: String,
-    #[schemars(
-        description = "The billing interval (e.g., 'month', 'year')",
-        example = &"month"
-    )]
-    pub interval: Option<String>,
-    #[schemars(description = "The number of intervals between each billing cycle")]
-    pub interval_count: Option<i64>,
-    #[schemars(description = "The pricing type (e.g., 'one_time', 'recurring')", example = &"recurring")]
-    pub pricing_type: String,
-}
+// ============================================================================
+// Validation for ProductSchema
+// ============================================================================
 
-impl Into<Product> for ProductRequest {
-    fn into(self) -> Product {
-        let ProductRequest {
-            name,
-            description,
-            features,
-            product_type,
-            statement_descriptor,
-            unit_label,
-            amount,
-            currency,
-            interval,
-            interval_count,
-            pricing_type,
-        } = self;
-        let mut product = Product::new()
-            .with_some_name(name)
-            .with_some_description(description)
-            .with_some_product_type(product_type)
-            .with_some_statement_descriptor(statement_descriptor)
-            .with_some_unit_label(unit_label)
-            .add_price(
-                Price::new(currency, pricing_type)
-                    .with_some_amount(amount)
-                    .with_some_interval(interval)
-                    .with_some_interval_count(interval_count),
-            );
+/// Validate a ProductSchema and return diagnostics
+fn validate_product_schema(product: &ProductSchema, index: usize) -> Vec<ValidationDiagnostic> {
+    let mut diagnostics = Vec::new();
+    let prefix = format!("products[{}]", index);
 
-        let mut feature_map = HashMap::new();
-        for feature in features {
-            let features_in_group = feature_map
-                .entry(feature.feature_group.to_case(Case::Snake))
-                .or_insert(Vec::new());
-
-            features_in_group.push(json!({
-                "name": feature.name,
-                "description": feature.description,
-                "value": feature.value,
-                "key": feature.name.to_case(Case::Snake),
-            }));
-        }
-        if !feature_map.is_empty() {
-            feature_map.insert(
-                "features".to_string(),
-                feature_map
-                    .keys()
-                    .map(|k| serde_json::Value::String(k.clone()))
-                    .collect(),
-            );
-            product.metadata = feature_map
-                .into_iter()
-                .map(|(k, v)| (k, serde_json::to_string(&v).unwrap()))
-                .collect();
-        }
-        product
+    // Validate name is not empty
+    if product.name.trim().is_empty() {
+        diagnostics.push(
+            ValidationDiagnostic::error(
+                "empty-required-field",
+                format!("Product at index {} has empty 'name' field", index),
+            )
+            .with_field(format!("{}.name", prefix))
+            .with_expected("A non-empty string")
+            .with_suggestion("Provide a product name like 'Premium Subscription'"),
+        );
     }
+
+    // Validate id is not empty
+    if product.id.trim().is_empty() {
+        diagnostics.push(
+            ValidationDiagnostic::error(
+                "empty-required-field",
+                format!("Product at index {} has empty 'id' field", index),
+            )
+            .with_field(format!("{}.id", prefix))
+            .with_expected("A unique identifier string")
+            .with_suggestion("Provide a unique id like 'prod_premium' or 'premium-subscription'"),
+        );
+    }
+
+    // Validate prices
+    match &product.prices {
+        None => {
+            diagnostics.push(
+                ValidationDiagnostic::error(
+                    "missing-prices",
+                    format!("Product at index {} has no 'prices' array", index),
+                )
+                .with_field(format!("{}.prices", prefix))
+                .with_expected("At least one price object")
+                .with_suggestion("Add a prices array with at least one price"),
+            );
+        }
+        Some(prices) if prices.is_empty() => {
+            diagnostics.push(
+                ValidationDiagnostic::error(
+                    "empty-prices",
+                    format!("Product at index {} has empty 'prices' array", index),
+                )
+                .with_field(format!("{}.prices", prefix))
+                .with_expected("At least one price object")
+                .with_suggestion("Add at least one price to the prices array"),
+            );
+        }
+        Some(prices) => {
+            // Validate each price
+            for (i, price) in prices.iter().enumerate() {
+                let price_prefix = format!("{}.prices[{}]", prefix, i);
+                match price {
+                    PriceSchema::OneTime(p) => {
+                        if p.unit_amount < 0 {
+                            diagnostics.push(
+                                ValidationDiagnostic::error(
+                                    "invalid-amount",
+                                    format!("Price at index {} has negative unit_amount", i),
+                                )
+                                .with_field(format!("{}.unit_amount", price_prefix))
+                                .with_expected("A non-negative integer (cents)")
+                                .with_received(p.unit_amount.to_string()),
+                            );
+                        }
+                    }
+                    PriceSchema::Recurring(p) => {
+                        if p.unit_amount < 0 {
+                            diagnostics.push(
+                                ValidationDiagnostic::error(
+                                    "invalid-amount",
+                                    format!("Price at index {} has negative unit_amount", i),
+                                )
+                                .with_field(format!("{}.unit_amount", price_prefix))
+                                .with_expected("A non-negative integer (cents)")
+                                .with_received(p.unit_amount.to_string()),
+                            );
+                        }
+                        if let Some(count) = p.interval_count {
+                            if count < 1 {
+                                diagnostics.push(
+                                    ValidationDiagnostic::error(
+                                        "invalid-interval-count",
+                                        format!("Price at index {} has invalid interval_count", i),
+                                    )
+                                    .with_field(format!("{}.interval_count", price_prefix))
+                                    .with_expected("A positive integer (default: 1)")
+                                    .with_received(count.to_string()),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    diagnostics
 }
 
-#[derive(Debug, serde::Deserialize, schemars::JsonSchema)]
-#[schemars(example = r#"{
-    "name": "Number of Networks",
-    "description": "The number of networks you can run in the cloud",
-    "feature_group": "Network Features",
-    "value": "5 networks",
-}"#)]
-pub struct ProductFeature {
-    #[schemars(description = "The name of the feature", example = &"Number of Networks")]
-    pub name: String,
-    #[schemars(description = "The description of the feature", example = &"The number of networks you can run in the cloud")]
-    pub description: Option<String>,
-    #[schemars(description = "The feature group this feature belongs to", example = &"Network Features")]
-    pub feature_group: String,
-    #[schemars(description = "The value of the feature", example = &"5 networks")]
-    pub value: String,
+/// Validate a catalog request and return all diagnostics
+fn validate_catalog_request(request: &CatalogRequest) -> ValidationResult {
+    let mut diagnostics = Vec::new();
+
+    // Validate project_root_dir
+    if request.project_root_dir.trim().is_empty() {
+        diagnostics.push(
+            ValidationDiagnostic::error(
+                "missing-required-field",
+                "The 'project_root_dir' field is empty",
+            )
+            .with_field("project_root_dir")
+            .with_expected("An absolute path to the project root directory")
+            .with_suggestion("Provide the full path like '/path/to/user/project'"),
+        );
+    }
+
+    // Validate products array
+    if request.products.is_empty() {
+        diagnostics.push(
+            ValidationDiagnostic::error("missing-required-field", "The 'products' array is empty")
+                .with_field("products")
+                .with_expected("At least one ProductSchema object")
+                .with_suggestion("Add at least one product to the products array"),
+        );
+    } else {
+        // Validate each product
+        for (i, product) in request.products.iter().enumerate() {
+            diagnostics.extend(validate_product_schema(product, i));
+        }
+    }
+
+    ValidationResult::from_diagnostics(diagnostics)
 }
+
+// ============================================================================
+// Tool Implementation
+// ============================================================================
 
 #[tool_router]
 impl MoneyMqMcp {
@@ -261,97 +227,153 @@ impl MoneyMqMcp {
             prompt_router: Self::prompt_router(),
         }
     }
+
     #[tool(description = r#"
-        Creates product catalog YAML files.
+Creates product catalog YAML files for MoneyMQ billing using ProductSchema.
 
-        Unless the user provides the project_root_dir, the directory MUST be the project's root directory.
+## ProductSchema Structure
 
-        The features field MUST be provided.
-        Product feature_mapping keys MUST correspond to feature key values.
+Each product must include:
+- `id`: Unique product identifier (string)
+- `name`: Product display name (string)
+- `prices`: Array of price objects (required, at least one)
 
-        Good Example 1: {
-            "project_root_dir": "/path/to/user/project",
-            "products": [
-                {
-                    "name": "Premium Subscription",
-                    "description": "Access to premium features",
-                    "features": [
-                        {
-                            "name": "Number of Networks",
-                            "description": "The number of networks you can run in the cloud",
-                            "feature_group": "Network Features",
-                            "value": "5 networks",
-                        },
-                        {
-                            "name": "Number of Requests",
-                            "description": "The number of requests that can be made",
-                            "feature_group": "Network Features",
-                            "value": "100 requests",
-                        },
-                        {
-                            "name": "Email Support",
-                            "description": "Email support available",
-                            "feature_group": "Support Features",
-                            "value": "Yes",
-                        },
-                        {
-                            "name": "Community Support",
-                            "description": "Community support available on Discord",
-                            "feature_group": "Support Features",
-                            "value": "Yes",
-                        }
-                    ],
-                    "product_type": "service",
-                    "statement_descriptor": "Moneymq Premium",
-                    "unit_label": "per month",
-                    "amount": 999,
-                    "currency": "usd",
-                    "interval": "month",
-                    "interval_count": 1,
-                    "pricing_type": "recurring"
-                }
-            ]
+Optional fields:
+- `description`: Product description
+- `active`: Whether product is active (default: true)
+- `product_type`: Type like "service" or "good"
+- `statement_descriptor`: Text on credit card statements
+- `unit_label`: Like "per seat" or "per GB"
+- `images`: Array of image URLs
+- `metadata`: Custom key-value data
+
+## PriceSchema (Tagged Union)
+
+Prices use `pricing_type` as the discriminator tag:
+
+### One-Time Price:
+```json
+{
+    "pricing_type": "one_time",
+    "currency": "usd",
+    "unit_amount": 999
+}
+```
+
+### Recurring Price:
+```json
+{
+    "pricing_type": "recurring",
+    "currency": "usd",
+    "unit_amount": 999,
+    "interval": "month",
+    "interval_count": 1
+}
+```
+
+## Valid Enum Values
+- `currency`: "usd", "eur", "gbp"
+- `pricing_type`: "one_time", "recurring"
+- `interval`: "day", "week", "month", "year"
+
+## Complete Example (Recurring Subscription):
+```json
+{
+    "project_root_dir": "/path/to/project",
+    "products": [{
+        "id": "prod_premium",
+        "name": "Premium Plan",
+        "description": "Access to all premium features",
+        "product_type": "service",
+        "prices": [{
+            "pricing_type": "recurring",
+            "currency": "usd",
+            "unit_amount": 1999,
+            "interval": "month"
+        }],
+        "metadata": {
+            "features": ["unlimited_api", "priority_support"]
         }
+    }]
+}
+```
 
-        Bad Example 1 (missing features): {
-            "project_root_dir": "/path/to/user/project",
-            "products": [
-                {
-                    "name": "Premium Subscription",
-                    "description": "Access to premium features",
-                    "product_type": "service",
-                    "statement_descriptor": "Moneymq Premium",
-                    "unit_label": "per month",
-                    "amount": 999,
-                    "currency": "usd",
-                    "interval": "month",
-                    "interval_count": 1,
-                    "pricing_type": "recurring"
-                }
-            ]
-        }
+## Complete Example (One-Time Payment):
+```json
+{
+    "project_root_dir": "/path/to/project",
+    "products": [{
+        "id": "prod_lifetime",
+        "name": "Lifetime License",
+        "prices": [{
+            "pricing_type": "one_time",
+            "currency": "usd",
+            "unit_amount": 9900
+        }]
+    }]
+}
+```
 
-        Writes each product as `<id>.yaml` in the products directory of the first catalog found in moneymq.yaml.
+Writes each product as `<id>.yaml` in the products directory.
     "#)]
     async fn add_product_to_catalog(
         &self,
-        Parameters(CatalogRequest {
+        Parameters(request): Parameters<CatalogRequest>,
+    ) -> Result<CallToolResult, McpError> {
+        // Step 1: Validate the entire request
+        let validation = validate_catalog_request(&request);
+
+        if !validation.is_valid {
+            // Return detailed validation errors for the LLM to iterate
+            let error_details = json!({
+                "error_type": "validation_failed",
+                "error_count": validation.error_count,
+                "warning_count": validation.warning_count,
+                "diagnostics": validation.diagnostics,
+                "hint": "Please review the errors above and fix each issue in your request. All required fields must be provided with valid values.",
+                "valid_enums": {
+                    "currency": ["usd", "eur", "gbp"],
+                    "pricing_type": ["one_time", "recurring"],
+                    "interval": ["day", "week", "month", "year"]
+                }
+            });
+
+            let error_msg = format!(
+                "## Validation Failed\n\n{} error(s) found in your request.\n{}",
+                validation.error_count,
+                validation.format_for_llm()
+            );
+
+            let full_error_msg = format!(
+                "{}\n\n---\n## Machine-Readable Diagnostics\n```json\n{}\n```",
+                error_msg,
+                serde_json::to_string_pretty(&error_details).unwrap_or_default()
+            );
+
+            return Ok(CallToolResult::error(vec![Content::text(&full_error_msg)]));
+        }
+
+        // Step 2: Note any warnings
+        let warning_msg = if validation.warning_count > 0 {
+            Some(validation.format_for_llm())
+        } else {
+            None
+        };
+
+        let CatalogRequest {
             project_root_dir,
             products,
-        }): Parameters<CatalogRequest>,
-    ) -> Result<CallToolResult, McpError> {
+        } = request;
         let project_path = PathBuf::from(&project_root_dir);
 
         // Read manifest to get catalog path
         let manifest_path = project_path.join(moneymq_types::MANIFEST_FILE_NAME);
         if !manifest_path.exists() {
-            return Err(McpError::invalid_request(
-                format!(
-                    "{} not found. Please run 'moneymq init' first.",
-                    moneymq_types::MANIFEST_FILE_NAME
-                ),
-                None,
-            ));
+            return Ok(CallToolResult::error(vec![Content::text(&format!(
+                "## Error: Manifest Not Found\n\n`{}` not found at `{}`.\n\n**Solution:** Run `moneymq init` first to initialize your project.",
+                moneymq_types::MANIFEST_FILE_NAME,
+                project_root_dir
+            ))]));
         }
 
         let manifest_content = fs::read_to_string(&manifest_path).map_err(|e| {
@@ -396,8 +418,7 @@ impl MoneyMqMcp {
         let mut created_files = Vec::new();
 
         for product in products {
-            let product: Product = product.into();
-
+            // Serialize ProductSchema directly to YAML
             let yaml_content = to_pretty_yaml_with_header(&product, Some("Product"), Some("v1"))
                 .map_err(|e| {
                     tracing::error!(?e, "Failed to serialize product");
@@ -407,7 +428,7 @@ impl MoneyMqMcp {
                     )
                 })?;
 
-            tracing::info!(?product, "Creating product");
+            tracing::info!(product_id = %product.id, product_name = %product.name, "Creating product");
 
             // Generate base58 filename from product ID
             let filename_base58 = bs58::encode(&product.id).into_string();
@@ -428,7 +449,7 @@ impl MoneyMqMcp {
         }
 
         // Build success message with next steps
-        let success_msg = if is_stripe {
+        let mut success_msg = if is_stripe {
             format!(
                 "✓ Created {} product(s) in {}\n\nNext steps:\n\n1. Sync to Stripe:\n   moneymq catalog sync\n\n2. Or run MoneyMQ Studio to test:\n   moneymq run",
                 created_files.len(),
@@ -441,6 +462,11 @@ impl MoneyMqMcp {
                 products_path.display()
             )
         };
+
+        // Append any warnings
+        if let Some(warnings) = warning_msg {
+            success_msg.push_str(&format!("\n\n{}", warnings));
+        }
 
         Ok(CallToolResult::success(vec![Content::text(&success_msg)]))
     }
@@ -461,8 +487,54 @@ impl ServerHandler for MoneyMqMcp {
                 .enable_tools()
                 .build(),
             server_info: Implementation::from_build_env(),
-            instructions: Some("This server provides tools to interact with the MoneyMQ cli tool. This tool is used to create product catalogs (a la stripe), where you can manage YAML files that define your products and prices.
-            Tools: add_product_to_catalog(takes a list of products to add to the catalog).".to_string()),
+            instructions: Some(r#"MoneyMQ Product Catalog MCP Server
+
+## Available Tools
+
+### add_product_to_catalog
+Creates product catalog YAML files using ProductSchema. Validates all input with detailed error reporting.
+
+## ProductSchema Structure
+
+Products require:
+- id: Unique identifier (e.g., "prod_premium")
+- name: Display name
+- prices: Array of PriceSchema objects (at least one)
+
+## PriceSchema (Tagged Union by pricing_type)
+
+One-time price:
+```json
+{"pricing_type": "one_time", "currency": "usd", "unit_amount": 999}
+```
+
+Recurring price:
+```json
+{"pricing_type": "recurring", "currency": "usd", "unit_amount": 999, "interval": "month"}
+```
+
+## Valid Enum Values
+- currency: "usd", "eur", "gbp"
+- pricing_type: "one_time", "recurring"
+- interval (for recurring): "day", "week", "month", "year"
+
+## Handling Errors
+
+When you receive a validation error:
+1. Check the `field` path to identify the issue location
+2. Check `expected` for what value was expected
+3. Check `received` for what was provided
+4. Check `suggestion` for how to fix it
+5. Fix ALL errors before retrying
+
+## Common Issues
+- Missing `prices` array - every product needs at least one price
+- Invalid enum value - use exact lowercase values
+- Empty `id` or `name` - these are required strings
+
+## Resources
+- add_product_to_catalog_schema: JSON Schema for CatalogRequest
+"#.to_string()),
         }
     }
 
@@ -476,7 +548,7 @@ impl ServerHandler for MoneyMqMcp {
                 title: Some("Add Product to Catalog Schema".to_string()),
                 uri: "str:///add_product_to_catalog_schema".to_string(),
                 name: "Schema for all types needed for an `add_product_to_catalog` request".to_string(),
-                description: Some("A json file containing the schema for all types needed for an `add_product_to_catalog` request".to_string()),
+                description: Some("A json file containing the schema for all types needed for an `add_product_to_catalog` request, including ProductSchema and PriceSchema".to_string()),
                 mime_type: Some("application/json".to_string()),
                 size: None,
                 icons: None

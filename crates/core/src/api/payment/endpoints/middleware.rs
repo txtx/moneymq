@@ -391,7 +391,8 @@ pub async fn payment_middleware(
                             }
                             .unwrap_or(&price.id);
                             if subscription_req.price_ids.contains(&price_id) && price.active {
-                                let is_margin = price.pricing_type.eq("margin");
+                                // Note: "margin" pricing type is not currently supported
+                                let is_margin = false;
                                 let price = price.unit_amount.clone().unwrap_or(1);
                                 let description =
                                     product.statement_descriptor.clone().unwrap_or_else(|| {

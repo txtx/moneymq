@@ -1,14 +1,14 @@
 /// Default binding address for facilitator and validator
 pub const DEFAULT_BINDING_ADDRESS: &str = "0.0.0.0";
 
-/// Default port for the facilitator service
-pub const DEFAULT_FACILITATOR_PORT: u16 = 7781;
+/// Default port for the MoneyMQ API server (consolidated catalog + payment APIs)
+pub const DEFAULT_MONEYMQ_PORT: u16 = 8488;
 
-/// Default RPC port for the validator
-pub const DEFAULT_RPC_PORT: u16 = 8899;
+/// Default RPC port for the Solana validator
+pub const DEFAULT_SOLANA_RPC_PORT: u16 = 8899;
 
-/// Default WebSocket port for the validator
-pub const DEFAULT_WS_PORT: u16 = 8900;
+/// Default WebSocket port for the Solana validator
+pub const DEFAULT_SOLANA_WS_PORT: u16 = 8900;
 
 /// Default sandbox name used throughout the system
 pub const DEFAULT_SANDBOX: &str = "default";
@@ -20,7 +20,7 @@ pub const PAYMENTS_CONFIG_HEADER: &str = "\
 
 /// Complete default payments footer for manifest files
 pub const DEFAULT_PAYMENTS_FOOTER: &str = "\
-# Payment configuration for accepting crypto payments
+# Payment configuration for accepting stablecoin payments
 # Learn more: https://docs.moneymq.co/payments
 # payments:
 #   stablecoins:
@@ -38,7 +38,6 @@ pub const DEFAULT_PAYMENTS_FOOTER: &str = "\
 #         recipient: your_solana_address_here
 #         currencies:
 #           - USDC
-#           - USDT
 #
 #     # Sandbox configuration for local development
 #     sandboxes:

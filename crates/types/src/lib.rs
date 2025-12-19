@@ -3,8 +3,15 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
+pub mod iac;
 pub mod stripe;
 pub mod x402;
+
+// Re-export commonly used IAC types at crate root for convenience
+pub use iac::{
+    Currency, DiagnosticSeverity, OneTimePriceSchema, PriceSchema, PricingType, ProductSchema,
+    RecurringInterval, RecurringPriceSchema, ValidationDiagnostic, ValidationResult,
+};
 
 /// Default manifest file name
 pub const MANIFEST_FILE_NAME: &str = "moneymq.yaml";
@@ -115,17 +122,17 @@ pub struct Price {
     /// Whether the price is currently active
     pub active: bool,
 
-    /// Three-letter ISO currency code (e.g., "usd")
-    pub currency: String,
+    /// Currency code
+    pub currency: iac::Currency,
 
     /// The unit amount (in cents for currencies like USD)
     pub unit_amount: Option<i64>,
 
-    /// Pricing type: "one_time" or "recurring"
-    pub pricing_type: String,
+    /// Pricing type: one_time or recurring
+    pub pricing_type: iac::PricingType,
 
-    /// Recurring interval (e.g., "month", "year") if applicable
-    pub recurring_interval: Option<String>,
+    /// Recurring interval (day, week, month, year) if applicable
+    pub recurring_interval: Option<iac::RecurringInterval>,
 
     /// Recurring interval count (e.g., 3 for "every 3 months")
     pub recurring_interval_count: Option<i64>,
@@ -146,7 +153,7 @@ pub struct Price {
 }
 
 impl Price {
-    pub fn new(currency: String, pricing_type: String) -> Self {
+    pub fn new(currency: iac::Currency, pricing_type: iac::PricingType) -> Self {
         Self {
             id: random_id(),
             deployed_id: None,
@@ -170,7 +177,7 @@ impl Price {
     }
 
     /// Set the recurring interval
-    pub fn with_some_interval(mut self, interval: Option<String>) -> Self {
+    pub fn with_some_interval(mut self, interval: Option<iac::RecurringInterval>) -> Self {
         self.recurring_interval = interval;
         self
     }

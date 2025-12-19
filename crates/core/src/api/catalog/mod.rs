@@ -21,6 +21,7 @@ use url::Url;
 use crate::api::{payment::endpoints::middleware::x402_post, sandbox::NetworksConfig};
 
 pub mod config;
+pub mod db;
 pub mod stripe;
 
 /// Application state
@@ -40,6 +41,7 @@ pub struct ProviderState {
     pub payment_intents: Arc<Mutex<HashMap<String, StripePaymentIntent>>>,
     pub kora_config: Option<Arc<kora_lib::Config>>,
     pub signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
+    pub manifest_path: PathBuf,
 }
 
 /// Application state
@@ -64,6 +66,7 @@ impl ProviderState {
         validators_config: ValidatorsConfig,
         kora_config: Option<Arc<kora_lib::Config>>,
         signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
+        manifest_path: PathBuf,
     ) -> Self {
         Self {
             products: Arc::new(products),
@@ -80,6 +83,7 @@ impl ProviderState {
             payment_intents: Arc::new(Mutex::new(HashMap::new())),
             kora_config,
             signer_pool,
+            manifest_path,
         }
     }
 }

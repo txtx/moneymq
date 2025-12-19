@@ -4,23 +4,28 @@ use indexmap::IndexMap;
 use moneymq_types::x402::config::constants::DEFAULT_SANDBOX;
 use serde::{Deserialize, Serialize};
 
-use crate::manifest::x402::PaymentConfig;
-pub mod x402;
-// TODO: Re-enable x402_rs imports when refactoring X402 facilitator
-// use x402_rs::{
-//     chain::{NetworkProvider, solana::SolanaProvider},
-//     provider_cache::ProviderCache,
-// };
+pub mod environments;
+pub mod payments;
+
+pub use environments::{Chain, EnvironmentConfig, SandboxEnvironment};
+pub use payments::PaymentsConfig;
 
 /// MoneyMQ manifest file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     /// Multiple catalog configurations
-    /// Key is the catalog name (e.g., "stripe", "stripe_sandbox")
+    /// Key is the catalog name (e.g., "v1", "v2")
     #[serde(default)]
     pub catalogs: IndexMap<String, CatalogConfig>,
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
-    pub payments: IndexMap<String, PaymentConfig>,
+
+    /// Payment configuration - what payments to accept
+    #[serde(default)]
+    pub payments: PaymentsConfig,
+
+    /// Environment configurations
+    /// Key is the environment name (e.g., "sandbox", "production")
+    #[serde(default = "environments::default_environments")]
+    pub environments: IndexMap<String, EnvironmentConfig>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -64,28 +69,27 @@ impl Manifest {
         self.catalogs.get(name)
     }
 
-    /// Get a payment configuration by name
-    pub fn get_payment(&self, name: &str) -> Option<&PaymentConfig> {
-        self.payments.get(name)
+    /// Get an environment configuration by name
+    pub fn get_environment(&self, name: &str) -> Option<&EnvironmentConfig> {
+        self.environments.get(name)
+    }
+
+    /// Get the default sandbox environment
+    pub fn get_sandbox(&self) -> Option<&EnvironmentConfig> {
+        self.environments.get("sandbox")
+    }
+
+    /// Get the production environment
+    pub fn get_production(&self) -> Option<&EnvironmentConfig> {
+        self.environments.get("production")
     }
 
     /// Save manifest to the specified file path with proper formatting
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        use crate::yaml_util::{
-            get_default_payments_footer, to_pretty_yaml_with_header_and_footer,
-        };
-
-        // Only add the payments footer if payments section is empty
-        let footer_string;
-        let footer = if self.payments.is_empty() {
-            footer_string = get_default_payments_footer();
-            Some(footer_string.as_str())
-        } else {
-            None
-        };
+        use crate::yaml_util::to_pretty_yaml_with_header_and_footer;
 
         let content =
-            to_pretty_yaml_with_header_and_footer(self, Some("Manifest"), Some("v1"), footer)?;
+            to_pretty_yaml_with_header_and_footer(self, Some("Manifest"), Some("v1"), None)?;
 
         std::fs::write(path, content)
             .map_err(|e| format!("Failed to write manifest to {}: {}", path.display(), e))?;
@@ -96,11 +100,10 @@ impl Manifest {
 
 impl Default for Manifest {
     fn default() -> Self {
-        let mut payments = IndexMap::new();
-        payments.insert("stablecoins".into(), PaymentConfig::default());
         Manifest {
-            payments,
             catalogs: IndexMap::new(),
+            payments: PaymentsConfig::default(),
+            environments: environments::default_environments(),
         }
     }
 }
@@ -229,181 +232,124 @@ fn default_catalog_path() -> String {
 mod tests {
     use std::fs;
 
-    use moneymq_types::x402::config::constants::DEFAULT_FACILITATOR_PORT;
+    use moneymq_types::x402::config::constants::{
+        DEFAULT_MONEYMQ_PORT, DEFAULT_SOLANA_RPC_PORT, DEFAULT_SOLANA_WS_PORT,
+    };
     use tempfile::TempDir;
 
     use super::*;
-    use crate::manifest::x402::{
-        AcceptedNetworkConfig, FacilitatorConfig, NetworkIdentifier, PaymentConfig,
-        SandboxFacilitatorConfig, SupportedNetworkConfig, ValidatorConfig, X402PaymentConfig,
-        X402SandboxConfig,
-    };
 
     #[test]
-    fn test_write_complete_manifest_to_disk() {
-        // Create a complete manifest with catalogs and payments
-        let mut manifest = Manifest {
-            catalogs: IndexMap::new(),
-            payments: IndexMap::new(),
-        };
+    fn test_parse_new_manifest_structure() {
+        let yaml = r#"
+catalogs:
+  v1:
+    description: 'Surfpool'
+    catalog_path: billing/v1
 
-        // Add catalog configuration
-        manifest.catalogs.insert(
-            "v1".to_string(),
-            CatalogConfig {
-                description: Some("Production catalog".to_string()),
-                catalog_path: "billing/v1".to_string(),
-                source: Some(CatalogSourceType::Stripe(StripeConfig {
-                    api_key: None,
-                    api_version: Some("2023-10-16".to_string()),
-                    webhook_endpoint: None,
-                    webhook_secret_env: None,
-                    sandboxes: IndexMap::new(),
-                })),
-            },
-        );
+payments:
+  networks:
+    chain: Solana
+    stablecoins:
+      - USDC
 
-        // Add payment configuration
-        let mut x402_config = X402PaymentConfig {
-            description: Some("Solana stablecoin payments".to_string()),
-            facilitator: FacilitatorConfig::ServiceUrl {
-                service_url: "https://facilitator.moneymq.co".to_string(),
-            },
-            accepted: IndexMap::new(),
-            sandboxes: IndexMap::new(),
-        };
+environments:
+  sandbox:
+    deployment: Sandbox
+    binding_address: 0.0.0.0
+    port: 8488
+    facilitator:
+      fee: 0
+      key_management: TurnKey
+    network:
+      chain: Solana
+      binding_address: 0.0.0.0
+      rpc_port: 8899
+      ws_port: 8900
 
-        // Add accepted network
-        x402_config.accepted.insert(
-            NetworkIdentifier::Solana,
-            AcceptedNetworkConfig {
-                recipient: Some("recipient123456789".to_string()),
-                currencies: vec!["USDC".to_string(), "USDT".to_string()],
-            },
-        );
+  internal:
+    deployment: SelfHosted
+    binding_address: 0.0.0.0
+    port: 8488
+    facilitator:
+      fee: 0
+      key_management: TurnKey
+    network:
+      chain: Solana
+      rpc_url: http://localhost:8899
+      ws_url: ws://localhost:8900
 
-        // Add sandbox configuration
-        let mut sandbox_facilitator_supported = IndexMap::new();
-        sandbox_facilitator_supported.insert(
-            NetworkIdentifier::Solana,
-            SupportedNetworkConfig {
-                fee: 0,
-                rpc_url: None,
-            },
-        );
+  production:
+    deployment: CloudHosted
+    project: Surfpool Project
+    workspace: surfpool
+    facilitator:
+      fee: 0
+      key_management: TurnKey
+"#;
 
-        x402_config.sandboxes.insert(
-            "default".to_string(),
-            X402SandboxConfig {
-                description: Some("Local development sandbox".to_string()),
-                facilitator: FacilitatorConfig::Embedded(SandboxFacilitatorConfig {
-                    binding_address: "0.0.0.0".to_string(),
-                    binding_port: DEFAULT_FACILITATOR_PORT,
-                    supported: sandbox_facilitator_supported,
-                }),
-                validator: IndexMap::from([(
-                    NetworkIdentifier::Solana,
-                    ValidatorConfig::default(),
-                )]),
-            },
-        );
+        let manifest: Manifest = serde_yml::from_str(yaml).expect("Failed to parse manifest");
 
-        manifest
-            .payments
-            .insert("stablecoins".to_string(), PaymentConfig::X402(x402_config));
+        // Verify catalogs
+        assert_eq!(manifest.catalogs.len(), 1);
+        let catalog = manifest.get_catalog("v1").expect("Catalog v1 not found");
+        assert_eq!(catalog.description, Some("Surfpool".to_string()));
 
-        // Create a temporary directory
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let manifest_path = temp_dir.path().join("moneymq.yaml");
+        // Verify payments
+        assert_eq!(manifest.payments.networks.chain, Chain::Solana);
+        assert_eq!(manifest.payments.networks.stablecoins, vec!["USDC"]);
 
-        // Serialize to YAML with header
-        let yaml_content = format!(
-            "---\n# MoneyMQ Manifest - API version v1\n{}",
-            serde_yml::to_string(&manifest).expect("Failed to serialize manifest")
-        );
+        // Verify environments
+        assert_eq!(manifest.environments.len(), 3);
 
-        // Write to disk
-        fs::write(&manifest_path, &yaml_content).expect("Failed to write manifest file");
-
-        // Verify file was created
-        assert!(manifest_path.exists(), "Manifest file was not created");
-
-        // Read back and verify it parses correctly
-        let read_content =
-            fs::read_to_string(&manifest_path).expect("Failed to read manifest file");
-        let parsed_manifest: Manifest =
-            serde_yml::from_str(&read_content).expect("Failed to parse manifest YAML");
-
-        // Verify catalog
-        assert_eq!(parsed_manifest.catalogs.len(), 1);
-        let catalog = parsed_manifest
-            .catalogs
-            .get("v1")
-            .expect("Catalog v1 not found");
-        assert_eq!(catalog.description, Some("Production catalog".to_string()));
-        assert_eq!(catalog.catalog_path, "billing/v1");
-
-        // Verify payment
-        assert_eq!(parsed_manifest.payments.len(), 1);
-        let payment = parsed_manifest
-            .payments
-            .get("stablecoins")
-            .expect("Payment config not found");
-
-        // Extract X402 config (only variant available currently)
-        let PaymentConfig::X402(x402) = payment;
-
-        assert_eq!(
-            x402.description,
-            Some("Solana stablecoin payments".to_string())
-        );
-
-        // Verify facilitator
-        match &x402.facilitator {
-            FacilitatorConfig::ServiceUrl { service_url } => {
-                assert_eq!(service_url, "https://facilitator.moneymq.co");
+        // Check sandbox
+        match manifest.get_sandbox().expect("Sandbox not found") {
+            EnvironmentConfig::Sandbox(env) => {
+                assert_eq!(env.port, DEFAULT_MONEYMQ_PORT);
+                assert_eq!(env.network.rpc_port, DEFAULT_SOLANA_RPC_PORT);
+                assert_eq!(env.network.ws_port, DEFAULT_SOLANA_WS_PORT);
             }
-            _ => panic!("Expected ServiceUrl facilitator"),
+            _ => panic!("Expected Sandbox environment"),
         }
 
-        // Verify accepted networks
-        assert_eq!(x402.accepted.len(), 1);
-        let accepted = x402
-            .accepted
-            .get(&NetworkIdentifier::Solana)
-            .expect("Solana network not found");
-        assert_eq!(accepted.currencies, vec!["USDC", "USDT"]);
-
-        // Verify sandbox
-        assert_eq!(x402.sandboxes.len(), 1);
-        let sandbox = x402
-            .get_default_sandbox()
-            .expect("Default sandbox not found");
-        assert_eq!(
-            sandbox.description,
-            Some("Local development sandbox".to_string())
-        );
-
-        // Verify sandbox facilitator is embedded
-        match &sandbox.facilitator {
-            FacilitatorConfig::Embedded(config) => {
-                assert_eq!(config.binding_port, DEFAULT_FACILITATOR_PORT);
-                assert_eq!(config.supported.len(), 1);
+        // Check internal (SelfHosted)
+        match manifest
+            .get_environment("internal")
+            .expect("Internal not found")
+        {
+            EnvironmentConfig::SelfHosted(env) => {
+                assert_eq!(env.network.rpc_url, "http://localhost:8899");
+                assert_eq!(env.network.ws_url, Some("ws://localhost:8900".to_string()));
             }
-            _ => panic!("Expected Embedded facilitator in sandbox"),
+            _ => panic!("Expected SelfHosted environment"),
         }
 
-        // Print the generated YAML for manual inspection
-        println!("Generated YAML:\n{}", yaml_content);
+        // Check production (CloudHosted)
+        match manifest.get_production().expect("Production not found") {
+            EnvironmentConfig::CloudHosted(env) => {
+                assert_eq!(env.project, "Surfpool Project");
+                assert_eq!(env.workspace, "surfpool");
+            }
+            _ => panic!("Expected CloudHosted environment"),
+        }
     }
 
     #[test]
-    fn test_manifest_save_with_payments_footer() {
-        // Create a manifest with only catalogs (no payments)
-        let mut manifest = Manifest {
-            catalogs: IndexMap::new(),
-            payments: IndexMap::new(),
-        };
+    fn test_manifest_default_has_sandbox() {
+        let manifest = Manifest::default();
+
+        assert!(manifest.environments.contains_key("sandbox"));
+        match manifest.get_sandbox().unwrap() {
+            EnvironmentConfig::Sandbox(env) => {
+                assert_eq!(env.port, DEFAULT_MONEYMQ_PORT);
+            }
+            _ => panic!("Expected Sandbox environment"),
+        }
+    }
+
+    #[test]
+    fn test_manifest_save_and_load() {
+        let mut manifest = Manifest::default();
 
         manifest.catalogs.insert(
             "v1".to_string(),
@@ -429,60 +375,16 @@ mod tests {
         assert!(content.starts_with("---\n"));
         assert!(content.contains("# MoneyMQ Manifest - API version v1"));
 
-        // Verify it has the catalog
+        // Verify structure
         assert!(content.contains("catalogs:"));
-        assert!(content.contains("v1:"));
-        assert!(content.contains("description: Test catalog"));
-
-        // Verify it has the payments footer (commented out)
-        assert!(content.contains("# Payment configuration for accepting crypto payments"));
-        assert!(content.contains("# payments:"));
-        assert!(content.contains("#   stablecoins:"));
-        assert!(content.contains("#     protocol: x402"));
-        assert!(content.contains("# Learn more: https://docs.moneymq.co/payments"));
+        assert!(content.contains("payments:"));
+        assert!(content.contains("environments:"));
 
         println!("Generated manifest:\n{}", content);
-    }
 
-    #[test]
-    fn test_manifest_save_without_footer_when_payments_exist() {
-        // Create a manifest with payments configured
-        let mut manifest = Manifest {
-            catalogs: IndexMap::new(),
-            payments: IndexMap::new(),
-        };
-
-        manifest.catalogs.insert(
-            "v1".to_string(),
-            CatalogConfig {
-                description: Some("Test catalog".to_string()),
-                catalog_path: "billing/v1".to_string(),
-                source: None,
-            },
-        );
-
-        manifest
-            .payments
-            .insert("stablecoins".to_string(), PaymentConfig::default());
-
-        // Save to temp file
-        let temp_dir = TempDir::new().expect("Failed to create temp dir");
-        let manifest_path = temp_dir.path().join("moneymq.yaml");
-
-        manifest
-            .save(&manifest_path)
-            .expect("Failed to save manifest");
-
-        // Read back the content
-        let content = fs::read_to_string(&manifest_path).expect("Failed to read manifest");
-
-        // Verify it has the actual payments section (not commented)
-        assert!(content.contains("payments:"));
-        assert!(content.contains("stablecoins:"));
-
-        // Verify it does NOT have the commented footer
-        assert!(!content.contains("# Payment configuration for accepting crypto payments"));
-
-        println!("Generated manifest with payments:\n{}", content);
+        // Load it back and verify
+        let loaded = Manifest::load(&manifest_path).expect("Failed to load manifest");
+        assert_eq!(loaded.catalogs.len(), 1);
+        assert!(loaded.environments.contains_key("sandbox"));
     }
 }

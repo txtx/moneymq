@@ -1,8 +1,9 @@
 //! Stripe-compatible response types for the catalog API
 
-use crate::{Meter, Price, Product};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+
+use crate::{Meter, Price, Product};
 
 /// Stripe-compatible list response
 #[derive(Debug, Clone, Serialize)]
@@ -119,11 +120,12 @@ impl StripePrice {
             product.deployed_id.as_ref()
         };
 
-        let recurring = if price.pricing_type == "recurring" {
+        let recurring = if price.pricing_type == crate::iac::PricingType::Recurring {
             Some(StripeRecurring {
                 interval: price
                     .recurring_interval
-                    .clone()
+                    .as_ref()
+                    .map(|i| i.as_str().to_string())
                     .unwrap_or_else(|| "month".to_string()),
                 interval_count: price.recurring_interval_count.unwrap_or(1),
             })
@@ -135,10 +137,10 @@ impl StripePrice {
             id: price_id.cloned().unwrap_or_else(|| price.id.clone()),
             object: "price".to_string(),
             active: price.active,
-            currency: price.currency.clone(),
+            currency: price.currency.as_str().to_string(),
             unit_amount: price.unit_amount,
             product: product_id.cloned().unwrap_or_else(|| product.id.clone()),
-            pricing_type: price.pricing_type.clone(),
+            pricing_type: price.pricing_type.as_str().to_string(),
             nickname: price.nickname.clone(),
             metadata: price.metadata.clone(),
             created: price.created_at.timestamp(),
@@ -209,12 +211,11 @@ impl StripeBillingMeter {
                     event_payload_key: cm.event_payload_key.clone(),
                 }
             }),
-            default_aggregation: meter
-                .default_aggregation
-                .as_ref()
-                .map(|da| StripeMeterAggregation {
+            default_aggregation: meter.default_aggregation.as_ref().map(|da| {
+                StripeMeterAggregation {
                     formula: da.formula.clone(),
-                }),
+                }
+            }),
             value_settings: meter
                 .value_settings
                 .as_ref()

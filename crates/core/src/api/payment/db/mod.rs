@@ -73,7 +73,6 @@ fn calculate_payment_hash(transaction: &str) -> Result<String, String> {
 fn map_spl_token_to_symbol(mint_address: &str) -> String {
     match mint_address {
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v" => "USDC".to_string(),
-        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB" => "USDT".to_string(),
         "So11111111111111111111111111111111111111112" => "SOL".to_string(),
         _ => mint_address.to_string(),
     }
@@ -135,7 +134,7 @@ impl DbManager {
         payment_requirement_base64: String,
         verify_request_base64: String,
         verify_response_base64: String,
-        facilitator_id: &str,
+        payment_stack_id: &str,
         is_sandbox: bool,
     ) -> DbResult<()> {
         let mut conn = self
@@ -230,7 +229,7 @@ impl DbManager {
             Some(verify_request_base64),
             Some(verify_response_base64),
             payment_hash,
-            facilitator_id.to_string(),
+            payment_stack_id.to_string(),
             is_sandbox,
         );
 
@@ -351,7 +350,7 @@ impl DbManager {
         &self,
         limit: usize,
         starting_after: Option<i32>,
-        facilitator_id: &str,
+        payment_stack_id: &str,
         is_sandbox: bool,
     ) -> DbResult<(Vec<FacilitatedTransaction>, bool)> {
         let mut conn = self
@@ -363,7 +362,7 @@ impl DbManager {
             &mut conn,
             limit,
             starting_after,
-            facilitator_id,
+            payment_stack_id,
             is_sandbox,
         )
         .map_err(DbError::ListTxError)

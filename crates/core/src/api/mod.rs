@@ -10,9 +10,15 @@ pub use sandbox::{NetworksConfig, NetworksConfigError};
 use tower_http::cors::{Any, CorsLayer};
 
 /// Create a combined router that includes both catalog and payment APIs
+///
+/// # Arguments
+/// * `catalog_state` - State for catalog endpoints
+/// * `facilitator_state` - Optional state for payment/facilitator endpoints
+/// * `extra_routes` - Optional additional routes to merge (e.g., IAC routes from CLI)
 pub fn create_combined_router(
     catalog_state: ProviderState,
     facilitator_state: Option<FacilitatorState>,
+    extra_routes: Option<Router<()>>,
 ) -> Router<()> {
     let cors_layer = CorsLayer::new()
         .allow_origin(Any)
@@ -39,6 +45,11 @@ pub fn create_combined_router(
         app = app.nest("/payment/v1", payment_router);
     }
 
+    // Merge extra routes if provided (e.g., IAC routes from CLI)
+    if let Some(extra) = extra_routes {
+        app = app.merge(extra);
+    }
+
     app.layer(cors_layer)
 }
 
@@ -46,9 +57,10 @@ pub fn create_combined_router(
 pub async fn start_server(
     catalog_state: ProviderState,
     facilitator_state: Option<FacilitatorState>,
+    extra_routes: Option<Router<()>>,
     port: u16,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = create_combined_router(catalog_state, facilitator_state);
+    let app = create_combined_router(catalog_state, facilitator_state, extra_routes);
 
     let addr = format!("0.0.0.0:{}", port);
     tracing::info!("Starting MoneyMQ API server on {}", addr);

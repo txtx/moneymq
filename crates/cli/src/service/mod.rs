@@ -3,16 +3,15 @@ use std::{fs, path::PathBuf};
 use console::{StyledObject, style};
 use indexmap::IndexMap;
 use moneymq_core::api::{NetworksConfig, NetworksConfigError, payment::FacilitatorState};
-// TODO: Re-enable when refactoring X402 facilitator
-// use moneymq_core::{facilitator::FacilitatorConfig, validator};
-use moneymq_types::{Meter, x402::config::facilitator::ValidatorsConfig};
-use moneymq_types::{Product, x402::MoneyMqNetwork};
+use moneymq_types::{
+    Meter, Product,
+    x402::{MoneyMqNetwork, config::facilitator::ValidatorsConfig},
+};
 use url::Url;
 
-// use x402_rs::{chain::NetworkProvider, network::SolanaNetwork};
 use crate::{
     Context,
-    manifest::{Manifest, x402::PaymentConfig},
+    manifest::{EnvironmentConfig, Manifest, PaymentsConfig},
 };
 
 mod run;
@@ -29,22 +28,24 @@ pub enum RunCommandError {
     DirectoryEntryReadError(std::io::Error),
     #[error("Failed to read file {}: {}", .0.display(), 1)]
     ReadFileError(PathBuf, std::io::Error),
-    #[error("Failed to start local facilitator networks: {0}")]
-    StartFacilitatorNetworks(String),
-    #[error("Failed configure billing settings: {0}")]
+    #[error("Failed to start payment API: {0}")]
+    StartPaymentApi(String),
+    #[error("Failed to configure payment networks: {0}")]
     NetworksConfigInitializationError(NetworksConfigError),
     #[error("Failed to fund local accounts: {0}")]
     FundLocalAccountsError(String),
     #[error("Failed to start provider server: {0}")]
     ProviderStartError(Box<dyn std::error::Error>),
-    #[error("Missing required billing networks")]
-    NoBillingNetworksConfigured,
+    #[error("No payment networks configured")]
+    NoPaymentNetworksConfigured,
+    #[error("Environment '{0}' not found in manifest")]
+    EnvironmentNotFound(String),
 }
 
-type BillingNetworksMap = IndexMap<String, (MoneyMqNetwork, Option<String>, Vec<String>)>;
+/// Map of payment network configurations: network_id -> (network_type, recipient, stablecoins)
+type PaymentNetworksMap = IndexMap<String, (MoneyMqNetwork, Option<String>, Vec<String>)>;
 
 pub trait ServiceCommand {
-    const SANDBOX: bool;
     fn get() -> StyledObject<&'static str> {
         style("  GET").yellow()
     }
@@ -53,25 +54,39 @@ pub trait ServiceCommand {
         style(" POST").magenta()
     }
 
-    fn port(&self) -> u16;
+    /// Returns the environment name to use
+    fn environment_name(&self) -> &str;
 
-    fn billing_networks(
-        &self,
-        manifest: &Manifest,
-    ) -> Result<IndexMap<String, (MoneyMqNetwork, Option<String>, Vec<String>)>, RunCommandError>;
+    /// Returns the port to use
+    fn port(&self, manifest: &Manifest) -> u16;
 
+    /// Returns true if running in sandbox mode
+    fn is_sandbox(&self, manifest: &Manifest) -> bool;
+
+    /// Build the payment networks map from the manifest
+    fn payment_networks(&self, manifest: &Manifest) -> Result<PaymentNetworksMap, RunCommandError>;
+
+    /// Build the networks configuration from payment networks
     fn networks_config(
         &self,
-        billing_networks: BillingNetworksMap,
+        manifest: &Manifest,
+        payment_networks: PaymentNetworksMap,
     ) -> Result<NetworksConfig, RunCommandError>;
 
-    async fn setup_facilitator(
+    /// Setup the payment API (facilitator) for the environment
+    async fn setup_payment_api(
         &self,
-        payments: &IndexMap<String, PaymentConfig>,
+        payments: &PaymentsConfig,
+        environment: &EnvironmentConfig,
         networks_config: &NetworksConfig,
+        port: u16,
     ) -> Result<(Url, String, ValidatorsConfig, Option<FacilitatorState>), RunCommandError>;
 
-    fn load_catalog(&self, ctx: &Context) -> Result<(Vec<Product>, Vec<Meter>), RunCommandError> {
+    fn load_catalog(
+        &self,
+        ctx: &Context,
+        port: u16,
+    ) -> Result<(Vec<Product>, Vec<Meter>), RunCommandError> {
         // Get catalog path from first catalog (or default to "billing/v1")
         let catalog_base_path = ctx
             .manifest
@@ -174,7 +189,7 @@ pub trait ServiceCommand {
 
         println!(
             "# {}{}{}",
-            style("Catalog & Billing API (schema: ").dim(),
+            style("Catalog API (schema: ").dim(),
             style("stripe").green(),
             style(")").dim()
         );
@@ -182,12 +197,12 @@ pub trait ServiceCommand {
         println!(
             " {} http://localhost:{}/catalog/v1/products",
             Self::get(),
-            self.port()
+            port
         );
         println!(
             " {} http://localhost:{}/catalog/v1/billing/meters",
             Self::post(),
-            self.port()
+            port
         );
         println!(" {}", style(" ...").dim());
 
@@ -195,10 +210,29 @@ pub trait ServiceCommand {
     }
 
     async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
+        let env_name = self.environment_name();
+        let port = self.port(&ctx.manifest);
+        let is_sandbox = self.is_sandbox(&ctx.manifest);
+
+        // Get environment config, using default sandbox if "sandbox" is not explicitly configured
+        let environment = ctx
+            .manifest
+            .get_environment(env_name)
+            .cloned()
+            .or_else(|| {
+                // For sandbox, use default if not explicitly configured
+                if env_name == "sandbox" {
+                    Some(EnvironmentConfig::default())
+                } else {
+                    None
+                }
+            })
+            .ok_or_else(|| RunCommandError::EnvironmentNotFound(env_name.to_string()))?;
+
         // If we're using the default manifest, there are no products/meters configured,
         // so the associated warnings are noisy and not helpful. Skip loading catalog in that case.
         let (products, meters) = if !ctx.is_default_manifest {
-            self.load_catalog(ctx)?
+            self.load_catalog(ctx, port)?
         } else {
             (Vec::new(), Vec::new())
         };
@@ -206,13 +240,13 @@ pub trait ServiceCommand {
         // Initialize tracing
         tracing_subscriber::fmt::init();
 
-        let billing_networks = self.billing_networks(&ctx.manifest)?;
+        let payment_networks = self.payment_networks(&ctx.manifest)?;
 
-        let networks_config = self.networks_config(billing_networks)?;
+        let networks_config = self.networks_config(&ctx.manifest, payment_networks)?;
 
-        // Build facilitator config once for sandbox mode
-        let (_facilitator_url, facilitator_pubkey, validator_rpc_urls, facilitator_state) = self
-            .setup_facilitator(&ctx.manifest.payments, &networks_config)
+        // Setup payment API
+        let (_payment_api_url, facilitator_pubkey, validator_rpc_urls, payment_api_state) = self
+            .setup_payment_api(&ctx.manifest.payments, &environment, &networks_config, port)
             .await?;
 
         println!();
@@ -221,14 +255,10 @@ pub trait ServiceCommand {
             style("Money").white(),
             style("MQ").green(),
             style("Studio:").white(),
-            style(format!("http://localhost:{}", self.port())).cyan(),
+            style(format!("http://localhost:{}", port)).cyan(),
             style("Press Ctrl+C to stop").dim()
         );
         println!();
-
-        // let Some((_facilitator_handle, local_validator_ctx, facilitator_url)) = handles else {
-        //     panic!("Facilitator must be started in sandbox mode");
-        // };
 
         // Get the first catalog name and description (for branding assets)
         let (catalog_name, catalog_description, catalog_path) = ctx
@@ -246,15 +276,14 @@ pub trait ServiceCommand {
             .unwrap_or((None, None, ctx.manifest_path.clone()));
 
         // Create the catalog provider state
-        // Use the consolidated API URL for the facilitator (same port, /payment/v1/ path)
-        let consolidated_facilitator_url = format!("http://localhost:{}/payment/v1/", self.port())
+        let payment_api_url = format!("http://localhost:{}/payment/v1/", port)
             .parse::<url::Url>()
-            .expect("Failed to parse consolidated facilitator URL");
+            .expect("Failed to parse payment API URL");
         let catalog_state = moneymq_core::api::catalog::ProviderState::new(
             products,
             meters,
-            Self::SANDBOX,
-            consolidated_facilitator_url,
+            is_sandbox,
+            payment_api_url,
             networks_config,
             catalog_path,
             catalog_name,
@@ -263,10 +292,16 @@ pub trait ServiceCommand {
             validator_rpc_urls,
             None, // kora_config
             None, // signer_pool
+            ctx.manifest_path.clone(),
         );
 
+        // Create IAC router for manifest management endpoints
+        let manifest_file = ctx.manifest_path.join("moneymq.yaml");
+        let iac_state = crate::iac::IacState::new(manifest_file);
+        let iac_router = crate::iac::create_router(iac_state);
+
         // Start the combined server with both catalog and payment APIs
-        moneymq_core::api::start_server(catalog_state, facilitator_state, self.port())
+        moneymq_core::api::start_server(catalog_state, payment_api_state, Some(iac_router), port)
             .await
             .map_err(RunCommandError::ProviderStartError)?;
 

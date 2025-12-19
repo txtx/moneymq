@@ -1,7 +1,7 @@
--- Remove facilitator context columns
+-- Remove payment stack context columns
 -- Note: SQLite doesn't support DROP COLUMN directly, so we need to recreate the table
 
-DROP INDEX IF EXISTS idx_facilitated_transactions_facilitator;
+DROP INDEX IF EXISTS idx_facilitated_transactions_payment_stack;
 
 -- SQLite workaround: create new table without the columns, copy data, drop old, rename
 CREATE TABLE facilitated_transactions_new (

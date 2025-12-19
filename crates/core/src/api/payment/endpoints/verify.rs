@@ -31,8 +31,8 @@ pub async fn handler(
     };
 
     debug!(
-        "Verify endpoint: FacilitatorState loaded, facilitator_id={}",
-        state.facilitator_id
+        "Verify endpoint: FacilitatorState loaded, payment_stack_id={}",
+        state.payment_stack_id
     );
 
     debug!(
@@ -120,7 +120,7 @@ pub async fn handler(
         payment_requirement_base64,
         verify_request_base64,
         verify_response_base64,
-        &state.facilitator_id,
+        &state.payment_stack_id,
         state.is_sandbox,
     ) {
         Ok(_) => {

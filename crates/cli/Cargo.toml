@@ -15,6 +15,8 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0"
+axum = { workspace = true }
+base64 = "0.22"
 clap = { version = "4.5.51", features = ["derive", "cargo", "env"] }
 clap_complete = { version = "4.5.60" }
 console = "0.16"
@@ -25,13 +27,17 @@ dotenvy = "0.15"
 indexmap = { version = "2.12.0", features = ["serde"] }
 indicatif = "0.18.2"
 json5 = "0.4"
+jsonwebtoken = "9.3"
 moneymq-core = { path = "../core" }
 moneymq-mcp = { path = "../mcp" }
-moneymq-types = { path = "../types" }
+moneymq-types = { path = "../types", features = ["schemars"] }
+open = "5.3"
 pretty_yaml = "0.5.1"
 reqwest = { version = "0.12.24", features = ["json"] }
+schemars = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+serde_urlencoded = "0.7"
 serde_yml = "0.0.12"
 sha2 = "0.10"
 solana-keypair = { workspace = true }

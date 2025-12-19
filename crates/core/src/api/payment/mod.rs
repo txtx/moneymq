@@ -39,7 +39,7 @@ pub struct FacilitatorState {
     pub db_manager: Arc<db::DbManager>,
     pub kora_config: Arc<Config>,
     pub signer_pool: Arc<SignerPool>,
-    pub facilitator_id: String,
+    pub payment_stack_id: String,
     pub is_sandbox: bool,
 }
 
@@ -50,8 +50,8 @@ impl FacilitatorState {
         kora_config: Config,
         signer_pool: SignerPool,
     ) -> Self {
-        // Extract facilitator_id from the URL's subdomain
-        let facilitator_id = config
+        // Extract payment_stack_id from the URL's subdomain
+        let payment_stack_id = config
             .url
             .host_str()
             .and_then(|host| host.split('.').next())
@@ -63,7 +63,7 @@ impl FacilitatorState {
             db_manager: Arc::new(DbManager::local(database_url).unwrap()),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
-            facilitator_id,
+            payment_stack_id,
             is_sandbox: true, // Local mode defaults to sandbox
         }
     }
@@ -73,7 +73,7 @@ impl FacilitatorState {
         db_manager: db::DbManager,
         kora_config: Config,
         signer_pool: SignerPool,
-        facilitator_id: String,
+        payment_stack_id: String,
         is_sandbox: bool,
     ) -> Self {
         Self {
@@ -81,7 +81,7 @@ impl FacilitatorState {
             db_manager: Arc::new(db_manager),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
-            facilitator_id,
+            payment_stack_id,
             is_sandbox,
         }
     }

@@ -360,7 +360,7 @@ fn display_diff(local: &Product, remote: &Product) {
             (
                 p.currency.as_str(),
                 p.unit_amount,
-                p.recurring_interval.as_deref(),
+                p.recurring_interval.as_ref().map(|i| i.as_str()),
                 p.recurring_interval_count,
                 p.pricing_type.as_str(),
             )
@@ -374,7 +374,7 @@ fn display_diff(local: &Product, remote: &Product) {
             (
                 p.currency.as_str(),
                 p.unit_amount,
-                p.recurring_interval.as_deref(),
+                p.recurring_interval.as_ref().map(|i| i.as_str()),
                 p.recurring_interval_count,
                 p.pricing_type.as_str(),
             )
@@ -404,15 +404,15 @@ fn display_diff(local: &Product, remote: &Product) {
                     &remote_price.recurring_interval,
                     remote_price.recurring_interval_count,
                 ) {
-                    (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i),
-                    (Some(i), _) => format!("per {}", i),
+                    (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i.as_str()),
+                    (Some(i), _) => format!("per {}", i.as_str()),
                     _ => "one-time".to_string(),
                 };
                 println!(
                     "    {} {} {} ({})",
                     style("-").red().bold(),
                     style(&amount).red(),
-                    style(&remote_price.currency.to_uppercase()).red(),
+                    style(&remote_price.currency.as_str().to_uppercase()).red(),
                     style(interval).red().dim()
                 );
             }
@@ -437,15 +437,15 @@ fn display_diff(local: &Product, remote: &Product) {
                     &local_price.recurring_interval,
                     local_price.recurring_interval_count,
                 ) {
-                    (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i),
-                    (Some(i), _) => format!("per {}", i),
+                    (Some(i), Some(c)) if c > 1 => format!("every {} {}s", c, i.as_str()),
+                    (Some(i), _) => format!("per {}", i.as_str()),
                     _ => "one-time".to_string(),
                 };
                 println!(
                     "    {} {} {} ({})",
                     style("+").green().bold(),
                     style(&amount).green(),
-                    style(&local_price.currency.to_uppercase()).green(),
+                    style(&local_price.currency.as_str().to_uppercase()).green(),
                     style(interval).green().dim()
                 );
             }
@@ -471,7 +471,7 @@ fn display_diff(local: &Product, remote: &Product) {
                         "    {} {} {} (modified attributes)",
                         style("~").yellow().bold(),
                         style(&amount).yellow(),
-                        style(&local_price.currency.to_uppercase()).yellow()
+                        style(&local_price.currency.as_str().to_uppercase()).yellow()
                     );
 
                     if local_price.active != remote_price.active {

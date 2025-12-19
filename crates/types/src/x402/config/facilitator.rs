@@ -9,7 +9,7 @@ use url::Url;
 
 use crate::x402::{
     Network, SupportedPaymentKindExtra,
-    config::constants::{DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT, DEFAULT_WS_PORT},
+    config::constants::{DEFAULT_BINDING_ADDRESS, DEFAULT_SOLANA_RPC_PORT, DEFAULT_SOLANA_WS_PORT},
 };
 
 #[derive(Debug)]
@@ -72,9 +72,12 @@ pub struct SolanaSurfnetFacilitatorConfig {
 impl Default for SolanaSurfnetFacilitatorConfig {
     fn default() -> Self {
         Self {
-            rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
-                .parse::<Url>()
-                .expect("Failed to parse default RPC URL"),
+            rpc_url: format!(
+                "http://{}:{}",
+                DEFAULT_BINDING_ADDRESS, DEFAULT_SOLANA_RPC_PORT
+            )
+            .parse::<Url>()
+            .expect("Failed to parse default RPC URL"),
             payer_pubkey: None,
         }
     }
@@ -99,12 +102,15 @@ pub struct SurfnetRpcConfig {
 impl Default for SurfnetRpcConfig {
     fn default() -> Self {
         Self {
-            rpc_url: format!("http://{}:{}", DEFAULT_BINDING_ADDRESS, DEFAULT_RPC_PORT)
-                .parse::<Url>()
-                .expect("Failed to parse default RPC URL"),
+            rpc_url: format!(
+                "http://{}:{}",
+                DEFAULT_BINDING_ADDRESS, DEFAULT_SOLANA_RPC_PORT
+            )
+            .parse::<Url>()
+            .expect("Failed to parse default RPC URL"),
             bind_host: Some(DEFAULT_BINDING_ADDRESS.into()),
-            rpc_port: Some(DEFAULT_RPC_PORT),
-            ws_port: Some(DEFAULT_WS_PORT),
+            rpc_port: Some(DEFAULT_SOLANA_RPC_PORT),
+            ws_port: Some(DEFAULT_SOLANA_WS_PORT),
         }
     }
 }

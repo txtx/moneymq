@@ -1,6 +1,9 @@
 use anyhow::Result;
 use indexmap::IndexMap;
-use moneymq_types::Price as MoneymqPrice;
+use moneymq_types::{
+    Price as MoneymqPrice,
+    iac::{Currency as MoneymqCurrency, PricingType, RecurringInterval},
+};
 use stripe::{
     Client, CreatePrice, CreatePriceRecurring, CreatePriceRecurringInterval, Currency, ListPrices,
     Price as StripePrice, PriceId, ProductId,
@@ -10,6 +13,25 @@ use super::{
     super::utils::timestamp_to_datetime,
     common::{generate_base58_id, metadata_to_sorted_indexmap},
 };
+
+/// Convert Stripe interval to MoneyMQ RecurringInterval
+fn stripe_interval_to_moneymq(interval: stripe::RecurringInterval) -> RecurringInterval {
+    match interval {
+        stripe::RecurringInterval::Day => RecurringInterval::Day,
+        stripe::RecurringInterval::Week => RecurringInterval::Week,
+        stripe::RecurringInterval::Month => RecurringInterval::Month,
+        stripe::RecurringInterval::Year => RecurringInterval::Year,
+    }
+}
+
+/// Convert Stripe currency string to MoneyMQ Currency
+fn stripe_currency_to_moneymq(currency_str: &str) -> MoneymqCurrency {
+    match currency_str.to_lowercase().as_str() {
+        "eur" => MoneymqCurrency::Eur,
+        "gbp" => MoneymqCurrency::Gbp,
+        _ => MoneymqCurrency::Usd, // Default to USD
+    }
+}
 
 /// Convert Stripe Price to MoneyMQ Price
 pub fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqPrice {
@@ -21,13 +43,16 @@ pub fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqP
     let (pricing_type, recurring_interval, recurring_interval_count) =
         if let Some(recurring) = stripe_price.recurring {
             (
-                "recurring".to_string(),
-                Some(format!("{:?}", recurring.interval).to_lowercase()),
+                PricingType::Recurring,
+                Some(stripe_interval_to_moneymq(recurring.interval)),
                 Some(recurring.interval_count as i64),
             )
         } else {
-            ("one_time".to_string(), None, None)
+            (PricingType::OneTime, None, None)
         };
+
+    let currency =
+        stripe_currency_to_moneymq(&stripe_price.currency.unwrap_or_default().to_string());
 
     let (deployed_id, sandboxes) = if is_production {
         (Some(stripe_id), IndexMap::new())
@@ -43,7 +68,7 @@ pub fn convert_price(stripe_price: StripePrice, is_production: bool) -> MoneymqP
         deployed_id,
         sandboxes,
         active: stripe_price.active.unwrap_or(true),
-        currency: stripe_price.currency.unwrap_or_default().to_string(),
+        currency,
         unit_amount: stripe_price.unit_amount,
         pricing_type,
         recurring_interval,
@@ -94,6 +119,25 @@ pub async fn fetch_product_prices(
     Ok(product_prices)
 }
 
+/// Convert MoneyMQ Currency to Stripe Currency
+fn moneymq_currency_to_stripe(currency: MoneymqCurrency) -> Currency {
+    match currency {
+        MoneymqCurrency::Usd => Currency::USD,
+        MoneymqCurrency::Eur => Currency::EUR,
+        MoneymqCurrency::Gbp => Currency::GBP,
+    }
+}
+
+/// Convert MoneyMQ RecurringInterval to Stripe CreatePriceRecurringInterval
+fn moneymq_interval_to_stripe(interval: &RecurringInterval) -> CreatePriceRecurringInterval {
+    match interval {
+        RecurringInterval::Day => CreatePriceRecurringInterval::Day,
+        RecurringInterval::Week => CreatePriceRecurringInterval::Week,
+        RecurringInterval::Month => CreatePriceRecurringInterval::Month,
+        RecurringInterval::Year => CreatePriceRecurringInterval::Year,
+    }
+}
+
 /// Create a price in Stripe
 ///
 /// # Arguments
@@ -110,15 +154,11 @@ pub async fn create_price(
 ) -> Result<String> {
     let client = Client::new(api_key);
 
-    let mut params = CreatePrice::new(Currency::USD);
+    let stripe_currency = moneymq_currency_to_stripe(local_price.currency);
+    let mut params = CreatePrice::new(stripe_currency);
 
     // Set the product this price belongs to
     params.product = Some(stripe::IdOrCreate::Id(product_id));
-
-    // Set currency
-    if let Ok(currency) = local_price.currency.to_uppercase().parse::<Currency>() {
-        params.currency = currency;
-    }
 
     // Set unit amount
     if let Some(amount) = local_price.unit_amount {
@@ -126,17 +166,11 @@ pub async fn create_price(
     }
 
     // Set recurring interval if this is a recurring price
-    if let Some(interval_str) = &local_price.recurring_interval {
-        let interval = match interval_str.as_str() {
-            "day" => CreatePriceRecurringInterval::Day,
-            "week" => CreatePriceRecurringInterval::Week,
-            "month" => CreatePriceRecurringInterval::Month,
-            "year" => CreatePriceRecurringInterval::Year,
-            _ => CreatePriceRecurringInterval::Month, // default to month
-        };
+    if let Some(interval) = &local_price.recurring_interval {
+        let stripe_interval = moneymq_interval_to_stripe(interval);
 
         let mut recurring = CreatePriceRecurring {
-            interval,
+            interval: stripe_interval,
             aggregate_usage: None,
             interval_count: None,
             trial_period_days: None,

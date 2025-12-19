@@ -8,13 +8,12 @@ pub mod products;
 pub mod subscriptions;
 
 // Re-export common catalog types from moneymq-types
-pub use moneymq_types::stripe::{
-    ListParams, ListResponse, StripeBillingMeter, StripePrice, StripeProduct, StripeRecurring,
-};
-
 // Re-export types specific to moneymq-core (not in moneymq-types)
 pub use billing::StripeMeterEvent;
 pub use customers::{CreateCustomerRequest, StripeCustomer};
+pub use moneymq_types::stripe::{
+    ListParams, ListResponse, StripeBillingMeter, StripePrice, StripeProduct, StripeRecurring,
+};
 pub use payment_intents::{
     ConfirmPaymentIntentRequest, CreatePaymentIntentRequest, PaymentIntentStatus,
     StripePaymentIntent,

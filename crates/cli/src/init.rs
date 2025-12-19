@@ -222,7 +222,8 @@ impl InitCommand {
                     // Create manifest with catalog configuration
                     let mut manifest = crate::manifest::Manifest {
                         catalogs: IndexMap::new(),
-                        payments: IndexMap::new(), // Empty - will trigger footer in save()
+                        payments: crate::manifest::PaymentsConfig::default(),
+                        environments: crate::manifest::environments::default_environments(),
                     };
 
                     // Build catalog config
