@@ -470,7 +470,8 @@ pub async fn get_iac(State(state): State<IacState>) -> impl IntoResponse {
                         .and_then(|v| v.as_str())
                         .unwrap_or("billing/v1");
 
-                    // Load products from {catalog_path}/products/*.yaml
+                    // Load products from {catalog_path}/products/
+                    // Supports both legacy flat files (*.yaml) and variant-based directories
                     let products_dir = manifest_dir.join(catalog_path).join("products");
                     if products_dir.exists() {
                         if let Ok(entries) = std::fs::read_dir(&products_dir) {
@@ -478,9 +479,188 @@ pub async fn get_iac(State(state): State<IacState>) -> impl IntoResponse {
 
                             for entry in entries.flatten() {
                                 let path = entry.path();
-                                if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+
+                                if path.is_dir() {
+                                    // Check for variant-based product directory (product.yaml + variants/)
+                                    let product_yaml = path.join("product.yaml");
+                                    if product_yaml.exists() {
+                                        if let Ok(base_content) =
+                                            std::fs::read_to_string(&product_yaml)
+                                        {
+                                            // Parse base product.yaml
+                                            if let Ok(base_yaml) =
+                                                serde_yml::from_str::<serde_yml::Value>(
+                                                    &base_content,
+                                                )
+                                            {
+                                                if let Ok(mut base_json) =
+                                                    serde_json::to_value(&base_yaml)
+                                                {
+                                                    // Add _source_file and _product_dir for the base
+                                                    if let Some(obj) = base_json.as_object_mut() {
+                                                        if let Some(dir_name) = path.file_name() {
+                                                            let dir_name_str = dir_name
+                                                                .to_string_lossy()
+                                                                .to_string();
+                                                            // Set ID for base product (used for grouping in UI)
+                                                            obj.insert(
+                                                                "id".to_string(),
+                                                                serde_json::Value::String(format!(
+                                                                    "{}/product",
+                                                                    dir_name_str
+                                                                )),
+                                                            );
+                                                            // Set name for base product if not present
+                                                            // (base products typically don't have names)
+                                                            if !obj.contains_key("name") {
+                                                                // Capitalize first letter of dir name
+                                                                let name = dir_name_str
+                                                                    .chars()
+                                                                    .next()
+                                                                    .map(|c| {
+                                                                        c.to_uppercase().to_string()
+                                                                    })
+                                                                    .unwrap_or_default()
+                                                                    + &dir_name_str[1..];
+                                                                obj.insert(
+                                                                    "name".to_string(),
+                                                                    serde_json::Value::String(name),
+                                                                );
+                                                            }
+                                                            obj.insert(
+                                                                "_source_file".to_string(),
+                                                                serde_json::Value::String(format!(
+                                                                    "{}/product",
+                                                                    dir_name_str
+                                                                )),
+                                                            );
+                                                            obj.insert(
+                                                                "_product_dir".to_string(),
+                                                                serde_json::Value::String(
+                                                                    dir_name_str,
+                                                                ),
+                                                            );
+                                                        }
+                                                    }
+                                                    products.push(base_json);
+                                                }
+                                            }
+                                        }
+
+                                        // Also load variants
+                                        let variants_dir = path.join("variants");
+                                        if variants_dir.exists() {
+                                            if let Ok(variant_entries) =
+                                                std::fs::read_dir(&variants_dir)
+                                            {
+                                                for variant_entry in variant_entries.flatten() {
+                                                    let variant_path = variant_entry.path();
+
+                                                    // Determine variant name and yaml path based on layout:
+                                                    // Old: variants/{variant}.yaml (file)
+                                                    // New: variants/{variant}/product.yaml (directory)
+                                                    let (variant_name, yaml_path) =
+                                                        if variant_path.is_dir() {
+                                                            // New layout: variants/{variant}/product.yaml
+                                                            let yaml_file =
+                                                                variant_path.join("product.yaml");
+                                                            if !yaml_file.exists() {
+                                                                continue;
+                                                            }
+                                                            let name = variant_path
+                                                                .file_name()
+                                                                .and_then(|n| n.to_str())
+                                                                .unwrap_or("unknown")
+                                                                .to_string();
+                                                            (name, yaml_file)
+                                                        } else if variant_path
+                                                            .extension()
+                                                            .and_then(|s| s.to_str())
+                                                            == Some("yaml")
+                                                        {
+                                                            // Old layout: variants/{variant}.yaml
+                                                            let name = variant_path
+                                                                .file_stem()
+                                                                .and_then(|n| n.to_str())
+                                                                .unwrap_or("unknown")
+                                                                .to_string();
+                                                            (name, variant_path.clone())
+                                                        } else {
+                                                            continue;
+                                                        };
+
+                                                    if let Ok(content) =
+                                                        std::fs::read_to_string(&yaml_path)
+                                                    {
+                                                        if let Ok(variant_yaml) =
+                                                            serde_yml::from_str::<serde_yml::Value>(
+                                                                &content,
+                                                            )
+                                                        {
+                                                            if let Ok(mut variant_json) =
+                                                                serde_json::to_value(&variant_yaml)
+                                                            {
+                                                                if let Some(obj) =
+                                                                    variant_json.as_object_mut()
+                                                                {
+                                                                    if let Some(dir_name) =
+                                                                        path.file_name()
+                                                                    {
+                                                                        let dir_name_str = dir_name
+                                                                            .to_string_lossy()
+                                                                            .to_string();
+                                                                        // Set ID for variant (matches loader format)
+                                                                        // Only set if not already present in YAML
+                                                                        if !obj.contains_key("id") {
+                                                                            obj.insert(
+                                                                                "id".to_string(),
+                                                                                serde_json::Value::String(
+                                                                                    format!(
+                                                                                        "{}-{}",
+                                                                                        dir_name_str,
+                                                                                        variant_name
+                                                                                    ),
+                                                                                ),
+                                                                            );
+                                                                        }
+                                                                        obj.insert(
+                                                                            "_source_file"
+                                                                                .to_string(),
+                                                                            serde_json::Value::String(
+                                                                                format!(
+                                                                                    "{}/variants/{}/product",
+                                                                                    dir_name_str,
+                                                                                    variant_name
+                                                                                ),
+                                                                            ),
+                                                                        );
+                                                                        obj.insert(
+                                                                            "_product_dir"
+                                                                                .to_string(),
+                                                                            serde_json::Value::String(
+                                                                                dir_name_str,
+                                                                            ),
+                                                                        );
+                                                                        obj.insert(
+                                                                            "_variant".to_string(),
+                                                                            serde_json::Value::String(
+                                                                                variant_name.clone(),
+                                                                            ),
+                                                                        );
+                                                                    }
+                                                                }
+                                                                products.push(variant_json);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if path.extension().and_then(|s| s.to_str()) == Some("yaml")
+                                {
+                                    // Legacy flat file format
                                     if let Ok(content) = std::fs::read_to_string(&path) {
-                                        // Parse as generic YAML then convert to JSON
                                         if let Ok(product_yaml) =
                                             serde_yml::from_str::<serde_yml::Value>(&content)
                                         {
@@ -619,6 +799,24 @@ pub async fn put_iac(
             let filename = product._source_file.as_ref().unwrap_or(&product.id).clone();
             let product_file = products_dir.join(format!("{}.yaml", filename));
 
+            // Ensure parent directory exists (for nested variant paths like surfnet/variants/light/product.yaml)
+            if let Some(parent) = product_file.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(IacResponse {
+                            success: false,
+                            message: format!(
+                                "Failed to create directory for product '{}': {}",
+                                product.id, e
+                            ),
+                            config: None,
+                            diagnostics: None,
+                        }),
+                    );
+                }
+            }
+
             // Merge with existing file content if it exists
             let yaml_content = if product_file.exists() {
                 match std::fs::read_to_string(&product_file) {
@@ -756,7 +954,7 @@ mod tests {
             "payments": {
                 "networks": {
                     "chain": "Solana",
-                    "stablecoins": ["USDC", "USDT"]
+                    "stablecoins": ["USDC"]
                 }
             },
             "environments": {
@@ -863,7 +1061,6 @@ mod tests {
         // Verify enum values are present
         assert!(json.contains("\"Solana\""));
         assert!(json.contains("\"USDC\""));
-        assert!(json.contains("\"USDT\""));
         assert!(json.contains("\"Sandbox\""));
         assert!(json.contains("\"SelfHosted\""));
         assert!(json.contains("\"CloudHosted\""));
@@ -1056,6 +1253,8 @@ network:
             metadata: None,
             prices: None,
             _source_file: None,
+            _product_dir: None,
+            _variant: None,
         };
 
         let yaml = serde_yml::to_string(&product).unwrap();
@@ -1158,6 +1357,8 @@ network:
                     metadata: None,
                 })]),
                 _source_file: None,
+                _product_dir: None,
+                _variant: None,
             }]),
             meters: None,
         };

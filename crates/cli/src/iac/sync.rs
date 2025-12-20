@@ -719,76 +719,109 @@ pub fn merge_product_update(existing_content: &str, update: &ProductSchema) -> S
         };
     };
 
-    // Helper to update a field in place (preserving order) or insert at end
+    // Helper to update a field in place or insert at end
+    // Uses shift_remove + insert to avoid duplicate key issues
     fn update_field(map: &mut serde_yml::Mapping, key: &str, value: serde_yml::Value) {
         let key_val = serde_yml::Value::String(key.to_string());
-        if let Some(existing_val) = map.get_mut(&key_val) {
-            *existing_val = value;
-        } else {
-            map.insert(key_val, value);
-        }
+        // Remove existing key first to avoid duplicates, then insert
+        map.shift_remove(&key_val);
+        map.insert(key_val, value);
     }
 
-    // Update fields from the incoming product (only those that are provided)
-    update_field(
-        existing_map,
-        "id",
-        serde_yml::Value::String(update.id.clone()),
-    );
+    // Helper to remove a field entirely
+    fn remove_field(map: &mut serde_yml::Mapping, key: &str) {
+        let key_val = serde_yml::Value::String(key.to_string());
+        map.shift_remove(&key_val);
+    }
+
+    // Update name (required field)
     update_field(
         existing_map,
         "name",
         serde_yml::Value::String(update.name.clone()),
     );
 
-    // Optional fields - only update if provided
-    if let Some(desc) = &update.description {
-        update_field(
-            existing_map,
-            "description",
-            serde_yml::Value::String(desc.clone()),
-        );
+    // Note: We do NOT write 'id' to the file - it's computed from the file path
+
+    // Optional fields - empty/null values remove the field from YAML
+    match &update.description {
+        Some(desc) if !desc.is_empty() => {
+            update_field(
+                existing_map,
+                "description",
+                serde_yml::Value::String(desc.clone()),
+            );
+        }
+        Some(_) => {
+            // Empty string means remove the field
+            remove_field(existing_map, "description");
+        }
+        None => {
+            // None means don't touch the field (leave as-is)
+        }
     }
 
     if let Some(active) = update.active {
         update_field(existing_map, "active", serde_yml::Value::Bool(active));
     }
 
-    if let Some(product_type) = &update.product_type {
-        update_field(
-            existing_map,
-            "product_type",
-            serde_yml::Value::String(product_type.clone()),
-        );
-    }
-
-    if let Some(unit_label) = &update.unit_label {
-        update_field(
-            existing_map,
-            "unit_label",
-            serde_yml::Value::String(unit_label.clone()),
-        );
-    }
-
-    if let Some(statement_descriptor) = &update.statement_descriptor {
-        update_field(
-            existing_map,
-            "statement_descriptor",
-            serde_yml::Value::String(statement_descriptor.clone()),
-        );
-    }
-
-    if let Some(images) = &update.images {
-        if let Ok(images_value) = serde_yml::to_value(images) {
-            update_field(existing_map, "images", images_value);
+    // Optional string fields - empty means remove
+    match &update.product_type {
+        Some(v) if !v.is_empty() => {
+            update_field(
+                existing_map,
+                "product_type",
+                serde_yml::Value::String(v.clone()),
+            );
         }
+        Some(_) => remove_field(existing_map, "product_type"),
+        None => {}
     }
 
-    // Update metadata - replace with new if present
-    if let Some(metadata) = &update.metadata {
-        if let Ok(metadata_value) = serde_yml::to_value(metadata) {
-            update_field(existing_map, "metadata", metadata_value);
+    match &update.unit_label {
+        Some(v) if !v.is_empty() => {
+            update_field(
+                existing_map,
+                "unit_label",
+                serde_yml::Value::String(v.clone()),
+            );
         }
+        Some(_) => remove_field(existing_map, "unit_label"),
+        None => {}
+    }
+
+    match &update.statement_descriptor {
+        Some(v) if !v.is_empty() => {
+            update_field(
+                existing_map,
+                "statement_descriptor",
+                serde_yml::Value::String(v.clone()),
+            );
+        }
+        Some(_) => remove_field(existing_map, "statement_descriptor"),
+        None => {}
+    }
+
+    // Images - empty array means remove
+    match &update.images {
+        Some(imgs) if !imgs.is_empty() => {
+            if let Ok(images_value) = serde_yml::to_value(imgs) {
+                update_field(existing_map, "images", images_value);
+            }
+        }
+        Some(_) => remove_field(existing_map, "images"),
+        None => {}
+    }
+
+    // Metadata - empty map means remove
+    match &update.metadata {
+        Some(meta) if !meta.is_empty() => {
+            if let Ok(metadata_value) = serde_yml::to_value(meta) {
+                update_field(existing_map, "metadata", metadata_value);
+            }
+        }
+        Some(_) => remove_field(existing_map, "metadata"),
+        None => {}
     }
 
     // Update prices - replace array but preserve extra fields from matching prices
@@ -876,16 +909,22 @@ pub fn merge_product_update(existing_content: &str, update: &ProductSchema) -> S
             }
         }
 
-        // Replace prices array with the new one
-        update_field(
-            existing_map,
-            "prices",
-            serde_yml::Value::Sequence(new_prices),
-        );
+        // Only write prices if there are any (don't write empty array)
+        if !new_prices.is_empty() {
+            update_field(
+                existing_map,
+                "prices",
+                serde_yml::Value::Sequence(new_prices),
+            );
+        }
     }
 
-    // Remove _source_file if present (it's only used for tracking)
+    // Remove internal fields that should not be persisted to YAML
+    // These are computed at runtime from file paths
+    existing_map.remove(&serde_yml::Value::String("id".to_string()));
     existing_map.remove(&serde_yml::Value::String("_source_file".to_string()));
+    existing_map.remove(&serde_yml::Value::String("_product_dir".to_string()));
+    existing_map.remove(&serde_yml::Value::String("_variant".to_string()));
 
     // Generate the final YAML
     match crate::yaml_util::to_pretty_yaml_with_header(&existing, Some("Product"), Some("v1")) {
@@ -921,6 +960,8 @@ mod product_tests {
             metadata: None,
             prices: None,
             _source_file: None,
+            _product_dir: None,
+            _variant: None,
         }
     }
 
@@ -1058,18 +1099,83 @@ prices:
     }
 
     #[test]
-    fn test_merge_removes_source_file() {
+    fn test_merge_removes_internal_fields() {
+        // Internal fields (id, _source_file, _product_dir, _variant) should never be written to YAML
+        // These are computed at runtime from file paths
         let existing = r#"---
 id: prod_123
 name: Test Product
 _source_file: surfboard
+_product_dir: surfnet
+_variant: light
 "#;
         let update = make_product("prod_123", "Updated Name");
 
         let result = merge_product_update(existing, &update);
 
         assert!(result.changed);
-        assert!(!result.content.contains("_source_file"));
+        // All internal fields should be removed
+        assert!(
+            !result.content.contains("_source_file"),
+            "_source_file should not be in output"
+        );
+        assert!(
+            !result.content.contains("_product_dir"),
+            "_product_dir should not be in output"
+        );
+        assert!(
+            !result.content.contains("_variant"),
+            "_variant should not be in output"
+        );
+        // id is computed from file path, not stored
+        assert!(
+            !result.content.contains("\nid:"),
+            "id should not be in output"
+        );
+    }
+
+    #[test]
+    fn test_merge_does_not_write_empty_prices() {
+        // When prices is empty, don't write "prices: []" to the file
+        let existing = r#"---
+name: Base Product
+product_type: service
+"#;
+        let mut update = make_product("prod_123", "Base Product");
+        update.prices = Some(vec![]); // Empty prices
+
+        let result = merge_product_update(existing, &update);
+
+        assert!(result.changed);
+        // Should not write empty prices array
+        assert!(
+            !result.content.contains("prices:"),
+            "empty prices should not be written"
+        );
+    }
+
+    #[test]
+    fn test_merge_empty_description_removes_field() {
+        // When description is set to empty string, the field should be removed from YAML
+        let existing = r#"---
+name: Test Product
+description: This is a description
+product_type: service
+"#;
+        let mut update = make_product("prod_123", "Test Product");
+        update.description = Some("".to_string()); // Empty description
+
+        let result = merge_product_update(existing, &update);
+
+        assert!(result.changed);
+        // Description field should be removed entirely
+        assert!(
+            !result.content.contains("description:"),
+            "empty description should remove the field"
+        );
+        // Other fields should still be present
+        assert!(result.content.contains("name: Test Product"));
+        assert!(result.content.contains("product_type: service"));
     }
 
     #[test]
@@ -1167,7 +1273,6 @@ prices:
     #[test]
     fn test_merge_preserves_product_field_order() {
         let existing = r#"---
-id: prod_123
 deployed_id: prod_stripe_abc
 name: Test Product
 description: Original description
@@ -1182,11 +1287,19 @@ product_type: service
         let result = merge_product_update(existing, &update);
 
         assert!(result.changed);
-        // Verify field order: id should come before name, name before description
-        let id_pos = result.content.find("id: prod_123").unwrap();
+        // Verify id is NOT written to file (it's computed from file path)
+        assert!(
+            !result.content.contains("\nid:"),
+            "id should not be written to file"
+        );
+        // Verify field order: deployed_id should come before name, name before description
+        let deployed_pos = result.content.find("deployed_id: prod_stripe_abc").unwrap();
         let name_pos = result.content.find("name: Updated Name").unwrap();
         let desc_pos = result.content.find("description: New description").unwrap();
-        assert!(id_pos < name_pos, "id should come before name");
+        assert!(
+            deployed_pos < name_pos,
+            "deployed_id should come before name"
+        );
         assert!(name_pos < desc_pos, "name should come before description");
     }
 

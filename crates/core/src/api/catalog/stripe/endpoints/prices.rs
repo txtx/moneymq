@@ -38,6 +38,14 @@ pub async fn list_prices(
         }
     }
 
+    // Sort by unit_amount ascending (prices without amount go last)
+    all_prices.sort_by(|(a, _), (b, _)| match (a.unit_amount, b.unit_amount) {
+        (Some(a_amt), Some(b_amt)) => a_amt.cmp(&b_amt),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+
     // Find starting position
     let start_idx = if let Some(starting_after) = params.starting_after {
         all_prices

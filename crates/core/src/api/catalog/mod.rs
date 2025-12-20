@@ -15,10 +15,13 @@ use moneymq_types::{
     Meter, Product,
     x402::{config::facilitator::ValidatorsConfig, transactions::FacilitatedTransaction},
 };
-use stripe::types::StripePaymentIntent;
+use stripe::types::{StripeCheckoutSession, StripePaymentIntent};
 use url::Url;
 
-use crate::api::{payment::endpoints::middleware::x402_post, sandbox::NetworksConfig};
+use crate::api::{
+    payment::endpoints::middleware::{x402_get, x402_post},
+    sandbox::NetworksConfig,
+};
 
 pub mod config;
 pub mod db;
@@ -39,6 +42,7 @@ pub struct ProviderState {
     pub validators: ValidatorsConfig,
     pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
     pub payment_intents: Arc<Mutex<HashMap<String, StripePaymentIntent>>>,
+    pub checkout_sessions: Arc<Mutex<HashMap<String, StripeCheckoutSession>>>,
     pub kora_config: Option<Arc<kora_lib::Config>>,
     pub signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
     pub manifest_path: PathBuf,
@@ -81,6 +85,7 @@ impl ProviderState {
             validators: validators_config,
             transactions: Arc::new(Mutex::new(Vec::new())),
             payment_intents: Arc::new(Mutex::new(HashMap::new())),
+            checkout_sessions: Arc::new(Mutex::new(HashMap::new())),
             kora_config,
             signer_pool,
             manifest_path,
@@ -93,6 +98,10 @@ pub fn create_router(state: ProviderState) -> Router<()> {
     Router::new()
         // Product endpoints
         .route("/products", get(stripe::list_products))
+        .route(
+            "/products/{id}/access",
+            x402_get(stripe::get_product_access, Some(state.clone())),
+        )
         .route("/prices", get(stripe::list_prices))
         // Billing endpoints
         .route("/billing/meters", get(stripe::list_meters))
@@ -127,6 +136,20 @@ pub fn create_router(state: ProviderState) -> Router<()> {
         .route(
             "/subscriptions",
             x402_post(stripe::create_subscription, Some(state.clone())),
+        )
+        // Checkout session endpoints (Stripe Checkout API)
+        .route("/checkout/sessions", post(stripe::create_checkout_session))
+        .route(
+            "/checkout/sessions/{id}",
+            get(stripe::retrieve_checkout_session),
+        )
+        .route(
+            "/checkout/sessions/{id}/line_items",
+            get(stripe::list_checkout_session_line_items),
+        )
+        .route(
+            "/checkout/sessions/{id}/expire",
+            post(stripe::expire_checkout_session),
         )
         .with_state(state)
 }

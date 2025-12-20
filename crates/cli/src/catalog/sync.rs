@@ -532,48 +532,16 @@ impl SyncCommand {
         let catalog_dir = ctx.manifest_path.join(catalog_base_path).join("products");
         let meters_dir = ctx.manifest_path.join(catalog_base_path).join("meters");
 
-        // Load existing products from YAML files
-        let mut local_products: HashMap<String, Product> = HashMap::new();
-        let loaded_count = if catalog_dir.exists() {
-            let entries = fs::read_dir(&catalog_dir)
-                .map_err(|e| format!("Failed to read catalog directory: {}", e))?;
-
-            for entry in entries {
-                let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-                let path = entry.path();
-
-                if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-                    let content = fs::read_to_string(&path)
-                        .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-
-                    match serde_yml::from_str::<Product>(&content) {
-                        Ok(product) => {
-                            local_products.insert(product.id.clone(), product);
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "{} Failed to parse {}: {}",
-                                style("Warning:").yellow(),
-                                path.display(),
-                                e
-                            );
-                            eprintln!(
-                                "  {} You may need to regenerate it.",
-                                style("Skipping this file.").dim()
-                            );
-                            continue;
-                        }
-                    }
-                }
-            }
-
-            local_products.len()
+        // Load existing products from YAML files (supports both legacy flat files and variant-based directories)
+        let mut local_products: HashMap<String, Product> = if catalog_dir.exists() {
+            super::loader::load_products_from_directory(&catalog_dir)?
         } else {
             // Create the catalog directory if it doesn't exist
             fs::create_dir_all(&catalog_dir)
                 .map_err(|e| format!("Failed to create catalog directory: {}", e))?;
-            0
+            HashMap::new()
         };
+        let loaded_count = local_products.len();
 
         // Check if workspace is empty (no local products loaded)
         let is_initial_sync = loaded_count == 0;
@@ -1040,34 +1008,7 @@ impl SyncCommand {
 
                 // Reload local products after creating in sandbox
                 // This is necessary so the next check can find the newly created sandbox products
-                local_products.clear();
-                let entries = fs::read_dir(&catalog_dir)
-                    .map_err(|e| format!("Failed to read catalog directory: {}", e))?;
-
-                for entry in entries {
-                    let entry =
-                        entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
-                    let path = entry.path();
-
-                    if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-                        let content = fs::read_to_string(&path)
-                            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-
-                        match serde_yml::from_str::<Product>(&content) {
-                            Ok(product) => {
-                                local_products.insert(product.id.clone(), product);
-                            }
-                            Err(e) => {
-                                eprintln!(
-                                    "{} Failed to parse {}: {}",
-                                    style("Warning:").yellow(),
-                                    path.display(),
-                                    e
-                                );
-                            }
-                        }
-                    }
-                }
+                local_products = super::loader::load_products_from_directory(&catalog_dir)?;
             } else {
                 println!();
                 println!(

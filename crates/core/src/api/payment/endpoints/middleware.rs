@@ -5,7 +5,7 @@ use axum::{
     http::{HeaderMap, Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{MethodRouter, post},
+    routing::{MethodRouter, get, post},
 };
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
 use moneymq_types::x402::{
@@ -57,6 +57,16 @@ pub enum X402MiddlewareError {
 
 impl Into<Response> for X402MiddlewareError {
     fn into(self) -> Response {
+        // For PaymentRequired, return x402 protocol standard format
+        if let X402MiddlewareError::PaymentRequired(requirements) = &self {
+            let body = json!({
+                "x402Version": 1,
+                "accepts": requirements,
+            });
+            return (StatusCode::PAYMENT_REQUIRED, axum::Json(body)).into_response();
+        }
+
+        // For other errors, return standard error format
         let (status, code, err_type) = match &self {
             X402MiddlewareError::SupportedFetchError(_) => (
                 StatusCode::BAD_GATEWAY,
@@ -73,21 +83,12 @@ impl Into<Response> for X402MiddlewareError {
                 "payment_settlement_failed",
                 "invalid_request_error",
             ),
-            X402MiddlewareError::PaymentRequired(_) => (
-                StatusCode::PAYMENT_REQUIRED,
-                "payment_required",
-                "invalid_request_error",
-            ),
+            X402MiddlewareError::PaymentRequired(_) => unreachable!(),
             X402MiddlewareError::InvalidPaymentHeader(_) => (
                 StatusCode::BAD_REQUEST,
                 "invalid_payment_header",
                 "invalid_request_error",
             ),
-        };
-
-        let some_payment_requirements = match &self {
-            X402MiddlewareError::PaymentRequired(items) => Some(items),
-            _ => None,
         };
 
         let message = self.to_string();
@@ -96,8 +97,6 @@ impl Into<Response> for X402MiddlewareError {
                 "code": code,
                 "message": message,
                 "type": err_type,
-                "payment_requirements": some_payment_requirements,
-
             }
         });
 
@@ -290,7 +289,8 @@ async fn settle_payment_with_facilitator(
 
 /// Extract payment amount and description from request
 /// Returns (amount_in_cents, description)
-fn extract_payment_details(state: &ProviderState, req_path: &str) -> Option<(i64, String)> {
+/// Returns (amount, description, product_id)
+fn extract_payment_details(state: &ProviderState, req_path: &str) -> Option<(i64, String, String)> {
     // Check if this is a payment intent confirm request
     // Support both /payment_intents/{id}/confirm (nested under /catalog/v1)
     // and /v1/payment_intents/{id}/confirm (legacy)
@@ -318,8 +318,59 @@ fn extract_payment_details(state: &ProviderState, req_path: &str) -> Option<(i64
                         .clone()
                         .unwrap_or_else(|| format!("Payment intent {}", payment_intent_id));
 
+                    // Build product quantities JSON from line_items (e.g., {"surfnet-max": 1, "other": 2})
+                    let product_quantities = intent
+                        .metadata
+                        .get("line_items")
+                        .and_then(|line_items_json| {
+                            // Parse line_items JSON array and build product -> quantity map
+                            serde_json::from_str::<Vec<serde_json::Value>>(line_items_json)
+                                .ok()
+                                .map(|items| {
+                                    let mut quantities: std::collections::HashMap<String, i64> =
+                                        std::collections::HashMap::new();
+                                    for item in items {
+                                        // Try to get product_id from item.price.product (checkout session format)
+                                        // or from item.product_id (legacy format)
+                                        let product_id = item
+                                            .get("price")
+                                            .and_then(|p| p.get("product"))
+                                            .and_then(|v| v.as_str())
+                                            .or_else(|| {
+                                                item.get("product_id").and_then(|v| v.as_str())
+                                            });
+
+                                        let quantity = item
+                                            .get("quantity")
+                                            .and_then(|v| v.as_i64())
+                                            .unwrap_or(1);
+
+                                        if let Some(pid) = product_id {
+                                            *quantities.entry(pid.to_string()).or_insert(0) +=
+                                                quantity;
+                                        }
+                                    }
+                                    serde_json::to_string(&quantities)
+                                        .unwrap_or_else(|_| "{}".to_string())
+                                })
+                        })
+                        // Fallback to legacy product_id field (single product, quantity 1)
+                        .or_else(|| {
+                            intent.metadata.get("product_id").map(|pid| {
+                                let mut map = std::collections::HashMap::new();
+                                map.insert(pid.clone(), 1i64);
+                                serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+                            })
+                        })
+                        // Final fallback to payment intent ID
+                        .unwrap_or_else(|| {
+                            let mut map = std::collections::HashMap::new();
+                            map.insert(payment_intent_id.to_string(), 1i64);
+                            serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+                        });
+
                     // Return amount in cents - the middleware will do the conversion to token amount
-                    return Some((intent.amount, description));
+                    return Some((intent.amount, description, product_quantities));
                 } else {
                     println!(
                         "WARN: Payment intent {} not found in state",
@@ -347,7 +398,7 @@ pub async fn payment_middleware(
 
     let mut req = Request::from_parts(parts, Body::from(request_bytes.clone()));
 
-    let (description, amount, _is_margin, product_name) = {
+    let (description, amount, _is_margin, product_id) = {
         let billing_event = BillingMeterEventRequest::parse(&request_bytes);
         if let Some(event_name) = billing_event.event_name {
             debug!("Parsed billing event name from request: {}", event_name);
@@ -362,14 +413,12 @@ pub async fn payment_middleware(
                     // TODO: need to figure out price for billing events
                     100,
                     false,
-                    billing_event
-                        .display_name
-                        .clone()
-                        .unwrap_or_else(|| billing_event.event_name.clone()),
+                    // Use meter ID for tracking
+                    billing_event.id.clone(),
                 )
             } else {
                 // Unknown billing event, default amount
-                ("Meter Event".into(), 100, false, "Meter Event".into())
+                ("Meter Event".into(), 100, false, "unknown-meter".into())
             }
         } else {
             let subscription_req = SubscriptionRequest::parse(&request_bytes);
@@ -398,27 +447,39 @@ pub async fn payment_middleware(
                                     product.statement_descriptor.clone().unwrap_or_else(|| {
                                         product.name.clone().unwrap_or("Product".to_string())
                                     });
-                                let name = product.name.clone().unwrap_or("Product".to_string());
-                                Some((description, price, is_margin, name))
+                                // Use product ID for tracking, not the display name
+                                let product_id = product.id.clone();
+                                Some((description, price, is_margin, product_id))
                             } else {
                                 None
                             }
                         })
                     })
                     .collect::<Vec<_>>();
-                let (description, price, is_margin, product_name) = active_price
-                    .first()
-                    .cloned()
-                    .unwrap_or(("Product".to_string(), 1, false, "Product".to_string())); // TODO: handle multiple prices properly
+                let (description, price, is_margin, product_id) =
+                    active_price.first().cloned().unwrap_or((
+                        "Unknown Product".to_string(),
+                        1,
+                        false,
+                        "unknown".to_string(),
+                    )); // TODO: handle multiple prices properly
 
-                (description, price, is_margin, product_name)
+                (description, price, is_margin, product_id)
             } else {
-                let Some((price, description)) = extract_payment_details(&state, req.uri().path())
-                else {
+                // Try payment intent first, then product access path
+                if let Some((price, description, product_id)) =
+                    extract_payment_details(&state, req.uri().path())
+                {
+                    (description, price, false, product_id)
+                } else if let Some((price, description, product_id)) =
+                    extract_product_from_path(&state, req.uri().path())
+                {
+                    // Product access path (e.g., /products/{id}/access)
+                    (description, price, false, product_id)
+                } else {
+                    // No payment context found, pass through without gating
                     return next.run(req).await;
-                };
-
-                (description, price, false, "Product".to_string())
+                }
             }
         }
     };
@@ -481,7 +542,7 @@ pub async fn payment_middleware(
                     .iter()
                     .find(|kind| kind.network == network)
                     .and_then(|kind| kind.extra.as_ref().map(|e| e.fee_payer.clone())),
-                    "product": product_name,
+                    "product": product_id,
                 })),
             }
         })
@@ -626,4 +687,57 @@ where
         return post(|| async { StatusCode::NOT_FOUND });
     };
     post(handler).layer(middleware::from_fn_with_state(state, payment_middleware))
+}
+
+/// Helper function to create a GET route with product access payment middleware
+///
+/// This is for raw x402 gating - the product and price are determined from the URL path.
+/// The endpoint will return 402 with payment requirements if no valid payment is provided.
+///
+/// # Example
+/// ```
+/// use crate::api::payment::endpoints::middleware::x402_get;
+///
+/// let route = x402_get(my_handler, state.clone());
+/// ```
+pub fn x402_get<H, T>(handler: H, state: Option<ProviderState>) -> MethodRouter<ProviderState>
+where
+    H: Handler<T, ProviderState>,
+    T: 'static,
+{
+    let Some(state) = state else {
+        return get(|| async { StatusCode::NOT_FOUND });
+    };
+    // Use the unified payment_middleware - it handles product access via extract_product_from_path
+    get(handler).layer(middleware::from_fn_with_state(state, payment_middleware))
+}
+
+/// Extract product info from path like /products/{product_id}/access
+/// Returns (amount_in_cents, description, product_id)
+fn extract_product_from_path(state: &ProviderState, path: &str) -> Option<(i64, String, String)> {
+    // Match pattern: /products/{product_id}/access
+    let parts: Vec<&str> = path.split('/').collect();
+
+    // Find the "products" segment and get the next one as product_id
+    let product_id = parts
+        .iter()
+        .position(|&p| p == "products")
+        .and_then(|idx| parts.get(idx + 1))
+        .map(|s| s.to_string())?;
+
+    // Check this is an access request
+    if !path.ends_with("/access") {
+        return None;
+    }
+
+    // Look up the product and its default price
+    let product = state.products.iter().find(|p| p.id == product_id)?;
+
+    // Get the default/first active price
+    let price = product.prices.iter().find(|p| p.active)?;
+
+    let amount = price.unit_amount.unwrap_or(0);
+    let description = product.name.clone().unwrap_or_else(|| product_id.clone());
+
+    Some((amount, description, product_id))
 }

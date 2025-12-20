@@ -9,8 +9,30 @@ pub mod x402;
 
 // Re-export commonly used IAC types at crate root for convenience
 pub use iac::{
-    Currency, DiagnosticSeverity, OneTimePriceSchema, PriceSchema, PricingType, ProductSchema,
-    RecurringInterval, RecurringPriceSchema, ValidationDiagnostic, ValidationResult,
+    // Schema types (for JSON/API)
+    Currency,
+    DiagnosticSeverity,
+    MetadataField,
+    MetadataFieldSchema,
+    MetadataValue,
+    OneTimePriceSchema,
+    PriceDefaults,
+    PriceSchema,
+    PricingType,
+    // YAML parsing types (for product.yaml and variants/*.yaml)
+    ProductBase,
+    ProductSchema,
+    ProductVariant,
+    RecurringInterval,
+    RecurringPriceSchema,
+    ValidationDiagnostic,
+    ValidationResult,
+    VariantPrice,
+    // Consolidation
+    consolidate_products,
+    // Deep merge utilities
+    deep_merge_json,
+    merge_product_with_variant,
 };
 
 /// Default manifest file name

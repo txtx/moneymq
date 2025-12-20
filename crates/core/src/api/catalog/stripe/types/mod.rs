@@ -1,4 +1,5 @@
 pub mod billing;
+pub mod checkout_sessions;
 pub mod common;
 pub mod customers;
 pub mod payment_intents;
@@ -10,6 +11,11 @@ pub mod subscriptions;
 // Re-export common catalog types from moneymq-types
 // Re-export types specific to moneymq-core (not in moneymq-types)
 pub use billing::StripeMeterEvent;
+pub use checkout_sessions::{
+    CheckoutLineItem, CheckoutLineItemList, CheckoutLineItemPrice, CheckoutSessionStatus,
+    CreateCheckoutSessionRequest, CreateLineItem, CreateLineItemPriceData,
+    CreateLineItemProductData, PaymentStatus, StripeCheckoutSession,
+};
 pub use customers::{CreateCustomerRequest, StripeCustomer};
 pub use moneymq_types::stripe::{
     ListParams, ListResponse, StripeBillingMeter, StripePrice, StripeProduct, StripeRecurring,

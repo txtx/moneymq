@@ -65,8 +65,43 @@ impl<'de> Deserialize<'de> for X402Version {
     where
         D: Deserializer<'de>,
     {
-        let num = u8::deserialize(deserializer)?;
-        X402Version::try_from(num).map_err(serde::de::Error::custom)
+        use serde::de::{self, Visitor};
+
+        struct X402VersionVisitor;
+
+        impl<'de> Visitor<'de> for X402VersionVisitor {
+            type Value = X402Version;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a version number as u8 or string")
+            }
+
+            fn visit_u8<E>(self, value: u8) -> Result<X402Version, E>
+            where
+                E: de::Error,
+            {
+                X402Version::try_from(value).map_err(de::Error::custom)
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<X402Version, E>
+            where
+                E: de::Error,
+            {
+                let value =
+                    u8::try_from(value).map_err(|_| de::Error::custom("version too large"))?;
+                X402Version::try_from(value).map_err(de::Error::custom)
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<X402Version, E>
+            where
+                E: de::Error,
+            {
+                let num: u8 = value.parse().map_err(de::Error::custom)?;
+                X402Version::try_from(num).map_err(de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_any(X402VersionVisitor)
     }
 }
 

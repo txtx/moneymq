@@ -95,8 +95,9 @@ pub async fn create_payment_intent(
 
             for part in body_str.split('&') {
                 if let Some((key, value)) = part.split_once('=') {
+                    let decoded_key = urlencoding::decode(key).unwrap_or_default().to_string();
                     let decoded_value = urlencoding::decode(value).unwrap_or_default().to_string();
-                    params.insert(key.to_string(), decoded_value);
+                    params.insert(decoded_key, decoded_value);
                 }
             }
 

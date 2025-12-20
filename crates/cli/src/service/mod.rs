@@ -97,41 +97,19 @@ pub trait ServiceCommand {
             .unwrap_or("billing/v1");
 
         // Load products from {catalog_path}/products directory
+        // Supports both legacy flat files and variant-based directories
         let catalog_dir = ctx.manifest_path.join(catalog_base_path).join("products");
 
         print!("{} ", style("Loading products").dim());
 
-        let mut products = Vec::new();
-
-        if catalog_dir.exists() {
-            let entries = fs::read_dir(&catalog_dir)
-                .map_err(|e| RunCommandError::DirectoryReadError(catalog_dir, e))?;
-
-            for entry in entries {
-                let entry = entry.map_err(RunCommandError::DirectoryEntryReadError)?;
-                let path = entry.path();
-
-                if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
-                    let content = fs::read_to_string(&path)
-                        .map_err(|e| RunCommandError::ReadFileError(path.clone(), e))?;
-
-                    match serde_yml::from_str::<Product>(&content) {
-                        Ok(product) => {
-                            products.push(product);
-                        }
-                        Err(e) => {
-                            eprintln!(
-                                "\n{} Failed to parse {}: {}",
-                                style("✗").red(),
-                                path.display(),
-                                e
-                            );
-                            eprintln!("  {}", style("Skipping this file").dim());
-                        }
-                    }
+        let products: Vec<Product> =
+            match crate::catalog::loader::load_products_from_directory(&catalog_dir) {
+                Ok(products_map) => products_map.into_values().collect(),
+                Err(e) => {
+                    eprintln!("\n{} Failed to load products: {}", style("✗").red(), e);
+                    Vec::new()
                 }
-            }
-        }
+            };
 
         if products.is_empty() {
             println!("{}", style("⚠ No products found").yellow());
