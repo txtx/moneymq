@@ -471,14 +471,39 @@ pub async fn payment_middleware(
                     extract_payment_details(&state, req.uri().path())
                 {
                     (description, price, false, product_id)
-                } else if let Some((price, description, product_id)) =
-                    extract_product_from_path(&state, req.uri().path())
-                {
-                    // Product access path (e.g., /products/{id}/access)
-                    (description, price, false, product_id)
                 } else {
-                    // No payment context found, pass through without gating
-                    return next.run(req).await;
+                    // Check for product access path (e.g., /products/{id}/access)
+                    match extract_product_from_path(&state, req.uri().path()) {
+                        ProductAccessResult::Found {
+                            amount,
+                            description,
+                            product_id,
+                        } => (description, amount, false, product_id),
+                        ProductAccessResult::ProductNotFound(product_id) => {
+                            let body = json!({
+                                "error": {
+                                    "code": "resource_missing",
+                                    "message": format!("No such product: '{}'", product_id),
+                                    "type": "invalid_request_error",
+                                }
+                            });
+                            return (StatusCode::NOT_FOUND, axum::Json(body)).into_response();
+                        }
+                        ProductAccessResult::NoPriceFound(product_id) => {
+                            let body = json!({
+                                "error": {
+                                    "code": "resource_missing",
+                                    "message": format!("Product '{}' has no active price", product_id),
+                                    "type": "invalid_request_error",
+                                }
+                            });
+                            return (StatusCode::NOT_FOUND, axum::Json(body)).into_response();
+                        }
+                        ProductAccessResult::NotApplicable => {
+                            // No payment context found, pass through without gating
+                            return next.run(req).await;
+                        }
+                    }
                 }
             }
         }
@@ -499,7 +524,15 @@ pub async fn payment_middleware(
 
     let network = Network::Solana; // TODO: Determine network based on request / product
     let Some(network_config) = state.networks_config.get_config_for_network(&network) else {
-        panic!("No billing config for network {:?}", network); // TODO: Handle this error properly
+        // No network config - x402 gating not configured, return error
+        let body = json!({
+            "error": {
+                "code": "payment_not_configured",
+                "message": "Payment gating is not configured for this resource. Please set kora_payment_address in payment stack configuration.",
+                "type": "invalid_request_error",
+            }
+        });
+        return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(body)).into_response();
     };
 
     // TODO: probably need some sort of filtering here based on product being accessed
@@ -712,32 +745,79 @@ where
     get(handler).layer(middleware::from_fn(payment_middleware))
 }
 
+/// Result of extracting product info from path
+pub enum ProductAccessResult {
+    /// Not a product access path - pass through
+    NotApplicable,
+    /// Product not found - return 404
+    ProductNotFound(String),
+    /// Product has no active price - return 404
+    NoPriceFound(String),
+    /// Found product with price - gate with 402
+    Found {
+        amount: i64,
+        description: String,
+        product_id: String,
+    },
+}
+
 /// Extract product info from path like /products/{product_id}/access
-/// Returns (amount_in_cents, description, product_id)
-fn extract_product_from_path(state: &CatalogState, path: &str) -> Option<(i64, String, String)> {
+fn extract_product_from_path(state: &CatalogState, path: &str) -> ProductAccessResult {
     // Match pattern: /products/{product_id}/access
     let parts: Vec<&str> = path.split('/').collect();
 
+    // Check this is an access request
+    if !path.ends_with("/access") {
+        return ProductAccessResult::NotApplicable;
+    }
+
     // Find the "products" segment and get the next one as product_id
-    let product_id = parts
+    let product_id = match parts
         .iter()
         .position(|&p| p == "products")
         .and_then(|idx| parts.get(idx + 1))
-        .map(|s| s.to_string())?;
+        .map(|s| s.to_string())
+    {
+        Some(id) => id,
+        None => return ProductAccessResult::NotApplicable,
+    };
 
-    // Check this is an access request
-    if !path.ends_with("/access") {
-        return None;
-    }
+    debug!(
+        "Looking up product '{}' in {} products",
+        product_id,
+        state.products.len()
+    );
 
-    // Look up the product and its default price
-    let product = state.products.iter().find(|p| p.id == product_id)?;
+    // Look up the product
+    let product = match state.products.iter().find(|p| p.id == product_id) {
+        Some(p) => p,
+        None => {
+            debug!(
+                "Product '{}' not found. Available products: {:?}",
+                product_id,
+                state.products.iter().map(|p| &p.id).collect::<Vec<_>>()
+            );
+            return ProductAccessResult::ProductNotFound(product_id);
+        }
+    };
 
     // Get the default/first active price
-    let price = product.prices.iter().find(|p| p.active)?;
+    let price = match product.prices.iter().find(|p| p.active) {
+        Some(p) => p,
+        None => {
+            debug!("Product '{}' has no active prices", product_id);
+            return ProductAccessResult::NoPriceFound(product_id);
+        }
+    };
 
     let amount = price.unit_amount.unwrap_or(0);
     let description = product.name.clone().unwrap_or_else(|| product_id.clone());
 
-    Some((amount, description, product_id))
+    debug!("Found product '{}' with price {} cents", product_id, amount);
+
+    ProductAccessResult::Found {
+        amount,
+        description,
+        product_id,
+    }
 }
