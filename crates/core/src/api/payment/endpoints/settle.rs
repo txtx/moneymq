@@ -10,11 +10,11 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{error, info};
 
-use crate::api::payment::{FacilitatorState, endpoints::serialize_to_base64, networks};
+use crate::api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, networks};
 
 /// POST /settle endpoint - settle a payment on-chain
 pub async fn handler(
-    Extension(state): Extension<Option<FacilitatorState>>,
+    Extension(state): Extension<Option<PaymentApiConfig>>,
     Json(request): Json<SettleRequest>,
 ) -> impl IntoResponse {
     let Some(state) = state else {
@@ -36,16 +36,17 @@ pub async fn handler(
     );
 
     // Verify network matches
-    let Some(network_config) = state
-        .config
-        .networks
-        .iter()
-        .find_map(|(_, network_config)| {
-            network_config
-                .network()
-                .eq(&request.payment_requirements.network)
-                .then(|| network_config)
-        })
+    let Some(network_config) =
+        state
+            .facilitator_config
+            .networks
+            .iter()
+            .find_map(|(_, network_config)| {
+                network_config
+                    .network()
+                    .eq(&request.payment_requirements.network)
+                    .then(|| network_config)
+            })
     else {
         return (
             StatusCode::BAD_REQUEST,

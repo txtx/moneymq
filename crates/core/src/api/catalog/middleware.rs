@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::api::{
     catalog::{
-        ProviderState,
+        CatalogState,
         stripe::endpoints::{
             billing::BillingMeterEventRequest, subscriptions::SubscriptionRequest,
         },
@@ -105,7 +105,7 @@ impl Into<Response> for X402MiddlewareError {
 }
 
 async fn fetch_supported(
-    state: &ProviderState,
+    state: &CatalogState,
 ) -> Result<SupportedResponse, X402FacilitatorRequestError> {
     let supported_url = format!("{}supported", state.facilitator_url);
 
@@ -181,7 +181,7 @@ async fn extract_payment_payload(
 
 /// Verify payment with the facilitator by calling its /verify endpoint
 async fn verify_payment_with_facilitator(
-    state: &ProviderState,
+    state: &CatalogState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
 ) -> Result<moneymq_types::x402::MixedAddress, X402FacilitatorRequestError> {
@@ -233,7 +233,7 @@ async fn verify_payment_with_facilitator(
 
 /// Settle payment with the facilitator by calling its /settle endpoint
 async fn settle_payment_with_facilitator(
-    state: &ProviderState,
+    state: &CatalogState,
     payment_payload: &PaymentPayload,
     payment_requirements: &PaymentRequirements,
 ) -> Result<(), X402FacilitatorRequestError> {
@@ -290,7 +290,7 @@ async fn settle_payment_with_facilitator(
 /// Extract payment amount and description from request
 /// Returns (amount_in_cents, description)
 /// Returns (amount, description, product_id)
-fn extract_payment_details(state: &ProviderState, req_path: &str) -> Option<(i64, String, String)> {
+fn extract_payment_details(state: &CatalogState, req_path: &str) -> Option<(i64, String, String)> {
     // Check if this is a payment intent confirm request
     // Support both /payment_intents/{id}/confirm (nested under /catalog/v1)
     // and /v1/payment_intents/{id}/confirm (legacy)
@@ -385,7 +385,7 @@ fn extract_payment_details(state: &ProviderState, req_path: &str) -> Option<(i64
 
 /// Middleware to handle payment requirements for meter events
 pub async fn payment_middleware(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
@@ -678,9 +678,9 @@ pub async fn payment_middleware(
 ///
 /// let route = x402_post(my_handler, state.clone());
 /// ```
-pub fn x402_post<H, T>(handler: H, state: Option<ProviderState>) -> MethodRouter<ProviderState>
+pub fn x402_post<H, T>(handler: H, state: Option<CatalogState>) -> MethodRouter<CatalogState>
 where
-    H: Handler<T, ProviderState>,
+    H: Handler<T, CatalogState>,
     T: 'static,
 {
     let Some(state) = state else {
@@ -700,9 +700,9 @@ where
 ///
 /// let route = x402_get(my_handler, state.clone());
 /// ```
-pub fn x402_get<H, T>(handler: H, state: Option<ProviderState>) -> MethodRouter<ProviderState>
+pub fn x402_get<H, T>(handler: H, state: Option<CatalogState>) -> MethodRouter<CatalogState>
 where
-    H: Handler<T, ProviderState>,
+    H: Handler<T, CatalogState>,
     T: 'static,
 {
     let Some(state) = state else {
@@ -714,7 +714,7 @@ where
 
 /// Extract product info from path like /products/{product_id}/access
 /// Returns (amount_in_cents, description, product_id)
-fn extract_product_from_path(state: &ProviderState, path: &str) -> Option<(i64, String, String)> {
+fn extract_product_from_path(state: &CatalogState, path: &str) -> Option<(i64, String, String)> {
     // Match pattern: /products/{product_id}/access
     let parts: Vec<&str> = path.split('/').collect();
 

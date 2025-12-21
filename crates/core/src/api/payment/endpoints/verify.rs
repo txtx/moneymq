@@ -10,17 +10,17 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{debug, error};
 
-use crate::api::payment::{FacilitatorState, endpoints::serialize_to_base64, networks};
+use crate::api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, networks};
 
 /// POST /verify endpoint - verify a payment payload
 pub async fn handler(
-    Extension(state): Extension<Option<FacilitatorState>>,
+    Extension(state): Extension<Option<PaymentApiConfig>>,
     Json(request): Json<VerifyRequest>,
 ) -> impl IntoResponse {
     debug!("Verify endpoint called");
 
     let Some(state) = state else {
-        error!("Verify endpoint: FacilitatorState is None!");
+        error!("Verify endpoint: PaymentApiConfig is None!");
         return (
             StatusCode::NOT_FOUND,
             Json(VerifyResponse::Invalid {
@@ -31,7 +31,7 @@ pub async fn handler(
     };
 
     debug!(
-        "Verify endpoint: FacilitatorState loaded, payment_stack_id={}",
+        "Verify endpoint: PaymentApiConfig loaded, payment_stack_id={}",
         state.payment_stack_id
     );
 
@@ -41,16 +41,17 @@ pub async fn handler(
     );
 
     // Verify network matches
-    let Some(network_config) = state
-        .config
-        .networks
-        .iter()
-        .find_map(|(_, network_config)| {
-            network_config
-                .network()
-                .eq(&request.payment_requirements.network)
-                .then(|| network_config)
-        })
+    let Some(network_config) =
+        state
+            .facilitator_config
+            .networks
+            .iter()
+            .find_map(|(_, network_config)| {
+                network_config
+                    .network()
+                    .eq(&request.payment_requirements.network)
+                    .then(|| network_config)
+            })
     else {
         debug!(
             "Invalid network in verify request: {:?}",

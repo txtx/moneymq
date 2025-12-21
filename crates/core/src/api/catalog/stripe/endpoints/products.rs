@@ -6,13 +6,13 @@ use axum::{
 use serde::Serialize;
 
 use crate::api::catalog::{
-    ProviderState,
+    CatalogState,
     stripe::types::{ListParams, ListResponse, StripeProduct},
 };
 
 /// GET /v1/products - List products
 pub async fn list_products(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
@@ -70,7 +70,7 @@ pub struct ProductAccessResponse {
 ///
 /// After successful payment, returns access confirmation.
 pub async fn get_product_access(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     Path(product_id): Path<String>,
 ) -> impl IntoResponse {
     // Find the product

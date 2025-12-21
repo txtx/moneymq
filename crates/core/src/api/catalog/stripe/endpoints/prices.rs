@@ -2,13 +2,13 @@ use axum::{Json, extract::State, response::IntoResponse};
 use moneymq_types::Product;
 
 use crate::api::catalog::{
-    ProviderState,
+    CatalogState,
     stripe::types::{ListParams, ListResponse, StripePrice},
 };
 
 /// GET /v1/prices - List prices
 pub async fn list_prices(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;

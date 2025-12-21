@@ -7,7 +7,7 @@ use axum::{
 };
 
 use crate::api::catalog::{
-    ProviderState,
+    CatalogState,
     stripe::{
         types::{CreateCustomerRequest, StripeCustomer},
         utils::generate_stripe_id,
@@ -16,7 +16,7 @@ use crate::api::catalog::{
 
 /// POST /v1/customers - Create a new customer
 pub async fn create_customer(
-    State(_state): State<ProviderState>,
+    State(_state): State<CatalogState>,
     Form(request): Form<CreateCustomerRequest>,
 ) -> impl IntoResponse {
     // Generate a mock customer ID
@@ -44,7 +44,7 @@ pub async fn create_customer(
 
 /// POST /v1/customers/:id - Update a customer
 pub async fn update_customer(
-    State(_state): State<ProviderState>,
+    State(_state): State<CatalogState>,
     Path(customer_id): Path<String>,
     body: Bytes,
 ) -> impl IntoResponse {

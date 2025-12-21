@@ -1,7 +1,7 @@
 use axum::{Json, body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::catalog::{
-    ProviderState,
+    CatalogState,
     stripe::{
         types::{StripeSubscription, SubscriptionItemData, SubscriptionItems, SubscriptionPrice},
         utils::generate_stripe_id,
@@ -45,7 +45,7 @@ impl SubscriptionRequest {
 
 /// POST /v1/subscriptions - Create a subscription
 pub async fn create_subscription(
-    State(_state): State<ProviderState>,
+    State(_state): State<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     let SubscriptionRequest {

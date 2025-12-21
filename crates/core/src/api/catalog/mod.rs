@@ -11,41 +11,33 @@ use axum::{
     routing::{get, post},
 };
 use moneymq_studio_ui::serve_studio_static_files;
-use moneymq_types::{
-    Meter, Product,
-    x402::{config::facilitator::ValidatorsConfig, transactions::FacilitatedTransaction},
-};
+use moneymq_types::{Meter, Product, x402::transactions::FacilitatedTransaction};
 use stripe::types::{StripeCheckoutSession, StripePaymentIntent};
 use url::Url;
 
-use crate::api::{
-    payment::endpoints::middleware::{x402_get, x402_post},
-    sandbox::NetworksConfig,
-};
+use crate::api::sandbox::NetworksConfig;
 
-pub mod config;
 pub mod db;
+pub mod middleware;
 pub mod stripe;
+
+use middleware::{x402_get, x402_post};
 
 /// Application state
 #[derive(Clone)]
-pub struct ProviderState {
+pub struct CatalogState {
+    pub facilitator_url: Url,
     pub products: Arc<Vec<Product>>,
     pub meters: Arc<Vec<Meter>>,
-    pub use_sandbox: bool,
-    pub facilitator_url: Url,
-    pub networks_config: NetworksConfig,
-    pub catalog_path: PathBuf,
-    pub catalog_name: Option<String>,
-    pub catalog_description: Option<String>,
-    pub facilitator_pubkey: String,
-    pub validators: ValidatorsConfig,
-    pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
     pub payment_intents: Arc<Mutex<HashMap<String, StripePaymentIntent>>>,
     pub checkout_sessions: Arc<Mutex<HashMap<String, StripeCheckoutSession>>>,
-    pub kora_config: Option<Arc<kora_lib::Config>>,
-    pub signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
+    pub transactions: Arc<Mutex<Vec<FacilitatedTransaction>>>,
+    pub networks_config: NetworksConfig,
+    pub catalog_name: Option<String>,
+    pub catalog_description: Option<String>,
     pub manifest_path: PathBuf,
+    pub catalog_path: PathBuf,
+    pub use_sandbox: bool,
 }
 
 /// Application state
@@ -55,7 +47,7 @@ pub struct Facilitator {
     pub meters: Arc<Vec<Meter>>,
 }
 
-impl ProviderState {
+impl CatalogState {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         products: Vec<Product>,
@@ -66,10 +58,6 @@ impl ProviderState {
         catalog_path: PathBuf,
         catalog_name: Option<String>,
         catalog_description: Option<String>,
-        facilitator_pubkey: String,
-        validators_config: ValidatorsConfig,
-        kora_config: Option<Arc<kora_lib::Config>>,
-        signer_pool: Option<Arc<kora_lib::signer::SignerPool>>,
         manifest_path: PathBuf,
     ) -> Self {
         Self {
@@ -81,20 +69,16 @@ impl ProviderState {
             catalog_path,
             catalog_name,
             catalog_description,
-            facilitator_pubkey,
-            validators: validators_config,
             transactions: Arc::new(Mutex::new(Vec::new())),
             payment_intents: Arc::new(Mutex::new(HashMap::new())),
             checkout_sessions: Arc::new(Mutex::new(HashMap::new())),
-            kora_config,
-            signer_pool,
             manifest_path,
         }
     }
 }
 
 /// Create the catalog router with all catalog-related routes
-pub fn create_router(state: ProviderState) -> Router<()> {
+pub fn create_router(state: CatalogState) -> Router<()> {
     Router::new()
         // Product endpoints
         .route("/products", get(stripe::list_products))

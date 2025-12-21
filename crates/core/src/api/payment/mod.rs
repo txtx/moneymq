@@ -18,7 +18,9 @@ use kora_lib::{
         SignerTypeConfig, config::SignerPoolSettings,
     },
 };
-use moneymq_types::x402::config::facilitator::{FacilitatorConfig, FacilitatorNetworkConfig};
+use moneymq_types::x402::config::facilitator::{
+    FacilitatorConfig, FacilitatorNetworkConfig, ValidatorsConfig,
+};
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -34,8 +36,9 @@ pub const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID: &str =
 
 /// Shared state for the facilitator
 #[derive(Clone)]
-pub struct FacilitatorState {
-    pub config: Arc<FacilitatorConfig>,
+pub struct PaymentApiConfig {
+    pub facilitator_config: Arc<FacilitatorConfig>,
+    pub validators: Arc<ValidatorsConfig>,
     pub db_manager: Arc<db::DbManager>,
     pub kora_config: Arc<Config>,
     pub signer_pool: Arc<SignerPool>,
@@ -43,15 +46,16 @@ pub struct FacilitatorState {
     pub is_sandbox: bool,
 }
 
-impl FacilitatorState {
+impl PaymentApiConfig {
     pub fn local(
-        config: FacilitatorConfig,
+        facilitator_config: FacilitatorConfig,
+        validators: ValidatorsConfig,
         database_url: &str,
         kora_config: Config,
         signer_pool: SignerPool,
     ) -> Self {
         // Extract payment_stack_id from the URL's subdomain
-        let payment_stack_id = config
+        let payment_stack_id = facilitator_config
             .url
             .host_str()
             .and_then(|host| host.split('.').next())
@@ -59,7 +63,8 @@ impl FacilitatorState {
             .to_string();
 
         Self {
-            config: Arc::new(config),
+            facilitator_config: Arc::new(facilitator_config),
+            validators: Arc::new(validators),
             db_manager: Arc::new(DbManager::local(database_url).unwrap()),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
@@ -69,7 +74,8 @@ impl FacilitatorState {
     }
 
     pub fn new(
-        config: FacilitatorConfig,
+        facilitator_config: FacilitatorConfig,
+        validators: ValidatorsConfig,
         db_manager: db::DbManager,
         kora_config: Config,
         signer_pool: SignerPool,
@@ -77,7 +83,8 @@ impl FacilitatorState {
         is_sandbox: bool,
     ) -> Self {
         Self {
-            config: Arc::new(config),
+            facilitator_config: Arc::new(facilitator_config),
+            validators: Arc::new(validators),
             db_manager: Arc::new(db_manager),
             kora_config: Arc::new(kora_config),
             signer_pool: Arc::new(signer_pool),
@@ -88,7 +95,7 @@ impl FacilitatorState {
 }
 
 /// Create the facilitator router
-pub fn create_router(state: FacilitatorState) -> Router {
+pub fn create_router(state: PaymentApiConfig) -> Router {
     let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any);
     Router::new()
         .route("/health", get(endpoints::health::handler))
@@ -103,11 +110,12 @@ pub fn create_router(state: FacilitatorState) -> Router {
         .layer(Extension(Some(state)))
 }
 
-/// Create a FacilitatorState from a FacilitatorConfig without starting a server
-pub async fn create_facilitator_state(
+/// Create a PaymentApiConfig from a FacilitatorConfig without starting a server
+pub async fn create_payment_api_config(
     config: FacilitatorConfig,
+    validators: ValidatorsConfig,
     _sandbox: bool,
-) -> Result<FacilitatorState, Box<dyn std::error::Error>> {
+) -> Result<PaymentApiConfig, Box<dyn std::error::Error>> {
     let kora_config = Config {
         validation: ValidationConfig {
             max_allowed_lamports: 100_000_000, // 0.1 SOL
@@ -159,8 +167,9 @@ pub async fn create_facilitator_state(
     };
     let signer_pool = SignerPool::from_config(signer_pool_config).await?;
 
-    let state = FacilitatorState::local(
+    let state = PaymentApiConfig::local(
         config,
+        validators,
         format!("sqlite://{}", "payments.sqlite").as_str(),
         kora_config,
         signer_pool,
@@ -172,13 +181,14 @@ pub async fn create_facilitator_state(
 /// Start the facilitator server
 pub async fn start_facilitator(
     config: FacilitatorConfig,
+    validators: ValidatorsConfig,
     sandbox: bool,
 ) -> Result<
     JoinHandle<Result<(), Box<dyn std::error::Error + Send + Sync>>>,
     Box<dyn std::error::Error>,
 > {
     let url = config.url.clone();
-    let state = create_facilitator_state(config, sandbox).await?;
+    let state = create_payment_api_config(config, validators, sandbox).await?;
     let app = create_router(state);
 
     let addr = format!("0.0.0.0:{}", url.port().expect("URL must have a port"));

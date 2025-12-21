@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 use console::{StyledObject, style};
 use indexmap::IndexMap;
-use moneymq_core::api::{NetworksConfig, NetworksConfigError, payment::FacilitatorState};
+use moneymq_core::api::{NetworksConfig, NetworksConfigError, payment::PaymentApiConfig};
 use moneymq_types::{
     Meter, Product,
     x402::{MoneyMqNetwork, config::facilitator::ValidatorsConfig},
@@ -80,7 +80,7 @@ pub trait ServiceCommand {
         environment: &EnvironmentConfig,
         networks_config: &NetworksConfig,
         port: u16,
-    ) -> Result<(Url, String, ValidatorsConfig, Option<FacilitatorState>), RunCommandError>;
+    ) -> Result<(Url, String, ValidatorsConfig, PaymentApiConfig), RunCommandError>;
 
     fn load_catalog(
         &self,
@@ -257,7 +257,7 @@ pub trait ServiceCommand {
         let payment_api_url = format!("http://localhost:{}/payment/v1/", port)
             .parse::<url::Url>()
             .expect("Failed to parse payment API URL");
-        let catalog_state = moneymq_core::api::catalog::ProviderState::new(
+        let catalog_state = moneymq_core::api::catalog::CatalogState::new(
             products,
             meters,
             is_sandbox,
@@ -266,10 +266,6 @@ pub trait ServiceCommand {
             catalog_path,
             catalog_name,
             catalog_description,
-            facilitator_pubkey,
-            validator_rpc_urls,
-            None, // kora_config
-            None, // signer_pool
             ctx.manifest_path.clone(),
         );
 

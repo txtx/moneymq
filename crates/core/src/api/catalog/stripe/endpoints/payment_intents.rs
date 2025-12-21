@@ -9,7 +9,7 @@ use axum::{
 };
 
 use crate::api::catalog::{
-    ProviderState,
+    CatalogState,
     stripe::{
         types::{PaymentIntentStatus, StripePaymentIntent},
         utils::generate_stripe_id,
@@ -18,7 +18,7 @@ use crate::api::catalog::{
 
 /// POST /v1/payment_intents - Create a payment intent
 pub async fn create_payment_intent(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     // Try to parse as JSON first, then fall back to form-encoded
@@ -195,7 +195,7 @@ pub async fn create_payment_intent(
 
 /// GET /v1/payment_intents/:id - Retrieve a payment intent
 pub async fn retrieve_payment_intent(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let payment_intents = state.payment_intents.lock().unwrap();
@@ -222,7 +222,7 @@ pub async fn retrieve_payment_intent(
 
 /// POST /v1/payment_intents/:id/confirm - Confirm a payment intent
 pub async fn confirm_payment_intent(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     Path(id): Path<String>,
     body: Bytes,
 ) -> impl IntoResponse {
@@ -274,7 +274,7 @@ pub async fn confirm_payment_intent(
 
 /// POST /v1/payment_intents/:id/cancel - Cancel a payment intent
 pub async fn cancel_payment_intent(
-    State(_state): State<ProviderState>,
+    State(_state): State<CatalogState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let payment_intent = StripePaymentIntent {

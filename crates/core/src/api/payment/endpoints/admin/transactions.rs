@@ -2,14 +2,14 @@ use axum::{Extension, Json, response::IntoResponse};
 
 use crate::api::{
     catalog::stripe::types::{ListParams, ListResponse},
-    payment::FacilitatorState,
+    payment::PaymentApiConfig,
 };
 
 /// GET /v1/transactions - List transactions
 ///
 /// This endpoint returns a list of transactions stored from x402 payments.
 pub async fn list_transactions(
-    Extension(state): Extension<Option<FacilitatorState>>,
+    Extension(state): Extension<Option<PaymentApiConfig>>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let Some(state) = state else {

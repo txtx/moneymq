@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solana_pubkey::Pubkey;
 
-use super::ProviderState;
+use crate::api::{catalog::CatalogState, payment::PaymentApiConfig};
 
 /// Configuration response structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,19 +72,22 @@ pub struct FacilitatorConfig {
 }
 
 /// Config endpoint - returns provider configuration including branding and x402 settings
-pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse {
+pub async fn get_config(
+    State(catalog_state): State<CatalogState>,
+    State(payment_api_config): State<PaymentApiConfig>,
+) -> impl IntoResponse {
     let network = Network::Solana;
     // Build account configuration
     let mut account = AccountConfig {
-        name: state.catalog_name.clone(),
-        description: state.catalog_description.clone(),
+        name: catalog_state.catalog_name.clone(),
+        description: catalog_state.catalog_description.clone(),
         logo: None,
         primary_color: None,
         secondary_color: None,
     };
 
     // Load branding assets if provider name is available
-    let assets_path = state.catalog_path.join("assets");
+    let assets_path = catalog_state.catalog_path.join("assets");
 
     // Load logo as base64
     let logo_path = assets_path.join("logo.png");
@@ -116,20 +119,57 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
     }
 
     // Build payout account configuration
-    let payout_account =
-        state
+    let payout_account = catalog_state
+        .networks_config
+        .configs
+        .iter()
+        .next()
+        .and_then(|(_, network_config)| {
+            let recipient_address = network_config.recipient().address();
+            let currency = network_config.currencies().first()?;
+
+            match (recipient_address, currency.address()) {
+                (MixedAddress::Solana(owner), MixedAddress::Solana(mint)) => {
+                    let ata =
+                        spl_associated_token_account::get_associated_token_address(&owner, &mint);
+
+                    // Get currency details
+                    let solana_currency = currency.solana_currency()?;
+
+                    Some(TokenAccountConfig {
+                        currency: solana_currency.symbol.to_lowercase(),
+                        decimals: solana_currency.decimals,
+                        address: ata.to_string(),        // ATA address
+                        token_address: mint.to_string(), // Mint address
+                    })
+                }
+                _ => None,
+            }
+        });
+
+    // Build facilitator configuration
+    let facilitator = {
+        // Parse the payer pubkey and compute its ATA
+        let in_account = catalog_state
             .networks_config
             .configs
             .iter()
             .next()
             .and_then(|(_, network_config)| {
-                let recipient_address = network_config.recipient().address();
                 let currency = network_config.currencies().first()?;
 
-                match (recipient_address, currency.address()) {
-                    (MixedAddress::Solana(owner), MixedAddress::Solana(mint)) => {
+                // Parse the facilitator's pubkey (the payer)
+                let facilitator_pubkey_str = payment_api_config
+                    .facilitator_config
+                    .get_facilitator_pubkey("solana")?;
+                let payer_pubkey = facilitator_pubkey_str.parse::<Pubkey>().ok()?;
+
+                match currency.address() {
+                    MixedAddress::Solana(mint) => {
+                        // Compute ATA for the PAYER (facilitator), not the recipient
                         let ata = spl_associated_token_account::get_associated_token_address(
-                            &owner, &mint,
+                            &payer_pubkey,
+                            &mint,
                         );
 
                         // Get currency details
@@ -138,61 +178,35 @@ pub async fn get_config(State(state): State<ProviderState>) -> impl IntoResponse
                         Some(TokenAccountConfig {
                             currency: solana_currency.symbol.to_lowercase(),
                             decimals: solana_currency.decimals,
-                            address: ata.to_string(),        // ATA address
-                            token_address: mint.to_string(), // Mint address
+                            address: ata.to_string(),
+                            token_address: mint.to_string(),
                         })
                     }
                     _ => None,
                 }
             });
 
-    // Build facilitator configuration
-    let facilitator = {
-        // Parse the payer pubkey and compute its ATA
-        let in_account =
-            state
-                .networks_config
-                .configs
-                .iter()
-                .next()
-                .and_then(|(_, network_config)| {
-                    let currency = network_config.currencies().first()?;
+        let facilitator_pubkey = payment_api_config
+            .facilitator_config
+            .get_facilitator_pubkey("solana");
 
-                    // Parse the facilitator's pubkey (the payer)
-                    let payer_pubkey = state.facilitator_pubkey.parse::<Pubkey>().ok()?;
-
-                    match currency.address() {
-                        MixedAddress::Solana(mint) => {
-                            // Compute ATA for the PAYER (facilitator), not the recipient
-                            let ata = spl_associated_token_account::get_associated_token_address(
-                                &payer_pubkey,
-                                &mint,
-                            );
-
-                            // Get currency details
-                            let solana_currency = currency.solana_currency()?;
-
-                            Some(TokenAccountConfig {
-                                currency: solana_currency.symbol.to_lowercase(),
-                                decimals: solana_currency.decimals,
-                                address: ata.to_string(),
-                                token_address: mint.to_string(),
-                            })
-                        }
-                        _ => None,
-                    }
-                });
-
-        in_account.map(|in_acc| FacilitatorConfig {
-            operator_account: OperatorAccountConfig {
-                out: state.facilitator_pubkey.clone(),
-                in_account: in_acc,
-            },
-            url: state.facilitator_url.to_string(),
-        })
+        match (in_account, facilitator_pubkey) {
+            (Some(in_acc), Some(pubkey)) => Some(FacilitatorConfig {
+                operator_account: OperatorAccountConfig {
+                    out: pubkey,
+                    in_account: in_acc,
+                },
+                url: catalog_state.facilitator_url.to_string(),
+            }),
+            _ => None,
+        }
     };
 
-    let validator = state.validators.networks.get(&network.to_string()).cloned();
+    let validator = payment_api_config
+        .validators
+        .networks
+        .get(&network.to_string())
+        .cloned();
 
     let x402 = X402Config {
         payout_account,

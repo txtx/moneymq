@@ -1,7 +1,7 @@
 use axum::{Json, body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
 
 use crate::api::catalog::{
-    ProviderState,
+    CatalogState,
     stripe::{
         types::{ListParams, ListResponse, StripeBillingMeter, StripeMeterEvent},
         utils::generate_stripe_id,
@@ -10,7 +10,7 @@ use crate::api::catalog::{
 
 /// GET /v1/billing/meters - List billing meters
 pub async fn list_meters(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
@@ -73,7 +73,7 @@ impl BillingMeterEventRequest {
 
 /// POST /v1/billing/meter_events - Record a meter event
 pub async fn create_meter_event(
-    State(_state): State<ProviderState>,
+    State(_state): State<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     let BillingMeterEventRequest { event_name } = BillingMeterEventRequest::parse(&body);

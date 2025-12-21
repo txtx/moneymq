@@ -1,7 +1,7 @@
 use console::style;
 use indexmap::IndexMap;
 use moneymq_core::{
-    api::{NetworksConfig, payment::FacilitatorState},
+    api::{NetworksConfig, payment::PaymentApiConfig},
     validator::SolanaValidatorConfig,
 };
 use moneymq_types::x402::{
@@ -137,7 +137,7 @@ impl ServiceCommand for RunCommand {
         environment: &EnvironmentConfig,
         networks_config: &NetworksConfig,
         port: u16,
-    ) -> Result<(Url, String, ValidatorsConfig, Option<FacilitatorState>), RunCommandError> {
+    ) -> Result<(Url, String, ValidatorsConfig, PaymentApiConfig), RunCommandError> {
         match environment {
             EnvironmentConfig::Sandbox(sandbox) => {
                 self.setup_sandbox_payment_api(sandbox, networks_config, port)
@@ -159,7 +159,7 @@ impl RunCommand {
         sandbox: &SandboxEnvironment,
         networks_config: &NetworksConfig,
         port: u16,
-    ) -> Result<(Url, String, ValidatorsConfig, Option<FacilitatorState>), RunCommandError> {
+    ) -> Result<(Url, String, ValidatorsConfig, PaymentApiConfig), RunCommandError> {
         let (facilitator_config, validators_config) =
             build_sandbox_payment_api_config(sandbox, port)
                 .map_err(RunCommandError::StartPaymentApi)?;
@@ -204,7 +204,7 @@ impl RunCommand {
             payment_api_url,
             facilitator_pubkey,
             validators_config,
-            Some(payment_api_state),
+            payment_api_state,
         ))
     }
 }
@@ -214,7 +214,7 @@ async fn setup_payment_api_networks(
     mut facilitator_config: FacilitatorConfig,
     validators_config: &ValidatorsConfig,
     networks_config: &NetworksConfig,
-) -> Result<(url::Url, String, FacilitatorState), String> {
+) -> Result<(url::Url, String, PaymentApiConfig), String> {
     #[cfg(feature = "embedded_validator")]
     for (network_name, facilitator_network_config) in facilitator_config.networks.iter_mut() {
         match facilitator_network_config {
@@ -287,10 +287,13 @@ async fn setup_payment_api_networks(
         .expect("Facilitator pubkey should be initialized");
 
     // Create the payment API state
-    let payment_api_state =
-        moneymq_core::api::payment::create_facilitator_state(facilitator_config, true)
-            .await
-            .map_err(|e| format!("Failed to create payment API state: {e}"))?;
+    let payment_api_state = moneymq_core::api::payment::create_payment_api_config(
+        facilitator_config,
+        validators_config.clone(),
+        true,
+    )
+    .await
+    .map_err(|e| format!("Failed to create payment API state: {e}"))?;
 
     Ok((url, facilitator_pubkey, payment_api_state))
 }

@@ -9,7 +9,7 @@ use axum::{
 use uuid::Uuid;
 
 use crate::api::catalog::{
-    ProviderState,
+    CatalogState,
     stripe::types::{
         CheckoutLineItem, CheckoutLineItemList, CheckoutLineItemPrice, CheckoutSessionStatus,
         CreateCheckoutSessionRequest, PaymentIntentStatus, PaymentStatus, StripeCheckoutSession,
@@ -19,7 +19,7 @@ use crate::api::catalog::{
 
 /// POST /checkout/sessions - Create a new checkout session
 pub async fn create_checkout_session(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     Json(request): Json<CreateCheckoutSessionRequest>,
 ) -> impl IntoResponse {
     let now = SystemTime::now()
@@ -223,7 +223,7 @@ pub async fn create_checkout_session(
 
 /// GET /checkout/sessions/:id - Retrieve a checkout session
 pub async fn retrieve_checkout_session(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
     let sessions = state.checkout_sessions.lock().unwrap();
@@ -261,7 +261,7 @@ pub async fn retrieve_checkout_session(
 
 /// GET /checkout/sessions/:id/line_items - Get line items for a checkout session
 pub async fn list_checkout_session_line_items(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
     let sessions = state.checkout_sessions.lock().unwrap();
@@ -284,7 +284,7 @@ pub async fn list_checkout_session_line_items(
 
 /// POST /checkout/sessions/:id/expire - Expire a checkout session
 pub async fn expire_checkout_session(
-    State(state): State<ProviderState>,
+    State(state): State<CatalogState>,
     Path(session_id): Path<String>,
 ) -> impl IntoResponse {
     let mut sessions = state.checkout_sessions.lock().unwrap();

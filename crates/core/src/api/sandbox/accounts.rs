@@ -7,10 +7,10 @@ use moneymq_types::x402::{
 use serde_json::{Value, json};
 use solana_pubkey::Pubkey;
 
-use crate::api::catalog::ProviderState;
+use crate::api::catalog::CatalogState;
 
 /// GET /sandbox/accounts - List local network accounts
-pub async fn list_accounts(State(state): State<ProviderState>) -> Result<Json<Value>, Json<Value>> {
+pub async fn list_accounts(State(state): State<CatalogState>) -> Result<Json<Value>, Json<Value>> {
     let networks_config = &state.networks_config;
 
     let mut res = json!({});

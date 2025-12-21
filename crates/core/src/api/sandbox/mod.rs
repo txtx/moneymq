@@ -19,6 +19,7 @@ use crate::validator::surfnet_utils::{
 };
 
 mod accounts;
+pub mod config;
 pub use accounts::list_accounts;
 
 /// Initial USDC token amount for user accounts in local surfnet (2000 USDC with 6 decimals)
