@@ -9,18 +9,9 @@ use crate::api::{
 ///
 /// This endpoint returns a list of transactions stored from x402 payments.
 pub async fn list_transactions(
-    Extension(state): Extension<Option<PaymentApiConfig>>,
+    Extension(state): Extension<PaymentApiConfig>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
-    let Some(state) = state else {
-        return Json(ListResponse {
-            object: "list".to_string(),
-            data: vec![],
-            has_more: false,
-            url: "/v1/transactions".to_string(),
-        });
-    };
-
     let limit = params.limit.unwrap_or(10).min(100) as usize;
 
     let start_idx = if let Some(starting_after) = params.starting_after {

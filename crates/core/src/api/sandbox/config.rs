@@ -1,6 +1,6 @@
 use std::fs;
 
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Extension, Json, response::IntoResponse};
 use moneymq_types::x402::{MixedAddress, Network, config::facilitator::ValidatorNetworkConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -73,8 +73,8 @@ pub struct FacilitatorConfig {
 
 /// Config endpoint - returns provider configuration including branding and x402 settings
 pub async fn get_config(
-    State(catalog_state): State<CatalogState>,
-    State(payment_api_config): State<PaymentApiConfig>,
+    Extension(catalog_state): Extension<CatalogState>,
+    Extension(payment_api_config): Extension<PaymentApiConfig>,
 ) -> impl IntoResponse {
     let network = Network::Solana;
     // Build account configuration

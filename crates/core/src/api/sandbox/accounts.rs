@@ -1,6 +1,6 @@
 //! Sandbox accounts endpoint
 
-use axum::{Json, extract::State};
+use axum::{Extension, Json};
 use moneymq_types::x402::{
     LocalManagedRecipient, MixedAddress, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
 };
@@ -10,7 +10,9 @@ use solana_pubkey::Pubkey;
 use crate::api::catalog::CatalogState;
 
 /// GET /sandbox/accounts - List local network accounts
-pub async fn list_accounts(State(state): State<CatalogState>) -> Result<Json<Value>, Json<Value>> {
+pub async fn list_accounts(
+    Extension(state): Extension<CatalogState>,
+) -> Result<Json<Value>, Json<Value>> {
     let networks_config = &state.networks_config;
 
     let mut res = json!({});

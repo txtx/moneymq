@@ -1,12 +1,6 @@
 use std::collections::HashMap;
 
-use axum::{
-    Json,
-    body::Bytes,
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{Extension, Json, body::Bytes, extract::Path, http::StatusCode, response::IntoResponse};
 
 use crate::api::catalog::{
     CatalogState,
@@ -18,7 +12,7 @@ use crate::api::catalog::{
 
 /// POST /v1/payment_intents - Create a payment intent
 pub async fn create_payment_intent(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     // Try to parse as JSON first, then fall back to form-encoded
@@ -195,7 +189,7 @@ pub async fn create_payment_intent(
 
 /// GET /v1/payment_intents/:id - Retrieve a payment intent
 pub async fn retrieve_payment_intent(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let payment_intents = state.payment_intents.lock().unwrap();
@@ -217,12 +211,12 @@ pub async fn retrieve_payment_intent(
         }
     });
 
-    (StatusCode::OK, Json(payment_intent))
+    (StatusCode::OK, Json(payment_intent)).into_response()
 }
 
 /// POST /v1/payment_intents/:id/confirm - Confirm a payment intent
 pub async fn confirm_payment_intent(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Path(id): Path<String>,
     body: Bytes,
 ) -> impl IntoResponse {
@@ -269,12 +263,12 @@ pub async fn confirm_payment_intent(
     // Store the updated payment intent
     payment_intents.insert(id, payment_intent.clone());
 
-    (StatusCode::OK, Json(payment_intent))
+    (StatusCode::OK, Json(payment_intent)).into_response()
 }
 
 /// POST /v1/payment_intents/:id/cancel - Cancel a payment intent
 pub async fn cancel_payment_intent(
-    State(_state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let payment_intent = StripePaymentIntent {
@@ -292,5 +286,5 @@ pub async fn cancel_payment_intent(
         client_secret: Some(format!("{}_secret_{}", id, generate_stripe_id(""))),
     };
 
-    (StatusCode::OK, Json(payment_intent))
+    (StatusCode::OK, Json(payment_intent)).into_response()
 }

@@ -4,11 +4,7 @@ use moneymq_types::x402::{SupportedPaymentKind, SupportedResponse};
 use crate::api::payment::PaymentApiConfig;
 
 /// GET /supported endpoint - returns supported payment kinds
-pub async fn handler(Extension(state): Extension<Option<PaymentApiConfig>>) -> impl IntoResponse {
-    let Some(state) = state else {
-        return Json(SupportedResponse { kinds: vec![] });
-    };
-
+pub async fn handler(Extension(state): Extension<PaymentApiConfig>) -> impl IntoResponse {
     let kinds = state
         .facilitator_config
         .networks

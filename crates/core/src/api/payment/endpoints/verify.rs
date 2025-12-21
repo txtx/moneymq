@@ -14,21 +14,10 @@ use crate::api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, netw
 
 /// POST /verify endpoint - verify a payment payload
 pub async fn handler(
-    Extension(state): Extension<Option<PaymentApiConfig>>,
+    Extension(state): Extension<PaymentApiConfig>,
     Json(request): Json<VerifyRequest>,
 ) -> impl IntoResponse {
     debug!("Verify endpoint called");
-
-    let Some(state) = state else {
-        error!("Verify endpoint: PaymentApiConfig is None!");
-        return (
-            StatusCode::NOT_FOUND,
-            Json(VerifyResponse::Invalid {
-                reason: FacilitatorErrorReason::FreeForm("Not found".into()),
-                payer: None,
-            }),
-        );
-    };
 
     debug!(
         "Verify endpoint: PaymentApiConfig loaded, payment_stack_id={}",

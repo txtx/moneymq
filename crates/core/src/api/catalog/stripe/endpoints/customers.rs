@@ -1,9 +1,5 @@
 use axum::{
-    Form, Json,
-    body::Bytes,
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
+    Extension, Form, Json, body::Bytes, extract::Path, http::StatusCode, response::IntoResponse,
 };
 
 use crate::api::catalog::{
@@ -16,7 +12,7 @@ use crate::api::catalog::{
 
 /// POST /v1/customers - Create a new customer
 pub async fn create_customer(
-    State(_state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Form(request): Form<CreateCustomerRequest>,
 ) -> impl IntoResponse {
     // Generate a mock customer ID
@@ -39,12 +35,12 @@ pub async fn create_customer(
         phone: None,
     };
 
-    (StatusCode::OK, Json(customer))
+    (StatusCode::OK, Json(customer)).into_response()
 }
 
 /// POST /v1/customers/:id - Update a customer
 pub async fn update_customer(
-    State(_state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Path(customer_id): Path<String>,
     body: Bytes,
 ) -> impl IntoResponse {
@@ -77,5 +73,5 @@ pub async fn update_customer(
         phone: None,
     };
 
-    (StatusCode::OK, Json(customer))
+    (StatusCode::OK, Json(customer)).into_response()
 }

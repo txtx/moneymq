@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    extract::{Path, State},
-    response::IntoResponse,
-};
+use axum::{Extension, Json, extract::Path, response::IntoResponse};
 use serde::Serialize;
 
 use crate::api::catalog::{
@@ -12,7 +8,7 @@ use crate::api::catalog::{
 
 /// GET /v1/products - List products
 pub async fn list_products(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
@@ -70,7 +66,7 @@ pub struct ProductAccessResponse {
 ///
 /// After successful payment, returns access confirmation.
 pub async fn get_product_access(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Path(product_id): Path<String>,
 ) -> impl IntoResponse {
     // Find the product

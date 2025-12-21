@@ -1,4 +1,4 @@
-use axum::{Json, body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{Extension, Json, body::Bytes, http::StatusCode, response::IntoResponse};
 
 use crate::api::catalog::{
     CatalogState,
@@ -7,6 +7,8 @@ use crate::api::catalog::{
         utils::generate_stripe_id,
     },
 };
+
+#[allow(dead_code)]
 
 pub struct SubscriptionRequest {
     pub customer: Option<String>,
@@ -45,7 +47,7 @@ impl SubscriptionRequest {
 
 /// POST /v1/subscriptions - Create a subscription
 pub async fn create_subscription(
-    State(_state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     let SubscriptionRequest {
@@ -91,5 +93,5 @@ pub async fn create_subscription(
         latest_invoice: Some(generate_stripe_id("in")),
     };
 
-    (StatusCode::OK, Json(subscription))
+    (StatusCode::OK, Json(subscription)).into_response()
 }

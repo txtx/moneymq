@@ -107,7 +107,7 @@ pub fn create_router(state: PaymentApiConfig) -> Router {
             get(endpoints::admin::list_transactions),
         )
         .layer(cors_layer)
-        .layer(Extension(Some(state)))
+        .layer(Extension(state))
 }
 
 /// Create a PaymentApiConfig from a FacilitatorConfig without starting a server

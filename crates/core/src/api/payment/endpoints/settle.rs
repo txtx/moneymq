@@ -14,22 +14,9 @@ use crate::api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, netw
 
 /// POST /settle endpoint - settle a payment on-chain
 pub async fn handler(
-    Extension(state): Extension<Option<PaymentApiConfig>>,
+    Extension(state): Extension<PaymentApiConfig>,
     Json(request): Json<SettleRequest>,
 ) -> impl IntoResponse {
-    let Some(state) = state else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(SettleResponse {
-                success: false,
-                error_reason: Some(FacilitatorErrorReason::UnexpectedSettleError),
-                payer: request.payment_requirements.pay_to.clone(),
-                transaction: None,
-                network: request.payment_requirements.network.clone(),
-            }),
-        );
-    };
-
     info!(
         "Received settle request for network: {:?}",
         request.payment_requirements.network

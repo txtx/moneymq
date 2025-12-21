@@ -1,4 +1,4 @@
-use axum::{Json, body::Bytes, extract::State, http::StatusCode, response::IntoResponse};
+use axum::{Extension, Json, body::Bytes, http::StatusCode, response::IntoResponse};
 
 use crate::api::catalog::{
     CatalogState,
@@ -10,7 +10,7 @@ use crate::api::catalog::{
 
 /// GET /v1/billing/meters - List billing meters
 pub async fn list_meters(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
@@ -50,6 +50,7 @@ pub async fn list_meters(
         has_more,
         url: "/v1/billing/meters".to_string(),
     })
+    .into_response()
 }
 
 pub struct BillingMeterEventRequest {
@@ -73,7 +74,7 @@ impl BillingMeterEventRequest {
 
 /// POST /v1/billing/meter_events - Record a meter event
 pub async fn create_meter_event(
-    State(_state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     let BillingMeterEventRequest { event_name } = BillingMeterEventRequest::parse(&body);

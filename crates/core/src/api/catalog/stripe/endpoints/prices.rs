@@ -1,4 +1,4 @@
-use axum::{Json, extract::State, response::IntoResponse};
+use axum::{Extension, Json, response::IntoResponse};
 use moneymq_types::Product;
 
 use crate::api::catalog::{
@@ -8,7 +8,7 @@ use crate::api::catalog::{
 
 /// GET /v1/prices - List prices
 pub async fn list_prices(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;

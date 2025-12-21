@@ -1,9 +1,4 @@
-use axum::{
-    Form, Json,
-    extract::{Path, State},
-    http::StatusCode,
-    response::IntoResponse,
-};
+use axum::{Extension, Form, Json, extract::Path, http::StatusCode, response::IntoResponse};
 
 use crate::api::catalog::{
     CatalogState,
@@ -17,7 +12,7 @@ use crate::api::catalog::{
 
 /// POST /v1/payment_methods - Create a payment method
 pub async fn create_payment_method(
-    State(_state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Form(request): Form<CreatePaymentMethodRequest>,
 ) -> impl IntoResponse {
     // Generate a mock payment method ID
@@ -45,12 +40,12 @@ pub async fn create_payment_method(
         customer: None,
     };
 
-    (StatusCode::OK, Json(payment_method))
+    (StatusCode::OK, Json(payment_method)).into_response()
 }
 
 /// POST /v1/payment_methods/:id/attach - Attach payment method to customer
 pub async fn attach_payment_method(
-    State(_state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     Path(payment_method_id): Path<String>,
     Form(request): Form<AttachPaymentMethodRequest>,
 ) -> impl IntoResponse {
@@ -71,5 +66,5 @@ pub async fn attach_payment_method(
         customer: Some(request.customer),
     };
 
-    (StatusCode::OK, Json(payment_method))
+    (StatusCode::OK, Json(payment_method)).into_response()
 }

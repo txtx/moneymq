@@ -40,6 +40,15 @@ pub enum NetworksConfigError {
     InitializationError(Network, String),
 }
 
+impl Default for NetworksConfig {
+    fn default() -> Self {
+        Self {
+            configs: IndexMap::new(),
+            lookup: IndexMap::new(),
+        }
+    }
+}
+
 impl NetworksConfig {
     /// Initializes the [NetworksConfig] with the provided network configurations
     pub fn initialize(

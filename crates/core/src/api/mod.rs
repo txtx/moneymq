@@ -2,31 +2,12 @@ pub mod catalog;
 pub mod payment;
 pub mod sandbox;
 
-use axum::{Router, extract::FromRef, routing::get};
+use axum::{Extension, Router, routing::get};
 use catalog::CatalogState;
 use payment::PaymentApiConfig;
 // Re-export commonly used types
 pub use sandbox::{NetworksConfig, NetworksConfigError};
 use tower_http::cors::{Any, CorsLayer};
-
-/// Combined state for routes that need both catalog and payment config
-#[derive(Clone)]
-pub struct AppState {
-    pub catalog: CatalogState,
-    pub payment: PaymentApiConfig,
-}
-
-impl FromRef<AppState> for CatalogState {
-    fn from_ref(state: &AppState) -> Self {
-        state.catalog.clone()
-    }
-}
-
-impl FromRef<AppState> for PaymentApiConfig {
-    fn from_ref(state: &AppState) -> Self {
-        state.payment.clone()
-    }
-}
 
 /// Create a combined router that includes both catalog and payment APIs
 ///
@@ -44,24 +25,19 @@ pub fn create_combined_router(
         .allow_methods(Any)
         .allow_headers(Any);
 
-    // Create combined state for routes needing both
-    let app_state = AppState {
-        catalog: catalog_state.clone(),
-        payment: payment_api_config.clone(),
-    };
-
-    // Create the catalog router (already includes .with_state())
+    // Create the catalog router (uses Extension layer internally)
     let catalog_router = catalog::create_router(catalog_state.clone());
 
     // Create root-level routes that need both CatalogState and PaymentApiConfig
-    let root_routes_with_state: Router<()> = Router::new()
+    let root_routes: Router<()> = Router::new()
         .route("/config", get(sandbox::config::get_config))
         .route("/sandbox/accounts", get(sandbox::list_accounts))
-        .with_state(app_state);
+        .layer(Extension(catalog_state))
+        .layer(Extension(payment_api_config.clone()));
 
     // Start with root-level routes (health, fallback) and merge stateful routes
     let mut app = catalog::create_root_router()
-        .merge(root_routes_with_state)
+        .merge(root_routes)
         .nest("/catalog/v1", catalog_router);
 
     // Mount the payment/facilitator API under /payment/v1 if provided

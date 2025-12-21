@@ -1,6 +1,6 @@
 use axum::{
+    Extension,
     body::Body,
-    extract::State,
     handler::Handler,
     http::{HeaderMap, Request, StatusCode},
     middleware::{self, Next},
@@ -385,7 +385,7 @@ fn extract_payment_details(state: &CatalogState, req_path: &str) -> Option<(i64,
 
 /// Middleware to handle payment requirements for meter events
 pub async fn payment_middleware(
-    State(state): State<CatalogState>,
+    Extension(state): Extension<CatalogState>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
@@ -672,21 +672,21 @@ pub async fn payment_middleware(
 
 /// Helper function to create a POST route with payment middleware
 ///
+/// The middleware extracts CatalogState from Extension, so the router must have
+/// the Extension layer applied.
+///
 /// # Example
 /// ```
 /// use crate::api::payment::endpoints::middleware::x402_post;
 ///
 /// let route = x402_post(my_handler, state.clone());
 /// ```
-pub fn x402_post<H, T>(handler: H, state: Option<CatalogState>) -> MethodRouter<CatalogState>
+pub fn x402_post<H, T>(handler: H, _state: Option<CatalogState>) -> MethodRouter<()>
 where
-    H: Handler<T, CatalogState>,
+    H: Handler<T, ()>,
     T: 'static,
 {
-    let Some(state) = state else {
-        return post(|| async { StatusCode::NOT_FOUND });
-    };
-    post(handler).layer(middleware::from_fn_with_state(state, payment_middleware))
+    post(handler).layer(middleware::from_fn(payment_middleware))
 }
 
 /// Helper function to create a GET route with product access payment middleware
@@ -694,22 +694,22 @@ where
 /// This is for raw x402 gating - the product and price are determined from the URL path.
 /// The endpoint will return 402 with payment requirements if no valid payment is provided.
 ///
+/// The middleware extracts CatalogState from Extension, so the router must have
+/// the Extension layer applied.
+///
 /// # Example
 /// ```
 /// use crate::api::payment::endpoints::middleware::x402_get;
 ///
 /// let route = x402_get(my_handler, state.clone());
 /// ```
-pub fn x402_get<H, T>(handler: H, state: Option<CatalogState>) -> MethodRouter<CatalogState>
+pub fn x402_get<H, T>(handler: H, _state: Option<CatalogState>) -> MethodRouter<()>
 where
-    H: Handler<T, CatalogState>,
+    H: Handler<T, ()>,
     T: 'static,
 {
-    let Some(state) = state else {
-        return get(|| async { StatusCode::NOT_FOUND });
-    };
     // Use the unified payment_middleware - it handles product access via extract_product_from_path
-    get(handler).layer(middleware::from_fn_with_state(state, payment_middleware))
+    get(handler).layer(middleware::from_fn(payment_middleware))
 }
 
 /// Extract product info from path like /products/{product_id}/access

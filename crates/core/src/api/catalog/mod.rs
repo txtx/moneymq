@@ -5,7 +5,7 @@ use std::{
 };
 
 use axum::{
-    Router,
+    Extension, Router,
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -135,7 +135,7 @@ pub fn create_router(state: CatalogState) -> Router<()> {
             "/checkout/sessions/{id}/expire",
             post(stripe::expire_checkout_session),
         )
-        .with_state(state)
+        .layer(Extension(state))
 }
 
 /// Health check endpoint
