@@ -886,20 +886,21 @@ pub fn consolidate_products(products: &[ProductSchema]) -> Vec<crate::Product> {
                 .as_ref()
                 .and_then(|dir| base_products.get(dir));
 
-            // Generate product ID from source_file or variant name
-            let product_id = variant
-                ._source_file
-                .clone()
-                .or_else(|| {
-                    variant._variant.clone().map(|v| {
-                        format!(
-                            "{}-{}",
-                            variant._product_dir.as_deref().unwrap_or("product"),
-                            v
-                        )
-                    })
-                })
-                .unwrap_or_else(|| format!("prod_{}", rand::random::<u32>()));
+            // Generate product ID from variant name: {product_dir}-{variant}
+            let product_id = if !variant.id.is_empty() {
+                // Use explicit ID if provided
+                variant.id.clone()
+            } else if let (Some(product_dir), Some(variant_name)) =
+                (&variant._product_dir, &variant._variant)
+            {
+                // Generate from product_dir and variant: surfnet-pro
+                format!("{}-{}", product_dir, variant_name)
+            } else if let Some(source_file) = &variant._source_file {
+                // Fallback to source_file for standalone products
+                source_file.clone()
+            } else {
+                format!("prod_{}", rand::random::<u32>())
+            };
 
             // Skip products without valid prices
             if !variant.has_prices() {
@@ -1093,7 +1094,7 @@ mod tests {
 
         assert_eq!(consolidated.len(), 1);
         let product = &consolidated[0];
-        assert_eq!(product.id, "surfnet/pro");
+        assert_eq!(product.id, "surfnet-pro");
         assert_eq!(product.name, Some("Product pro".to_string()));
         assert_eq!(
             product.description,
@@ -1123,9 +1124,9 @@ mod tests {
 
         // Check all variants are present
         let ids: Vec<&str> = consolidated.iter().map(|p| p.id.as_str()).collect();
-        assert!(ids.contains(&"surfnet/light"));
-        assert!(ids.contains(&"surfnet/pro"));
-        assert!(ids.contains(&"surfnet/max"));
+        assert!(ids.contains(&"surfnet-light"));
+        assert!(ids.contains(&"surfnet-pro"));
+        assert!(ids.contains(&"surfnet-max"));
     }
 
     #[test]
@@ -1158,7 +1159,7 @@ mod tests {
         let consolidated = consolidate_products(&products);
 
         assert_eq!(consolidated.len(), 1);
-        assert_eq!(consolidated[0].id, "surfnet/pro");
+        assert_eq!(consolidated[0].id, "surfnet-pro");
     }
 
     #[test]
@@ -1269,10 +1270,10 @@ mod tests {
         assert_eq!(consolidated.len(), 4);
 
         let ids: Vec<&str> = consolidated.iter().map(|p| p.id.as_str()).collect();
-        assert!(ids.contains(&"product-a/lite"));
-        assert!(ids.contains(&"product-a/pro"));
-        assert!(ids.contains(&"product-b/starter"));
-        assert!(ids.contains(&"product-b/enterprise"));
+        assert!(ids.contains(&"product-a-lite"));
+        assert!(ids.contains(&"product-a-pro"));
+        assert!(ids.contains(&"product-b-starter"));
+        assert!(ids.contains(&"product-b-enterprise"));
     }
 
     #[test]
