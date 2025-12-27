@@ -6,17 +6,30 @@ use crate::api::catalog::{
     stripe::types::{ListParams, ListResponse, StripeProduct},
 };
 
-/// GET /v1/products - List products
+/// Get the minimum price for a product (used for sorting)
+fn get_min_price(product: &moneymq_types::Product) -> i64 {
+    product
+        .prices
+        .iter()
+        .filter_map(|p| p.unit_amount)
+        .min()
+        .unwrap_or(i64::MAX) // Products without prices go last
+}
+
+/// GET /v1/products - List products (sorted by price ASC)
 pub async fn list_products(
     Extension(state): Extension<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
 
+    // Sort products by minimum price (ascending)
+    let mut sorted_products: Vec<_> = state.products.iter().collect();
+    sorted_products.sort_by_key(|p| get_min_price(p));
+
     // Find starting position
     let start_idx = if let Some(starting_after) = params.starting_after {
-        state
-            .products
+        sorted_products
             .iter()
             .position(|p| {
                 let external_id = if state.use_sandbox {
@@ -32,15 +45,15 @@ pub async fn list_products(
         0
     };
 
-    let end_idx = (start_idx + limit).min(state.products.len());
-    let products_slice = &state.products[start_idx..end_idx];
+    let end_idx = (start_idx + limit).min(sorted_products.len());
+    let products_slice = &sorted_products[start_idx..end_idx];
 
     let stripe_products: Vec<StripeProduct> = products_slice
         .iter()
         .map(|p| StripeProduct::from_product(p, state.use_sandbox))
         .collect();
 
-    let has_more = end_idx < state.products.len();
+    let has_more = end_idx < sorted_products.len();
 
     Json(ListResponse {
         object: "list".to_string(),

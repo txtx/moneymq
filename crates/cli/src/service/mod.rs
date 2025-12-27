@@ -63,6 +63,9 @@ pub trait ServiceCommand {
     /// Returns true if running in sandbox mode
     fn is_sandbox(&self, manifest: &Manifest) -> bool;
 
+    /// Returns the log level (None means logging disabled)
+    fn log_level(&self) -> Option<&str>;
+
     /// Build the payment networks map from the manifest
     fn payment_networks(&self, manifest: &Manifest) -> Result<PaymentNetworksMap, RunCommandError>;
 
@@ -215,17 +218,48 @@ pub trait ServiceCommand {
             (Vec::new(), Vec::new())
         };
 
-        // Initialize tracing
-        tracing_subscriber::fmt::init();
+        // Initialize tracing only if --log-level is set or RUST_LOG env var is present
+        if let Some(log_level) = self.log_level() {
+            use tracing_subscriber::EnvFilter;
+            let filter =
+                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+            let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+        } else if std::env::var("RUST_LOG").is_ok() {
+            use tracing_subscriber::EnvFilter;
+            let filter = EnvFilter::from_default_env();
+            let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
+        }
+        // If neither is set, tracing is a no-op
 
         let payment_networks = self.payment_networks(&ctx.manifest)?;
 
         let networks_config = self.networks_config(&ctx.manifest, payment_networks)?;
 
         // Setup payment API
-        let (_payment_api_url, facilitator_pubkey, validator_rpc_urls, payment_api_state) = self
-            .setup_payment_api(&ctx.manifest.payments, &environment, &networks_config, port)
-            .await?;
+        let (_payment_api_url, facilitator_pubkey, validator_rpc_urls, mut payment_api_state) =
+            self.setup_payment_api(&ctx.manifest.payments, &environment, &networks_config, port)
+                .await?;
+
+        // Setup event channel and stateful broadcaster for SSE
+        let (event_sender, event_receiver) = moneymq_core::events::create_event_channel();
+
+        // Create stateful event broadcaster with DB persistence
+        let event_stream_context = moneymq_core::events::EventStreamContext {
+            payment_stack_id: payment_api_state.payment_stack_id.clone(),
+            is_sandbox: payment_api_state.is_sandbox,
+        };
+        let event_broadcaster =
+            std::sync::Arc::new(moneymq_core::events::StatefulEventBroadcaster::new(
+                256,
+                payment_api_state.db_manager.clone(),
+                event_stream_context,
+            ));
+        payment_api_state = payment_api_state.with_event_sender(event_sender);
+
+        // Spawn the stateful event consumer thread
+        let broadcaster_clone = event_broadcaster.clone();
+        let _event_consumer_handle =
+            moneymq_core::events::spawn_stateful_event_consumer(event_receiver, broadcaster_clone);
 
         println!();
         println!(
@@ -275,9 +309,15 @@ pub trait ServiceCommand {
         let iac_router = crate::iac::create_router(iac_state);
 
         // Start the combined server with both catalog and payment APIs
-        moneymq_core::api::start_server(catalog_state, payment_api_state, Some(iac_router), port)
-            .await
-            .map_err(RunCommandError::ProviderStartError)?;
+        moneymq_core::api::start_server(
+            catalog_state,
+            payment_api_state,
+            Some(event_broadcaster),
+            Some(iac_router),
+            port,
+        )
+        .await
+        .map_err(RunCommandError::ProviderStartError)?;
 
         Ok(())
     }

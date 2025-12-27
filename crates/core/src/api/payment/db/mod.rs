@@ -23,6 +23,26 @@ pub type PooledConnection = diesel::r2d2::PooledConnection<ConnectionManager<DbC
 
 pub type DbPool = Pool<ConnectionManager<DbConnection>>;
 
+/// Custom connection initializer for SQLite
+/// Enables WAL mode and sets busy_timeout for better concurrency
+#[cfg(feature = "sqlite")]
+#[derive(Debug)]
+struct SqliteConnectionCustomizer;
+
+#[cfg(feature = "sqlite")]
+impl diesel::r2d2::CustomizeConnection<DbConnection, diesel::r2d2::Error>
+    for SqliteConnectionCustomizer
+{
+    fn on_acquire(&self, conn: &mut DbConnection) -> Result<(), diesel::r2d2::Error> {
+        use diesel::connection::SimpleConnection;
+        // WAL mode allows concurrent reads while writing
+        // busy_timeout waits up to 5 seconds for locks instead of failing immediately
+        conn.batch_execute("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
+            .map_err(|e| diesel::r2d2::Error::QueryError(e))?;
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct DbManager {
     control_db_conn: DbPool,
@@ -46,6 +66,12 @@ pub enum DbError {
     UpdateTxError(diesel::result::Error),
     #[error("Failed to list transactions: {0}")]
     ListTxError(diesel::result::Error),
+    #[error("Failed to insert cloud event: {0}")]
+    InsertEventError(diesel::result::Error),
+    #[error("Failed to query events: {0}")]
+    QueryEventError(diesel::result::Error),
+    #[error("Failed to manage event stream: {0}")]
+    EventStreamError(diesel::result::Error),
 }
 
 fn run_migrations(conn: &mut PooledConnection) -> Result<(), DbError> {
@@ -111,6 +137,14 @@ impl DbManager {
     pub fn local(database_url: &str) -> DbResult<Self> {
         debug!("Establishing connection to database at {}", database_url);
         let manager = ConnectionManager::<DbConnection>::new(database_url);
+
+        #[cfg(feature = "sqlite")]
+        let pool = Pool::builder()
+            .connection_customizer(Box::new(SqliteConnectionCustomizer))
+            .build(manager)
+            .unwrap();
+
+        #[cfg(feature = "postgres")]
         let pool = Pool::builder().build(manager).unwrap();
 
         let mut pooled_connection = pool
@@ -375,5 +409,141 @@ impl DbManager {
                 has_more,
             )
         })
+    }
+
+    // ==================== Event Stream Methods ====================
+
+    /// Insert a CloudEvent into the database for replay
+    pub fn insert_cloud_event(
+        &self,
+        event_id: String,
+        event_type: String,
+        event_source: String,
+        event_time: i64,
+        data_json: String,
+        payment_stack_id: &str,
+        is_sandbox: bool,
+    ) -> DbResult<()> {
+        let mut conn = self
+            .payment_db_conn
+            .get()
+            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+
+        let new_event = models::cloud_event::NewCloudEvent::new(
+            event_id,
+            event_type,
+            event_source,
+            event_time,
+            data_json,
+            payment_stack_id.to_string(),
+            is_sandbox,
+        );
+
+        new_event
+            .insert(&mut conn)
+            .map_err(DbError::InsertEventError)?;
+        Ok(())
+    }
+
+    /// Get events after a cursor for replay (for stateful streams)
+    pub fn get_events_after_cursor(
+        &self,
+        cursor_event_id: &str,
+        payment_stack_id: &str,
+        is_sandbox: bool,
+        limit: i64,
+    ) -> DbResult<Vec<models::CloudEventModel>> {
+        let mut conn = self
+            .payment_db_conn
+            .get()
+            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+
+        models::cloud_event::get_events_after_cursor(
+            &mut conn,
+            cursor_event_id,
+            payment_stack_id,
+            is_sandbox,
+            limit,
+        )
+        .map_err(DbError::QueryEventError)
+    }
+
+    /// Get the last N events for initial replay
+    pub fn get_last_events(
+        &self,
+        payment_stack_id: &str,
+        is_sandbox: bool,
+        limit: i64,
+    ) -> DbResult<Vec<models::CloudEventModel>> {
+        let mut conn = self
+            .payment_db_conn
+            .get()
+            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+
+        models::cloud_event::get_last_events(&mut conn, payment_stack_id, is_sandbox, limit)
+            .map_err(DbError::QueryEventError)
+    }
+
+    /// Find or create a stateful event stream
+    pub fn find_or_create_event_stream(
+        &self,
+        stream_id: &str,
+        payment_stack_id: &str,
+        is_sandbox: bool,
+    ) -> DbResult<models::EventStreamModel> {
+        let mut conn = self
+            .payment_db_conn
+            .get()
+            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+
+        models::event_stream::find_or_create_stream(
+            &mut conn,
+            stream_id,
+            payment_stack_id,
+            is_sandbox,
+        )
+        .map_err(DbError::EventStreamError)
+    }
+
+    /// Update the cursor for a stateful stream after consuming an event
+    /// Returns the number of rows updated (should be 1 if stream exists)
+    pub fn update_event_stream_cursor(
+        &self,
+        stream_id: &str,
+        payment_stack_id: &str,
+        is_sandbox: bool,
+        event_id: &str,
+        event_time: i64,
+    ) -> DbResult<usize> {
+        let mut conn = self
+            .payment_db_conn
+            .get()
+            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+
+        models::event_stream::update_stream_cursor(
+            &mut conn,
+            stream_id,
+            payment_stack_id,
+            is_sandbox,
+            event_id,
+            event_time,
+        )
+        .map_err(DbError::EventStreamError)
+    }
+
+    /// Find a stateful event stream by ID
+    pub fn find_event_stream(
+        &self,
+        stream_id: &str,
+        payment_stack_id: &str,
+        is_sandbox: bool,
+    ) -> DbResult<Option<models::EventStreamModel>> {
+        let mut conn = self
+            .payment_db_conn
+            .get()
+            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+
+        models::event_stream::find_stream(&mut conn, stream_id, payment_stack_id, is_sandbox)
+            .map_err(DbError::EventStreamError)
     }
 }

@@ -32,6 +32,10 @@ pub struct RunCommand {
     /// Port to run the server on (overrides environment config)
     #[arg(long)]
     pub port: Option<u16>,
+
+    /// Log level (error, warn, info, debug, trace). If not set, logging is disabled.
+    #[arg(long)]
+    pub log_level: Option<String>,
 }
 
 impl RunCommand {
@@ -82,6 +86,10 @@ impl ServiceCommand for RunCommand {
 
     fn is_sandbox(&self, manifest: &Manifest) -> bool {
         self.is_sandbox(manifest)
+    }
+
+    fn log_level(&self) -> Option<&str> {
+        self.log_level.as_deref()
     }
 
     fn payment_networks(
@@ -194,6 +202,7 @@ impl RunCommand {
             Self::post(),
             port
         );
+        println!(" {} http://localhost:{}/events", Self::get(), port);
 
         networks_config
             .fund_accounts(&validators_config)

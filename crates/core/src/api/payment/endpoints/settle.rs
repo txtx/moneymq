@@ -10,7 +10,13 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{error, info};
 
-use crate::api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, networks};
+use crate::{
+    api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, networks},
+    events::{
+        PaymentFlow, PaymentSettlementFailedData, PaymentSettlementSucceededData,
+        create_payment_settlement_failed_event, create_payment_settlement_succeeded_event,
+    },
+};
 
 /// POST /settle endpoint - settle a payment on-chain
 pub async fn handler(
@@ -98,7 +104,7 @@ pub async fn handler(
     let settle_request_base64 = serialize_to_base64(&request);
     let settle_response_base64 = serialize_to_base64(&response);
 
-    let status = if response.success {
+    let status: String = if response.success {
         "completed".into()
     } else {
         "failed".into()
@@ -121,8 +127,8 @@ pub async fn handler(
         Ok(Some(tx_id)) => {
             if let Err(e) = state.db_manager.update_transaction_after_settlement(
                 tx_id,
-                Some(status),
-                signature,
+                Some(status.clone()),
+                signature.clone(),
                 Some(settle_request_base64),
                 Some(settle_response_base64),
             ) {
@@ -150,6 +156,47 @@ pub async fn handler(
         }
         Err(e) => {
             error!("Error finding transaction for settlement: {}", e);
+        }
+    }
+
+    // Emit CloudEvent for settlement result
+    if let Some(ref sender) = state.event_sender {
+        // Extract product_id from payment requirements extra metadata
+        let product_id = request
+            .payment_requirements
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("product"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let event = if response.success {
+            let event_data = PaymentSettlementSucceededData {
+                payer: response.payer.to_string(),
+                amount: request.payment_requirements.max_amount_required.0.clone(),
+                network: format!("{:?}", request.payment_requirements.network),
+                transaction_signature: signature,
+                product_id,
+                payment_flow: PaymentFlow::X402,
+            };
+            create_payment_settlement_succeeded_event(event_data)
+        } else {
+            let event_data = PaymentSettlementFailedData {
+                payer: Some(response.payer.to_string()),
+                amount: request.payment_requirements.max_amount_required.0.clone(),
+                network: format!("{:?}", request.payment_requirements.network),
+                reason: response
+                    .error_reason
+                    .as_ref()
+                    .map(|r| format!("{:?}", r))
+                    .unwrap_or_else(|| "Unknown error".to_string()),
+                product_id,
+                payment_flow: PaymentFlow::X402,
+            };
+            create_payment_settlement_failed_event(event_data)
+        };
+        if let Err(e) = sender.send(event) {
+            error!("Failed to send settlement event: {}", e);
         }
     }
 

@@ -10,7 +10,13 @@ use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{debug, error};
 
-use crate::api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, networks};
+use crate::{
+    api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, networks},
+    events::{
+        PaymentFlow, PaymentVerificationFailedData, PaymentVerificationSucceededData,
+        create_payment_verification_failed_event, create_payment_verification_succeeded_event,
+    },
+};
 
 /// POST /verify endpoint - verify a payment payload
 pub async fn handler(
@@ -120,6 +126,45 @@ pub async fn handler(
             error!("Failed to log transaction to database: {}", e);
         }
     };
+
+    // Emit CloudEvent for verification result
+    if let Some(ref sender) = state.event_sender {
+        // Extract product_id from payment requirements extra metadata
+        let product_id = request
+            .payment_requirements
+            .extra
+            .as_ref()
+            .and_then(|extra| extra.get("product"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let event = match &response {
+            VerifyResponse::Valid { payer } => {
+                let event_data = PaymentVerificationSucceededData {
+                    payer: payer.to_string(),
+                    amount: request.payment_requirements.max_amount_required.0.clone(),
+                    network: format!("{:?}", request.payment_requirements.network),
+                    product_id: product_id.clone(),
+                    payment_flow: PaymentFlow::X402,
+                };
+                create_payment_verification_succeeded_event(event_data)
+            }
+            VerifyResponse::Invalid { reason, payer } => {
+                let event_data = PaymentVerificationFailedData {
+                    payer: payer.as_ref().map(|p| p.to_string()),
+                    amount: request.payment_requirements.max_amount_required.0.clone(),
+                    network: format!("{:?}", request.payment_requirements.network),
+                    reason: format!("{:?}", reason),
+                    product_id,
+                    payment_flow: PaymentFlow::X402,
+                };
+                create_payment_verification_failed_event(event_data)
+            }
+        };
+        if let Err(e) = sender.send(event) {
+            error!("Failed to send verification event: {}", e);
+        }
+    }
 
     (status, Json(response))
 }

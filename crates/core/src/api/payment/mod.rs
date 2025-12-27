@@ -8,6 +8,8 @@ use axum::{
     Extension, Router,
     routing::{get, post},
 };
+use cloudevents::Event;
+use crossbeam_channel::Sender;
 use kora_lib::{
     Config,
     config::{FeePayerPolicy, KoraConfig, MetricsConfig, Token2022Config, ValidationConfig},
@@ -44,6 +46,7 @@ pub struct PaymentApiConfig {
     pub signer_pool: Arc<SignerPool>,
     pub payment_stack_id: String,
     pub is_sandbox: bool,
+    pub event_sender: Option<Sender<Event>>,
 }
 
 impl PaymentApiConfig {
@@ -70,6 +73,7 @@ impl PaymentApiConfig {
             signer_pool: Arc::new(signer_pool),
             payment_stack_id,
             is_sandbox: true, // Local mode defaults to sandbox
+            event_sender: None,
         }
     }
 
@@ -90,7 +94,14 @@ impl PaymentApiConfig {
             signer_pool: Arc::new(signer_pool),
             payment_stack_id,
             is_sandbox,
+            event_sender: None,
         }
+    }
+
+    /// Set the event sender for CloudEvents
+    pub fn with_event_sender(mut self, sender: Sender<Event>) -> Self {
+        self.event_sender = Some(sender);
+        self
     }
 }
 

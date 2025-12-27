@@ -27,6 +27,10 @@ pub struct SandboxCommand {
     /// Port to run the server on (overrides environment config)
     #[arg(long)]
     pub port: Option<u16>,
+
+    /// Log level (error, warn, info, debug, trace). If not set, logging is disabled.
+    #[arg(long)]
+    pub log_level: Option<String>,
 }
 
 impl SandboxCommand {
@@ -35,6 +39,7 @@ impl SandboxCommand {
         RunCommand {
             environment: "sandbox".to_string(),
             port: self.port,
+            log_level: self.log_level.clone(),
         }
     }
 

@@ -30,6 +30,38 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    cloud_events (id) {
+        id -> Int4,
+        event_id -> Text,
+        event_type -> Text,
+        event_source -> Text,
+        event_time -> Int8,
+        data_json -> Text,
+        payment_stack_id -> Text,
+        is_sandbox -> Bool,
+        created_at -> Int8,
+    }
+}
+
+diesel::table! {
+    event_streams (id) {
+        id -> Int4,
+        stream_id -> Text,
+        payment_stack_id -> Text,
+        is_sandbox -> Bool,
+        last_event_id -> Nullable<Text>,
+        last_event_time -> Nullable<Int8>,
+        created_at -> Int8,
+        updated_at -> Int8,
+    }
+}
+
 diesel::joinable!(facilitated_transactions -> transaction_customers (customer_id));
 
-diesel::allow_tables_to_appear_in_same_query!(facilitated_transactions, transaction_customers,);
+diesel::allow_tables_to_appear_in_same_query!(
+    facilitated_transactions,
+    transaction_customers,
+    cloud_events,
+    event_streams,
+);
