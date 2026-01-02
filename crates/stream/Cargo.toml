@@ -1,0 +1,42 @@
+[package]
+name = "durable-stream"
+version = "0.1.0"
+edition = "2021"
+description = "Durable streams server implementation - append-only logs with replay support"
+license = "MIT"
+
+[dependencies]
+# HTTP server
+axum = { version = "0.8", features = ["macros"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "compression-gzip", "compression-deflate"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+base64 = "0.22"
+hex = "0.4"
+rand = "0.8"
+parking_lot = "0.12"
+tracing = "0.1"
+thiserror = "1"
+bytes = "1"
+async-stream = "0.3"
+futures = "0.3"
+tokio-stream = "0.1"
+
+# Optional: file-backed storage
+heed = { version = "0.20", optional = true }
+
+[features]
+default = []
+file-storage = ["heed"]
+
+[dev-dependencies]
+tokio-test = "0.4"

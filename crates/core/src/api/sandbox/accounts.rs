@@ -65,16 +65,16 @@ pub async fn list_accounts(
                 };
 
                 // Add stablecoins with USDC ATA if we have a USDC mint
-                if let Some(mint) = usdc_mint {
-                    if let Ok(owner_pubkey) = r.address().to_string().parse::<Pubkey>() {
-                        let usdc_ata = spl_associated_token_account::get_associated_token_address(
-                            &owner_pubkey,
-                            &mint,
-                        );
-                        account_json["stablecoins"] = json!({
-                            "usdc": usdc_ata.to_string(),
-                        });
-                    }
+                if let Some(mint) = usdc_mint
+                    && let Ok(owner_pubkey) = r.address().to_string().parse::<Pubkey>()
+                {
+                    let usdc_ata = spl_associated_token_account::get_associated_token_address(
+                        &owner_pubkey,
+                        &mint,
+                    );
+                    account_json["stablecoins"] = json!({
+                        "usdc": usdc_ata.to_string(),
+                    });
                 }
 
                 account_json

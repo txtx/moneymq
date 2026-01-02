@@ -4,7 +4,6 @@
 
 use std::io::{Read, Write};
 
-use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 
 /// Authentication configuration stored on disk
@@ -135,7 +134,7 @@ impl AuthConfig {
     async fn get_refreshed_session(&self, id_service_url: &str) -> Result<AuthConfig, String> {
         let client = reqwest::Client::new();
         let res = client
-            .post(&format!("{id_service_url}/token"))
+            .post(format!("{id_service_url}/token"))
             .json(&serde_json::json!({
                 "refreshToken": &self.refresh_token,
             }))
@@ -152,16 +151,16 @@ impl AuthConfig {
             let auth_config = AuthConfig::from_refresh_session_response(&res, &self.pat)?;
 
             auth_config.write_to_system_config()?;
-            return Ok(auth_config);
+            Ok(auth_config)
         } else {
             let err = res
                 .text()
                 .await
                 .unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(format!(
+            Err(format!(
                 "Received error from refresh session request: {}",
                 err
-            ));
+            ))
         }
     }
 

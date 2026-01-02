@@ -1,0 +1,19 @@
+name: Weather Pro
+description: For apps that need reliable weather data.
+
+features:
+  requests_per_day:
+    value: 10000
+  forecast_days:
+    value: 14
+  historical_data:
+    value: true
+  alerts:
+    value: true
+
+price:
+  amounts:
+    usd: 29.00
+  pricing_type: recurring
+  recurring:
+    interval: month

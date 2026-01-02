@@ -15,7 +15,7 @@ pub use iac::{
     MetadataField,
     MetadataFieldSchema,
     MetadataValue,
-    OneTimePriceSchema,
+    OverageConfig,
     PriceDefaults,
     PriceSchema,
     PricingType,
@@ -23,11 +23,11 @@ pub use iac::{
     ProductBase,
     ProductSchema,
     ProductVariant,
+    RecurringConfig,
     RecurringInterval,
-    RecurringPriceSchema,
+    TrialConfig,
     ValidationDiagnostic,
     ValidationResult,
-    VariantPrice,
     // Consolidation
     consolidate_products,
     // Deep merge utilities
@@ -258,6 +258,11 @@ pub struct Product {
     )]
     pub metadata: IndexMap<String, String>,
 
+    /// Product features with their values
+    /// Keys are feature identifiers, values contain name, description, and value
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub features: IndexMap<String, ProductFeature>,
+
     /// When the product was created
     #[serde(with = "chrono::serde::ts_seconds")]
     pub created_at: DateTime<Utc>,
@@ -293,6 +298,12 @@ fn random_id() -> String {
     format!("prod_{}", random_part)
 }
 
+impl Default for Product {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Product {
     pub fn new() -> Self {
         Self {
@@ -303,6 +314,7 @@ impl Product {
             description: None,
             active: true,
             metadata: IndexMap::new(),
+            features: IndexMap::new(),
             created_at: Utc::now(),
             updated_at: None,
             product_type: None,
@@ -366,6 +378,39 @@ impl Product {
     /// Get the base58 encoded filename for this product
     pub fn filename(&self) -> String {
         format!("{}.yaml", bs58::encode(&self.id).into_string())
+    }
+}
+
+/// A product feature with its definition and value
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProductFeature {
+    /// Display name for the feature
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// Description of the feature
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Feature value - can be boolean, number, or string
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<serde_json::Value>,
+}
+
+impl ProductFeature {
+    /// Create a new feature with name and description
+    pub fn new(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self {
+            name: Some(name.into()),
+            description: Some(description.into()),
+            value: None,
+        }
+    }
+
+    /// Set the feature value
+    pub fn with_value(mut self, value: serde_json::Value) -> Self {
+        self.value = Some(value);
+        self
     }
 }
 

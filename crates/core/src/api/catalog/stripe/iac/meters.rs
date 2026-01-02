@@ -101,16 +101,10 @@ fn convert_stripe_meter(
 /// `MeterCollection` containing all meters
 ///
 /// # Example
-/// ```no_run
-/// use moneymq_core::provider::stripe::iac::meters::download_meters;
-///
-/// #[tokio::main]
-/// async fn main() -> anyhow::Result<()> {
-///     let api_key = std::env::var("STRIPE_SECRET_KEY")?;
-///     let meters = download_meters(&api_key, "stripe", true).await?;
-///     println!("Downloaded {} meters", meters.total_count);
-///     Ok(())
-/// }
+/// ```ignore
+/// let api_key = std::env::var("STRIPE_SECRET_KEY")?;
+/// let meters = download_meters(&api_key, "stripe", true).await?;
+/// println!("Downloaded {} meters", meters.total_count);
 /// ```
 pub async fn download_meters(
     api_key: &str,

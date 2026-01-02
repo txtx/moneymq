@@ -116,6 +116,7 @@ pub fn get_last_events(
 }
 
 /// Find event by event_id
+#[allow(dead_code)]
 pub fn find_by_event_id(
     conn: &mut PooledConnection,
     event_id: &str,

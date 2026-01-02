@@ -195,12 +195,9 @@ impl InitCommand {
                         .map_err(|e| format!("Failed to fetch account info: {}", e))?;
 
                 let sandbox_account_info = if let Some(ref sandbox_key_value) = sandbox_key {
-                    let info = moneymq_core::api::catalog::stripe::iac::get_account_info(
-                        sandbox_key_value,
-                    )
-                    .await
-                    .ok();
-                    info
+                    moneymq_core::api::catalog::stripe::iac::get_account_info(sandbox_key_value)
+                        .await
+                        .ok()
                 } else {
                     None
                 };
@@ -338,87 +335,78 @@ impl InitCommand {
                 .map_err(|e| format!("Failed to fetch catalog: {}", e))?;
 
                 // If sandbox key is provided, fetch sandbox catalog and match products
-                if let Some(ref sandbox_key_value) = sandbox_key {
-                    match moneymq_core::api::catalog::stripe::iac::download_catalog(
-                        sandbox_key_value,
-                        &provider,
-                        false,
-                    )
-                    .await
-                    {
-                        Ok(sandbox_catalog) => {
-                            // Match sandbox products to production products by name
-                            let mut matched_count = 0;
-                            let mut matched_sandbox_ids = std::collections::HashSet::new();
+                if let Some(ref sandbox_key_value) = sandbox_key
+                    && let Ok(sandbox_catalog) =
+                        moneymq_core::api::catalog::stripe::iac::download_catalog(
+                            sandbox_key_value,
+                            &provider,
+                            false,
+                        )
+                        .await
+                {
+                    // Match sandbox products to production products by name
+                    let mut matched_count = 0;
+                    let mut matched_sandbox_ids = std::collections::HashSet::new();
 
-                            for prod_product in &mut catalog.products {
-                                // Find matching sandbox product by name
-                                if let Some(sandbox_product) = sandbox_catalog
-                                    .products
-                                    .iter()
-                                    .find(|sp| sp.name == prod_product.name && sp.name.is_some())
-                                {
-                                    // The sandbox product should have its ID in sandboxes["default"]
-                                    if let Some(sandbox_id) =
-                                        sandbox_product.sandboxes.get(DEFAULT_SANDBOX)
+                    for prod_product in &mut catalog.products {
+                        // Find matching sandbox product by name
+                        if let Some(sandbox_product) = sandbox_catalog
+                            .products
+                            .iter()
+                            .find(|sp| sp.name == prod_product.name && sp.name.is_some())
+                        {
+                            // The sandbox product should have its ID in sandboxes["default"]
+                            if let Some(sandbox_id) = sandbox_product.sandboxes.get(DEFAULT_SANDBOX)
+                            {
+                                // Add the sandbox ID to the production product
+                                prod_product
+                                    .sandboxes
+                                    .insert(DEFAULT_SANDBOX.to_string(), sandbox_id.clone());
+                                matched_sandbox_ids.insert(sandbox_id.clone());
+                                matched_count += 1;
+
+                                // Also match prices within the product
+                                for prod_price in &mut prod_product.prices {
+                                    if let Some(sandbox_price) = sandbox_product
+                                        .prices
+                                        .iter()
+                                        .find(|sp| sp.nickname == prod_price.nickname)
+                                        && let Some(sandbox_price_id) =
+                                            sandbox_price.sandboxes.get(DEFAULT_SANDBOX)
                                     {
-                                        // Add the sandbox ID to the production product
-                                        prod_product.sandboxes.insert(
+                                        prod_price.sandboxes.insert(
                                             DEFAULT_SANDBOX.to_string(),
-                                            sandbox_id.clone(),
+                                            sandbox_price_id.clone(),
                                         );
-                                        matched_sandbox_ids.insert(sandbox_id.clone());
-                                        matched_count += 1;
-
-                                        // Also match prices within the product
-                                        for prod_price in &mut prod_product.prices {
-                                            if let Some(sandbox_price) = sandbox_product
-                                                .prices
-                                                .iter()
-                                                .find(|sp| sp.nickname == prod_price.nickname)
-                                            {
-                                                if let Some(sandbox_price_id) =
-                                                    sandbox_price.sandboxes.get(DEFAULT_SANDBOX)
-                                                {
-                                                    prod_price.sandboxes.insert(
-                                                        DEFAULT_SANDBOX.to_string(),
-                                                        sandbox_price_id.clone(),
-                                                    );
-                                                }
-                                            }
-                                        }
                                     }
                                 }
-                            }
-
-                            // Add sandbox-only products (products that exist in sandbox but not in production)
-                            let mut sandbox_only_count = 0;
-                            for sandbox_product in &sandbox_catalog.products {
-                                // Check if this sandbox product was matched to a production product
-                                if let Some(sandbox_id) =
-                                    sandbox_product.sandboxes.get(DEFAULT_SANDBOX)
-                                {
-                                    if !matched_sandbox_ids.contains(sandbox_id) {
-                                        // This is a sandbox-only product - add it to the catalog
-                                        let mut new_product = sandbox_product.clone();
-                                        // Clear deployed_id since it doesn't exist in production
-                                        new_product.deployed_id = None;
-                                        catalog.products.push(new_product);
-                                        sandbox_only_count += 1;
-                                    }
-                                }
-                            }
-
-                            let total_changes = matched_count + sandbox_only_count;
-                            if total_changes > 0 {
-                                println!(
-                                    "{} Matched {} sandbox items",
-                                    style("✓").green(),
-                                    total_changes
-                                );
                             }
                         }
-                        Err(_) => {}
+                    }
+
+                    // Add sandbox-only products (products that exist in sandbox but not in production)
+                    let mut sandbox_only_count = 0;
+                    for sandbox_product in &sandbox_catalog.products {
+                        // Check if this sandbox product was matched to a production product
+                        if let Some(sandbox_id) = sandbox_product.sandboxes.get(DEFAULT_SANDBOX)
+                            && !matched_sandbox_ids.contains(sandbox_id)
+                        {
+                            // This is a sandbox-only product - add it to the catalog
+                            let mut new_product = sandbox_product.clone();
+                            // Clear deployed_id since it doesn't exist in production
+                            new_product.deployed_id = None;
+                            catalog.products.push(new_product);
+                            sandbox_only_count += 1;
+                        }
+                    }
+
+                    let total_changes = matched_count + sandbox_only_count;
+                    if total_changes > 0 {
+                        println!(
+                            "{} Matched {} sandbox items",
+                            style("✓").green(),
+                            total_changes
+                        );
                     }
                 }
 
@@ -460,55 +448,46 @@ impl InitCommand {
                     .map_err(|e| format!("Failed to fetch meters: {}", e))?;
 
                 // If sandbox key is provided, fetch sandbox meters and match
-                if let Some(ref sandbox_key_value) = sandbox_key {
-                    match moneymq_core::api::catalog::stripe::iac::download_meters(
-                        sandbox_key_value,
-                        &format!("{}_sandbox", provider_name),
-                        false,
-                    )
-                    .await
-                    {
-                        Ok(sandbox_meter_collection) => {
-                            // Track which sandbox meters were matched
-                            let mut matched_sandbox_ids = std::collections::HashSet::new();
+                if let Some(ref sandbox_key_value) = sandbox_key
+                    && let Ok(sandbox_meter_collection) =
+                        moneymq_core::api::catalog::stripe::iac::download_meters(
+                            sandbox_key_value,
+                            &format!("{}_sandbox", provider_name),
+                            false,
+                        )
+                        .await
+                {
+                    // Track which sandbox meters were matched
+                    let mut matched_sandbox_ids = std::collections::HashSet::new();
 
-                            // Match sandbox meters to production meters by event_name
-                            let mut _matched_count = 0;
-                            for prod_meter in &mut meter_collection.meters {
-                                if let Some(sandbox_meter) = sandbox_meter_collection
-                                    .meters
-                                    .iter()
-                                    .find(|sm| sm.event_name == prod_meter.event_name)
-                                {
-                                    if let Some(sandbox_id) =
-                                        sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
-                                    {
-                                        prod_meter.sandboxes.insert(
-                                            DEFAULT_SANDBOX.to_string(),
-                                            sandbox_id.clone(),
-                                        );
-                                        matched_sandbox_ids.insert(sandbox_id.clone());
-                                        _matched_count += 1;
-                                    }
-                                }
-                            }
-
-                            // Add sandbox-only meters
-                            let mut _sandbox_only_count = 0;
-                            for sandbox_meter in &sandbox_meter_collection.meters {
-                                if let Some(sandbox_id) =
-                                    sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
-                                {
-                                    if !matched_sandbox_ids.contains(sandbox_id) {
-                                        let mut new_meter = sandbox_meter.clone();
-                                        new_meter.deployed_id = None;
-                                        meter_collection.meters.push(new_meter);
-                                        _sandbox_only_count += 1;
-                                    }
-                                }
-                            }
+                    // Match sandbox meters to production meters by event_name
+                    let mut _matched_count = 0;
+                    for prod_meter in &mut meter_collection.meters {
+                        if let Some(sandbox_meter) = sandbox_meter_collection
+                            .meters
+                            .iter()
+                            .find(|sm| sm.event_name == prod_meter.event_name)
+                            && let Some(sandbox_id) = sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
+                        {
+                            prod_meter
+                                .sandboxes
+                                .insert(DEFAULT_SANDBOX.to_string(), sandbox_id.clone());
+                            matched_sandbox_ids.insert(sandbox_id.clone());
+                            _matched_count += 1;
                         }
-                        Err(_) => {}
+                    }
+
+                    // Add sandbox-only meters
+                    let mut _sandbox_only_count = 0;
+                    for sandbox_meter in &sandbox_meter_collection.meters {
+                        if let Some(sandbox_id) = sandbox_meter.sandboxes.get(DEFAULT_SANDBOX)
+                            && !matched_sandbox_ids.contains(sandbox_id)
+                        {
+                            let mut new_meter = sandbox_meter.clone();
+                            new_meter.deployed_id = None;
+                            meter_collection.meters.push(new_meter);
+                            _sandbox_only_count += 1;
+                        }
                     }
                 }
 
@@ -655,14 +634,14 @@ impl Editor {
 
                 // For CLI, check if current project exists in ~/.claude.json or if file exists at all
                 let cli_installed = dirs::home_dir()
-                    .and_then(|home| {
+                    .map(|home| {
                         let cli_path = home.join(".claude.json");
                         if !cli_path.exists() {
-                            return Some(false);
+                            return false;
                         }
 
                         // If .claude.json exists, consider CLI installed
-                        Some(true)
+                        true
                     })
                     .unwrap_or(false);
 
@@ -908,7 +887,7 @@ fn configure_cursor_mcp(config_path: &Path) -> Result<(), String> {
     };
 
     // Initialize mcpServers if it doesn't exist
-    if !config.get("mcpServers").is_some() {
+    if config.get("mcpServers").is_none() {
         config["mcpServers"] = serde_json::json!({});
     }
 
@@ -963,7 +942,7 @@ fn configure_zed_mcp(config_path: &Path) -> Result<(), String> {
     };
 
     // Initialize context_servers if it doesn't exist
-    if !settings.get("context_servers").is_some() {
+    if settings.get("context_servers").is_none() {
         settings["context_servers"] = serde_json::json!({});
     }
 
@@ -1060,7 +1039,7 @@ fn configure_claude_cli_project(
     };
 
     // Initialize projects object if it doesn't exist
-    if !config.get("projects").is_some() {
+    if config.get("projects").is_none() {
         config["projects"] = serde_json::json!({});
     }
 
@@ -1094,7 +1073,7 @@ fn configure_claude_cli_project(
         .ok_or("Failed to get project object")?;
 
     // Initialize mcpServers if it doesn't exist
-    if !project.get("mcpServers").is_some() {
+    if project.get("mcpServers").is_none() {
         project.insert("mcpServers".to_string(), serde_json::json!({}));
     }
 
@@ -1133,7 +1112,7 @@ fn configure_claude_config_file(config_path: &Path, moneymq_path: &str) -> Resul
     };
 
     // Initialize mcpServers if it doesn't exist
-    if !config.get("mcpServers").is_some() {
+    if config.get("mcpServers").is_none() {
         config["mcpServers"] = serde_json::json!({});
     }
 

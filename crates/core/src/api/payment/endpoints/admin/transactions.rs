@@ -14,17 +14,13 @@ pub async fn list_transactions(
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
 
-    let start_idx = if let Some(starting_after) = params.starting_after {
-        starting_after.parse().unwrap_or(0)
-    } else {
-        0
-    };
+    let starting_after = params.starting_after.and_then(|s| s.parse::<i32>().ok());
 
     let (transactions, has_more) = state
         .db_manager
         .list_transactions(
             limit,
-            Some(start_idx),
+            starting_after,
             &state.payment_stack_id,
             state.is_sandbox,
         )

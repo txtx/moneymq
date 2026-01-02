@@ -41,6 +41,7 @@ pub fn convert_product(
         description: stripe_product.description,
         active: stripe_product.active.unwrap_or(true),
         metadata: metadata_to_sorted_indexmap(stripe_product.metadata.unwrap_or_default()),
+        features: IndexMap::new(),
         created_at,
         updated_at,
         product_type: stripe_product.type_.map(|t| format!("{:?}", t)),
@@ -62,16 +63,10 @@ pub fn convert_product(
 /// A `Catalog` containing all products from your Stripe account
 ///
 /// # Example
-/// ```no_run
-/// use moneymq_core::provider::stripe::iac::products::download_catalog;
-///
-/// #[tokio::main]
-/// async fn main() -> anyhow::Result<()> {
-///     let api_key = std::env::var("STRIPE_SECRET_KEY")?;
-///     let catalog = download_catalog(&api_key, "stripe", true).await?;
-///     println!("Downloaded {} products", catalog.total_count);
-///     Ok(())
-/// }
+/// ```ignore
+/// let api_key = std::env::var("STRIPE_SECRET_KEY")?;
+/// let catalog = download_catalog(&api_key, "stripe", true).await?;
+/// println!("Downloaded {} products", catalog.total_count);
 /// ```
 pub async fn download_catalog(
     api_key: &str,

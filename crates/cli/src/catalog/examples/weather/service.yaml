@@ -1,0 +1,17 @@
+name: Weather API
+description: Real-time weather data and forecasts
+active: true
+
+features:
+  requests_per_day:
+    name: Daily Requests
+    description: API calls included per day
+  forecast_days:
+    name: Forecast Range
+    description: Days of forecast data available
+  historical_data:
+    name: Historical Data
+    description: Access to past weather records
+  alerts:
+    name: Weather Alerts
+    description: Severe weather notifications

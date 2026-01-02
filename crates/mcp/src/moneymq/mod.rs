@@ -1,7 +1,7 @@
 use std::{fs, path::PathBuf};
 
 use indexmap::IndexMap;
-use moneymq_types::iac::{PriceSchema, ProductSchema, ValidationDiagnostic, ValidationResult};
+use moneymq_types::iac::{ProductSchema, ValidationDiagnostic, ValidationResult};
 use rmcp::{
     ErrorData as McpError, RoleServer, ServerHandler,
     handler::server::{
@@ -104,75 +104,60 @@ fn validate_product_schema(product: &ProductSchema, index: usize) -> Vec<Validat
         );
     }
 
-    // Validate prices
-    match &product.prices {
+    // Validate price (singular)
+    match &product.price {
         None => {
             diagnostics.push(
                 ValidationDiagnostic::error(
-                    "missing-prices",
-                    format!("Product at index {} has no 'prices' array", index),
+                    "missing-price",
+                    format!("Product at index {} has no 'price' object", index),
                 )
-                .with_field(format!("{}.prices", prefix))
-                .with_expected("At least one price object")
-                .with_suggestion("Add a prices array with at least one price"),
+                .with_field(format!("{}.price", prefix))
+                .with_expected("A price object with amounts")
+                .with_suggestion("Add a price with amounts: { usd: 9.99 }"),
             );
         }
-        Some(prices) if prices.is_empty() => {
+        Some(price) if price.amounts.is_empty() => {
             diagnostics.push(
                 ValidationDiagnostic::error(
-                    "empty-prices",
-                    format!("Product at index {} has empty 'prices' array", index),
+                    "empty-amounts",
+                    format!("Product at index {} has empty 'amounts' map", index),
                 )
-                .with_field(format!("{}.prices", prefix))
-                .with_expected("At least one price object")
-                .with_suggestion("Add at least one price to the prices array"),
+                .with_field(format!("{}.price.amounts", prefix))
+                .with_expected("At least one currency/amount pair")
+                .with_suggestion("Add at least one amount: { usd: 9.99 }"),
             );
         }
-        Some(prices) => {
-            // Validate each price
-            for (i, price) in prices.iter().enumerate() {
-                let price_prefix = format!("{}.prices[{}]", prefix, i);
-                match price {
-                    PriceSchema::OneTime(p) => {
-                        if p.unit_amount < 0 {
-                            diagnostics.push(
-                                ValidationDiagnostic::error(
-                                    "invalid-amount",
-                                    format!("Price at index {} has negative unit_amount", i),
-                                )
-                                .with_field(format!("{}.unit_amount", price_prefix))
-                                .with_expected("A non-negative integer (cents)")
-                                .with_received(p.unit_amount.to_string()),
-                            );
-                        }
-                    }
-                    PriceSchema::Recurring(p) => {
-                        if p.unit_amount < 0 {
-                            diagnostics.push(
-                                ValidationDiagnostic::error(
-                                    "invalid-amount",
-                                    format!("Price at index {} has negative unit_amount", i),
-                                )
-                                .with_field(format!("{}.unit_amount", price_prefix))
-                                .with_expected("A non-negative integer (cents)")
-                                .with_received(p.unit_amount.to_string()),
-                            );
-                        }
-                        if let Some(count) = p.interval_count {
-                            if count < 1 {
-                                diagnostics.push(
-                                    ValidationDiagnostic::error(
-                                        "invalid-interval-count",
-                                        format!("Price at index {} has invalid interval_count", i),
-                                    )
-                                    .with_field(format!("{}.interval_count", price_prefix))
-                                    .with_expected("A positive integer (default: 1)")
-                                    .with_received(count.to_string()),
-                                );
-                            }
-                        }
-                    }
+        Some(price) => {
+            let price_prefix = format!("{}.price", prefix);
+            // Validate amounts (ensure no negative values)
+            for (currency, amount) in &price.amounts {
+                if *amount < 0.0 {
+                    diagnostics.push(
+                        ValidationDiagnostic::error(
+                            "invalid-amount",
+                            format!("Price for {} has negative amount", currency),
+                        )
+                        .with_field(format!("{}.amounts.{}", price_prefix, currency))
+                        .with_expected("A non-negative number (e.g., 9.99)")
+                        .with_received(amount.to_string()),
+                    );
                 }
+            }
+            // Validate recurring interval_count if present
+            if let Some(recurring) = &price.recurring
+                && let Some(count) = recurring.interval_count
+                && count < 1
+            {
+                diagnostics.push(
+                    ValidationDiagnostic::error(
+                        "invalid-interval-count",
+                        "Price has invalid interval_count".to_string(),
+                    )
+                    .with_field(format!("{}.recurring.interval_count", price_prefix))
+                    .with_expected("A positive integer (default: 1)")
+                    .with_received(count.to_string()),
+                );
             }
         }
     }
@@ -369,7 +354,7 @@ Writes each product as `<id>.yaml` in the products directory.
         // Read manifest to get catalog path
         let manifest_path = project_path.join(moneymq_types::MANIFEST_FILE_NAME);
         if !manifest_path.exists() {
-            return Ok(CallToolResult::error(vec![Content::text(&format!(
+            return Ok(CallToolResult::error(vec![Content::text(format!(
                 "## Error: Manifest Not Found\n\n`{}` not found at `{}`.\n\n**Solution:** Run `moneymq init` first to initialize your project.",
                 moneymq_types::MANIFEST_FILE_NAME,
                 project_root_dir

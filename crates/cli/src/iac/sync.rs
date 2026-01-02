@@ -824,107 +824,46 @@ pub fn merge_product_update(existing_content: &str, update: &ProductSchema) -> S
         None => {}
     }
 
-    // Update prices - replace array but preserve extra fields from matching prices
-    if let Some(prices) = &update.prices {
-        let existing_prices = existing_map
-            .get(&serde_yml::Value::String("prices".to_string()))
-            .and_then(|v| v.as_sequence())
-            .cloned()
-            .unwrap_or_default();
+    // Update price (singular) - preserve extra fields from existing price if present
+    if let Some(price) = &update.price {
+        if price.amounts.is_empty() {
+            // Remove price if empty amounts
+            existing_map.remove(serde_yml::Value::String("price".to_string()));
+        } else if let Ok(update_price_val) = serde_yml::to_value(price) {
+            // Try to merge with existing price structure
+            let existing_price = existing_map
+                .get(serde_yml::Value::String("price".to_string()))
+                .and_then(|v| v.as_mapping())
+                .cloned();
 
-        let mut new_prices: Vec<serde_yml::Value> = Vec::new();
-
-        for update_price in prices {
-            let update_price_val = match serde_yml::to_value(update_price) {
-                Ok(v) => v,
-                Err(_) => continue,
-            };
-
-            let update_map = match update_price_val.as_mapping() {
-                Some(m) => m,
-                None => {
-                    new_prices.push(update_price_val);
-                    continue;
-                }
-            };
-
-            // Try to find matching existing price by id first, then by currency
-            let update_id = update_map
-                .get(&serde_yml::Value::String("id".to_string()))
-                .and_then(|v| v.as_str());
-            let update_currency = update_map
-                .get(&serde_yml::Value::String("currency".to_string()))
-                .and_then(|v| v.as_str());
-
-            let mut matched_existing: Option<&serde_yml::Mapping> = None;
-
-            // First try to match by id
-            if let Some(uid) = update_id {
-                for existing_price in &existing_prices {
-                    if let Some(ep_map) = existing_price.as_mapping() {
-                        let existing_id = ep_map
-                            .get(&serde_yml::Value::String("id".to_string()))
-                            .and_then(|v| v.as_str());
-                        if existing_id == Some(uid) {
-                            matched_existing = Some(ep_map);
-                            break;
+            if let Some(mut existing_price_map) = existing_price {
+                // Merge update values into existing
+                if let Some(update_map) = update_price_val.as_mapping() {
+                    for (key, value) in update_map.iter() {
+                        if let Some(existing_val) = existing_price_map.get_mut(key) {
+                            *existing_val = value.clone();
+                        } else {
+                            existing_price_map.insert(key.clone(), value.clone());
                         }
                     }
                 }
-            }
-
-            // Fall back to matching by currency (since only USD is supported)
-            if matched_existing.is_none() {
-                if let Some(uc) = update_currency {
-                    for existing_price in &existing_prices {
-                        if let Some(ep_map) = existing_price.as_mapping() {
-                            let existing_currency = ep_map
-                                .get(&serde_yml::Value::String("currency".to_string()))
-                                .and_then(|v| v.as_str());
-                            if existing_currency == Some(uc) {
-                                matched_existing = Some(ep_map);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Build the new price, starting from existing if matched
-            if let Some(existing_map) = matched_existing {
-                // Start with existing price (preserves field order and extra fields)
-                let mut merged = existing_map.clone();
-                // Update with new values
-                for (key, value) in update_map.iter() {
-                    if let Some(existing_val) = merged.get_mut(key) {
-                        *existing_val = value.clone();
-                    } else {
-                        merged.insert(key.clone(), value.clone());
-                    }
-                }
-                new_prices.push(serde_yml::Value::Mapping(merged));
+                existing_map.insert(
+                    serde_yml::Value::String("price".to_string()),
+                    serde_yml::Value::Mapping(existing_price_map),
+                );
             } else {
-                // No match - add as new
-                new_prices.push(update_price_val);
+                // No existing price, just set the new one
+                update_field(existing_map, "price", update_price_val);
             }
-        }
-
-        // Only write prices if there are any (don't write empty array)
-        if !new_prices.is_empty() {
-            update_field(
-                existing_map,
-                "prices",
-                serde_yml::Value::Sequence(new_prices),
-            );
         }
     }
 
     // Remove internal fields that should not be persisted to YAML
     // These are computed at runtime from file paths
-    existing_map.remove(&serde_yml::Value::String("id".to_string()));
-    existing_map.remove(&serde_yml::Value::String("_source_file".to_string()));
-    existing_map.remove(&serde_yml::Value::String("_product_dir".to_string()));
-    existing_map.remove(&serde_yml::Value::String("_variant".to_string()));
+    existing_map.remove(serde_yml::Value::String("id".to_string()));
+    existing_map.remove(serde_yml::Value::String("_source_file".to_string()));
+    existing_map.remove(serde_yml::Value::String("_product_dir".to_string()));
+    existing_map.remove(serde_yml::Value::String("_variant".to_string()));
 
     // Generate the final YAML
     match crate::yaml_util::to_pretty_yaml_with_header(&existing, Some("Product"), Some("v1")) {
@@ -958,10 +897,28 @@ mod product_tests {
             unit_label: None,
             images: None,
             metadata: None,
-            prices: None,
+            features: None,
+            price: None,
             _source_file: None,
             _product_dir: None,
             _variant: None,
+        }
+    }
+
+    /// Create a price schema with the given amount in dollars
+    fn make_price(amount: f64) -> super::super::PriceSchema {
+        let mut amounts = IndexMap::new();
+        amounts.insert("usd".to_string(), amount);
+        super::super::PriceSchema {
+            id: None,
+            amounts,
+            pricing_type: None,
+            recurring: None,
+            overage: None,
+            trial: None,
+            active: Some(true),
+            nickname: None,
+            metadata: None,
         }
     }
 
@@ -1027,75 +984,48 @@ metadata:
     }
 
     #[test]
-    fn test_merge_preserves_price_deployed_ids() {
+    fn test_merge_preserves_price_extra_fields() {
         let existing = r#"---
 id: prod_123
 name: Test Product
-prices:
-  - pricing_type: one_time
-    currency: usd
-    unit_amount: 1000
-    deployed_id: price_stripe_abc
-    sandboxes:
-      default: price_test_xyz
+price:
+  amounts:
+    usd: 10.00
+  deployed_id: price_stripe_abc
+  sandboxes:
+    default: price_test_xyz
 "#;
         let mut update = make_product("prod_123", "Test Product");
-        update.prices = Some(vec![super::super::PriceSchema::OneTime(
-            super::super::OneTimePriceSchema {
-                id: None,
-                currency: super::super::Currency::Usd,
-                unit_amount: 1000,
-                active: Some(true),
-                nickname: None,
-                metadata: None,
-            },
-        )]);
+        update.price = Some(make_price(10.00));
 
         let result = merge_product_update(existing, &update);
 
         assert!(result.changed);
+        // Extra fields from existing price should be preserved
         assert!(result.content.contains("deployed_id: price_stripe_abc"));
         assert!(result.content.contains("default: price_test_xyz"));
     }
 
     #[test]
-    fn test_merge_handles_new_price() {
+    fn test_merge_updates_price_amount() {
         let existing = r#"---
 id: prod_123
 name: Test Product
-prices:
-  - pricing_type: one_time
-    currency: usd
-    unit_amount: 1000
-    deployed_id: price_existing
+price:
+  amounts:
+    usd: 10.00
+  deployed_id: price_existing
 "#;
         let mut update = make_product("prod_123", "Test Product");
-        update.prices = Some(vec![
-            super::super::PriceSchema::OneTime(super::super::OneTimePriceSchema {
-                id: None,
-                currency: super::super::Currency::Usd,
-                unit_amount: 1000,
-                active: None,
-                nickname: None,
-                metadata: None,
-            }),
-            super::super::PriceSchema::OneTime(super::super::OneTimePriceSchema {
-                id: None,
-                currency: super::super::Currency::Usd,
-                unit_amount: 2000,
-                active: None,
-                nickname: None,
-                metadata: None,
-            }),
-        ]);
+        update.price = Some(make_price(20.00)); // Update amount
 
         let result = merge_product_update(existing, &update);
 
         assert!(result.changed);
         // Existing price keeps its deployed_id
         assert!(result.content.contains("deployed_id: price_existing"));
-        // New price is added
-        assert!(result.content.contains("unit_amount: 2000"));
+        // Amount is updated
+        assert!(result.content.contains("usd: 20"));
     }
 
     #[test]
@@ -1142,15 +1072,15 @@ name: Base Product
 product_type: service
 "#;
         let mut update = make_product("prod_123", "Base Product");
-        update.prices = Some(vec![]); // Empty prices
+        update.price = None; // No price
 
         let result = merge_product_update(existing, &update);
 
         assert!(result.changed);
-        // Should not write empty prices array
+        // Should not write price field when None
         assert!(
-            !result.content.contains("prices:"),
-            "empty prices should not be written"
+            !result.content.contains("price:"),
+            "None price should not be written"
         );
     }
 
@@ -1231,29 +1161,18 @@ nested:
         let existing = r#"---
 id: prod_123
 name: Test Product
-prices:
-  - id: price_abc
-    deployed_id: price_stripe_123
-    currency: usd
-    unit_amount: 1000
-    pricing_type: one_time
-    recurring_interval: null
-    nickname: Enterprise
-    active: true
-    metadata: {}
-    created_at: 1704067200
+price:
+  id: price_abc
+  deployed_id: price_stripe_123
+  amounts:
+    usd: 10.00
+  nickname: Enterprise
+  active: true
+  metadata: {}
+  created_at: 1704067200
 "#;
         let mut update = make_product("prod_123", "Test Product");
-        update.prices = Some(vec![super::super::PriceSchema::OneTime(
-            super::super::OneTimePriceSchema {
-                id: Some("price_abc".to_string()),
-                currency: super::super::Currency::Usd,
-                unit_amount: 2000, // Changed amount
-                active: Some(true),
-                nickname: None,
-                metadata: None,
-            },
-        )]);
+        update.price = Some(make_price(20.00)); // Changed amount
 
         let result = merge_product_update(existing, &update);
 
@@ -1263,10 +1182,10 @@ prices:
         assert!(result.content.contains("nickname: Enterprise"));
         assert!(result.content.contains("created_at:"));
         // Verify updated field
-        assert!(result.content.contains("unit_amount: 2000"));
-        // Verify field order is roughly preserved (id should come before unit_amount)
+        assert!(result.content.contains("usd: 20"));
+        // Verify field order is roughly preserved (id should come before amounts)
         let id_pos = result.content.find("id: price_abc").unwrap();
-        let amount_pos = result.content.find("unit_amount: 2000").unwrap();
+        let amount_pos = result.content.find("usd: 20").unwrap();
         assert!(id_pos < amount_pos, "Field order not preserved");
     }
 
@@ -1304,44 +1223,38 @@ product_type: service
     }
 
     #[test]
-    fn test_merge_price_type_change_replaces_not_adds() {
-        // When switching from one_time to recurring, should replace not add
+    fn test_merge_price_with_recurring_config() {
         let existing = r#"---
 id: prod_123
 name: Test Product
-prices:
-  - id: price_abc
-    deployed_id: price_stripe_123
-    currency: usd
-    unit_amount: 1000
-    pricing_type: one_time
-    created_at: 1704067200
+price:
+  amounts:
+    usd: 10.00
+  deployed_id: price_stripe_123
+  created_at: 1704067200
 "#;
         let mut update = make_product("prod_123", "Test Product");
-        // Switch to recurring price
-        update.prices = Some(vec![super::super::PriceSchema::Recurring(
-            super::super::RecurringPriceSchema {
-                id: Some("price_abc".to_string()),
-                currency: super::super::Currency::Usd,
-                unit_amount: 1000,
+        // Add recurring config to price
+        let mut amounts = IndexMap::new();
+        amounts.insert("usd".to_string(), 10.0);
+        update.price = Some(super::super::PriceSchema {
+            id: None,
+            amounts,
+            pricing_type: Some(super::super::PricingType::Recurring),
+            recurring: Some(super::super::RecurringConfig {
                 interval: super::super::RecurringInterval::Month,
                 interval_count: None,
-                active: Some(true),
-                nickname: None,
-                metadata: None,
-            },
-        )]);
+            }),
+            overage: None,
+            trial: None,
+            active: Some(true),
+            nickname: None,
+            metadata: None,
+        });
 
         let result = merge_product_update(existing, &update);
 
         assert!(result.changed);
-        // Should have only ONE price (not two)
-        let price_count = result.content.matches("pricing_type:").count();
-        assert_eq!(
-            price_count, 1,
-            "Should have exactly one price, not {}",
-            price_count
-        );
         // Should be recurring now
         assert!(result.content.contains("pricing_type: recurring"));
         // Should preserve deployed_id and created_at
@@ -1350,39 +1263,25 @@ prices:
     }
 
     #[test]
-    fn test_merge_price_matches_by_currency_when_no_id() {
-        // When price has no id, match by currency (since only USD supported)
+    fn test_merge_preserves_price_deployed_id() {
         let existing = r#"---
 id: prod_123
 name: Test Product
-prices:
-  - deployed_id: price_stripe_123
-    currency: usd
-    unit_amount: 1000
-    pricing_type: one_time
-    created_at: 1704067200
+price:
+  deployed_id: price_stripe_123
+  amounts:
+    usd: 10.00
+  created_at: 1704067200
 "#;
         let mut update = make_product("prod_123", "Test Product");
-        update.prices = Some(vec![super::super::PriceSchema::OneTime(
-            super::super::OneTimePriceSchema {
-                id: None,
-                currency: super::super::Currency::Usd,
-                unit_amount: 2000, // Changed amount
-                active: Some(true),
-                nickname: None,
-                metadata: None,
-            },
-        )]);
+        update.price = Some(make_price(20.00)); // Changed amount
 
         let result = merge_product_update(existing, &update);
 
         assert!(result.changed);
-        // Should update existing price, not add new
-        let price_count = result.content.matches("currency: usd").count();
-        assert_eq!(price_count, 1, "Should have exactly one price");
         // Should preserve deployed_id
         assert!(result.content.contains("deployed_id: price_stripe_123"));
         // Should have updated amount
-        assert!(result.content.contains("unit_amount: 2000"));
+        assert!(result.content.contains("usd: 20"));
     }
 }

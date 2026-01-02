@@ -12,7 +12,7 @@ use crate::api::catalog::{
 
 /// POST /v1/payment_methods - Create a payment method
 pub async fn create_payment_method(
-    Extension(state): Extension<CatalogState>,
+    Extension(_state): Extension<CatalogState>,
     Form(request): Form<CreatePaymentMethodRequest>,
 ) -> impl IntoResponse {
     // Generate a mock payment method ID
@@ -45,7 +45,7 @@ pub async fn create_payment_method(
 
 /// POST /v1/payment_methods/:id/attach - Attach payment method to customer
 pub async fn attach_payment_method(
-    Extension(state): Extension<CatalogState>,
+    Extension(_state): Extension<CatalogState>,
     Path(payment_method_id): Path<String>,
     Form(request): Form<AttachPaymentMethodRequest>,
 ) -> impl IntoResponse {

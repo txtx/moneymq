@@ -155,11 +155,10 @@ impl NetworksConfig {
                         .user_accounts
                         .iter()
                         .map(|recipient| {
-                            recipient
+                            *recipient
                                 .address()
                                 .pubkey()
                                 .expect("Expected Solana address")
-                                .clone()
                         })
                         .collect::<Vec<_>>();
 

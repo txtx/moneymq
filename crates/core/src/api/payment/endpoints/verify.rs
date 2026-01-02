@@ -45,7 +45,7 @@ pub async fn handler(
                 network_config
                     .network()
                     .eq(&request.payment_requirements.network)
-                    .then(|| network_config)
+                    .then_some(network_config)
             })
     else {
         debug!(

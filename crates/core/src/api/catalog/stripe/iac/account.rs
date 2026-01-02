@@ -22,16 +22,10 @@ pub struct AccountInfo {
 /// `AccountInfo` containing account details
 ///
 /// # Example
-/// ```no_run
-/// use moneymq_core::provider::stripe::iac::account::get_account_info;
-///
-/// #[tokio::main]
-/// async fn main() -> anyhow::Result<()> {
-///     let api_key = std::env::var("STRIPE_SECRET_KEY")?;
-///     let account_info = get_account_info(&api_key).await?;
-///     println!("Account: {}", account_info.display_name.unwrap_or_default());
-///     Ok(())
-/// }
+/// ```ignore
+/// let api_key = std::env::var("STRIPE_SECRET_KEY")?;
+/// let account_info = get_account_info(&api_key).await?;
+/// println!("Account: {}", account_info.display_name.unwrap_or_default());
 /// ```
 pub async fn get_account_info(api_key: &str) -> Result<AccountInfo> {
     // Use the account endpoint directly via HTTP

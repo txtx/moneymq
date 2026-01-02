@@ -13,7 +13,6 @@ use axum::{
     response::{Html, IntoResponse},
     routing::get,
 };
-use base64::Engine as _;
 use console::style;
 use dialoguer::{Confirm, theme::ColorfulTheme};
 use serde::{Deserialize, Serialize};
@@ -73,16 +72,16 @@ pub async fn handle_login_command(
                 }
                 Err(_e) => {
                     // Try PAT login if available
-                    if let Some(pat) = &auth_config.pat {
-                        if let Ok(auth_config) = pat_login(id_service_url, pat).await {
-                            auth_config.write_to_system_config()?;
-                            println!(
-                                "{} Logged in as {}.",
-                                style("✓").green(),
-                                auth_config.user.display_name
-                            );
-                            return Ok(());
-                        }
+                    if let Some(pat) = &auth_config.pat
+                        && let Ok(auth_config) = pat_login(id_service_url, pat).await
+                    {
+                        auth_config.write_to_system_config()?;
+                        println!(
+                            "{} Logged in as {}.",
+                            style("✓").green(),
+                            auth_config.user.display_name
+                        );
+                        return Ok(());
                     }
                     println!(
                         "{} Session expired, attempting login...",
@@ -223,31 +222,29 @@ async fn auth_callback(
         }
 
         // Try base64 decoding the entire query string
-        if let Some(encoded) = params.keys().next() {
-            if let Ok(decoded) =
+        if let Some(encoded) = params.keys().next()
+            && let Ok(decoded) =
                 base64::Engine::decode(&base64::engine::general_purpose::URL_SAFE, encoded)
-            {
-                if let Ok(decoded_str) = String::from_utf8(decoded) {
-                    let mut inner_params: HashMap<String, String> =
-                        serde_urlencoded::from_str(&decoded_str)
-                            .map_err(|e| format!("Failed to parse params: {}", e))?;
+            && let Ok(decoded_str) = String::from_utf8(decoded)
+        {
+            let mut inner_params: HashMap<String, String> =
+                serde_urlencoded::from_str(&decoded_str)
+                    .map_err(|e| format!("Failed to parse params: {}", e))?;
 
-                    if let Some(user_json) = inner_params.remove("user") {
-                        let user: AuthUser = serde_json::from_str(&user_json)
-                            .map_err(|e| format!("Failed to parse user: {}", e))?;
-                        return Ok(LoginCallbackResult {
-                            access_token: inner_params.remove("accessToken").unwrap_or_default(),
-                            exp: inner_params
-                                .remove("exp")
-                                .unwrap_or_default()
-                                .parse()
-                                .unwrap_or(0),
-                            refresh_token: inner_params.remove("refreshToken").unwrap_or_default(),
-                            pat: inner_params.remove("pat").unwrap_or_default(),
-                            user,
-                        });
-                    }
-                }
+            if let Some(user_json) = inner_params.remove("user") {
+                let user: AuthUser = serde_json::from_str(&user_json)
+                    .map_err(|e| format!("Failed to parse user: {}", e))?;
+                return Ok(LoginCallbackResult {
+                    access_token: inner_params.remove("accessToken").unwrap_or_default(),
+                    exp: inner_params
+                        .remove("exp")
+                        .unwrap_or_default()
+                        .parse()
+                        .unwrap_or(0),
+                    refresh_token: inner_params.remove("refreshToken").unwrap_or_default(),
+                    pat: inner_params.remove("pat").unwrap_or_default(),
+                    user,
+                });
             }
         }
 
@@ -274,7 +271,7 @@ async fn user_pass_login(
 ) -> Result<AuthConfig, String> {
     let client = reqwest::Client::new();
     let res = client
-        .post(&format!("{}/signin/email-password", id_service_url))
+        .post(format!("{}/signin/email-password", id_service_url))
         .json(&serde_json::json!({
             "email": email,
             "password": password,
@@ -312,7 +309,7 @@ async fn user_pass_login(
 pub async fn pat_login(id_service_url: &str, pat: &str) -> Result<AuthConfig, String> {
     let client = reqwest::Client::new();
     let res = client
-        .post(&format!("{}/signin/pat", id_service_url))
+        .post(format!("{}/signin/pat", id_service_url))
         .json(&serde_json::json!({
             "personalAccessToken": pat,
         }))

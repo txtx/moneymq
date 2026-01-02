@@ -292,7 +292,7 @@ async fn setup_payment_api_networks(
 
     // Extract the facilitator pubkey before the config is consumed
     let facilitator_pubkey = facilitator_config
-        .get_facilitator_pubkey(&"solana".to_string())
+        .get_facilitator_pubkey("solana")
         .expect("Facilitator pubkey should be initialized");
 
     // Create the payment API state

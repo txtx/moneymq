@@ -91,31 +91,29 @@ pub async fn get_config(
 
     // Load logo as base64
     let logo_path = assets_path.join("logo.png");
-    if logo_path.exists() {
-        if let Ok(logo_bytes) = fs::read(&logo_path) {
-            let logo_base64 =
-                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &logo_bytes);
-            account.logo = Some(format!("data:image/png;base64,{}", logo_base64));
-        }
+    if logo_path.exists()
+        && let Ok(logo_bytes) = fs::read(&logo_path)
+    {
+        let logo_base64 =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &logo_bytes);
+        account.logo = Some(format!("data:image/png;base64,{}", logo_base64));
     }
 
     // Load style.json
     let style_path = assets_path.join("style.json");
-    if style_path.exists() {
-        if let Ok(style_content) = fs::read_to_string(&style_path) {
-            if let Ok(style_json) = serde_json::from_str::<Value>(&style_content) {
-                if let Some(style_obj) = style_json.as_object() {
-                    account.primary_color = style_obj
-                        .get("primary_color")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    account.secondary_color = style_obj
-                        .get("secondary_color")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                }
-            }
-        }
+    if style_path.exists()
+        && let Ok(style_content) = fs::read_to_string(&style_path)
+        && let Ok(style_json) = serde_json::from_str::<Value>(&style_content)
+        && let Some(style_obj) = style_json.as_object()
+    {
+        account.primary_color = style_obj
+            .get("primary_color")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        account.secondary_color = style_obj
+            .get("secondary_color")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
     }
 
     // Build payout account configuration

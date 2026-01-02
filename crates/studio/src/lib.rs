@@ -34,7 +34,7 @@ pub async fn serve_studio_static_files(req: Request) -> Response<Body> {
             Response::builder()
                 .status(StatusCode::OK)
                 .header("Content-Type", mime.as_ref())
-                .body(Body::from(bytes.to_owned()))
+                .body(Body::from(bytes.into_owned()))
                 .unwrap()
         }
         None => Response::builder()

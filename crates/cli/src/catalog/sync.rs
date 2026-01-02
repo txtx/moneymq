@@ -295,8 +295,7 @@ fn display_diff(local: &Product, remote: &Product) {
                     lines_to_show.sort();
 
                     // Display lines
-                    let mut shown = 0;
-                    for &idx in &lines_to_show {
+                    for (shown, &idx) in lines_to_show.iter().enumerate() {
                         if shown >= 15 {
                             // Limit total output
                             println!("      {}", style("...").dim());
@@ -318,7 +317,6 @@ fn display_diff(local: &Product, remote: &Product) {
                             }
                             _ => {}
                         }
-                        shown += 1;
                     }
                 }
                 (Some(remote), None) => {
@@ -459,29 +457,27 @@ fn display_diff(local: &Product, remote: &Product) {
                     && rp.recurring_interval == local_price.recurring_interval
                     && rp.recurring_interval_count == local_price.recurring_interval_count
                     && rp.pricing_type == local_price.pricing_type
-            }) {
-                if local_price.active != remote_price.active
-                    || local_price.nickname != remote_price.nickname
-                {
-                    let amount = local_price
-                        .unit_amount
-                        .map(|a| format!("${}.{:02}", a / 100, a % 100))
-                        .unwrap_or_else(|| "custom".to_string());
-                    println!(
-                        "    {} {} {} (modified attributes)",
-                        style("~").yellow().bold(),
-                        style(&amount).yellow(),
-                        style(&local_price.currency.as_str().to_uppercase()).yellow()
-                    );
+            }) && (local_price.active != remote_price.active
+                || local_price.nickname != remote_price.nickname)
+            {
+                let amount = local_price
+                    .unit_amount
+                    .map(|a| format!("${}.{:02}", a / 100, a % 100))
+                    .unwrap_or_else(|| "custom".to_string());
+                println!(
+                    "    {} {} {} (modified attributes)",
+                    style("~").yellow().bold(),
+                    style(&amount).yellow(),
+                    style(&local_price.currency.as_str().to_uppercase()).yellow()
+                );
 
-                    if local_price.active != remote_price.active {
-                        println!(
-                            "      {} active: {} -> {}",
-                            style("active:").dim(),
-                            remote_price.active,
-                            local_price.active
-                        );
-                    }
+                if local_price.active != remote_price.active {
+                    println!(
+                        "      {} active: {} -> {}",
+                        style("active:").dim(),
+                        remote_price.active,
+                        local_price.active
+                    );
                 }
             }
         }
@@ -957,7 +953,7 @@ impl SyncCommand {
 
         if push_count > 0 {
             // Handle push workflow interactively
-            self.handle_push_workflow(products_to_push, &provider_config, ctx, &catalog_dir)
+            self.handle_push_workflow(products_to_push, provider_config, ctx, &catalog_dir)
                 .await?;
         }
 
@@ -1001,7 +997,7 @@ impl SyncCommand {
 
                 self.handle_create_sandbox_workflow(
                     local_only_products,
-                    &provider_config,
+                    provider_config,
                     &catalog_dir,
                 )
                 .await?;
@@ -1039,7 +1035,7 @@ impl SyncCommand {
 
             self.handle_create_workflow(
                 sandbox_only_products,
-                &provider_config,
+                provider_config,
                 &api_key,
                 &catalog_dir,
             )
@@ -1523,7 +1519,7 @@ impl SyncCommand {
                         Err(_) => stripe_config
                             .api_key
                             .as_ref()
-                            .ok_or_else(|| format!("Production API key not found"))?
+                            .ok_or_else(|| "Production API key not found".to_string())?
                             .clone(),
                     },
                 };

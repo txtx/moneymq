@@ -12,17 +12,14 @@ use crate::api::catalog::{
 
 /// POST /v1/customers - Create a new customer
 pub async fn create_customer(
-    Extension(state): Extension<CatalogState>,
+    Extension(_state): Extension<CatalogState>,
     Form(request): Form<CreateCustomerRequest>,
 ) -> impl IntoResponse {
     // Generate a mock customer ID
     let customer_id = generate_stripe_id("cus");
     let created = chrono::Utc::now().timestamp();
 
-    let metadata = request
-        .metadata
-        .map(|m| serde_json::to_value(m).ok())
-        .flatten();
+    let metadata = request.metadata.and_then(|m| serde_json::to_value(m).ok());
 
     let customer = StripeCustomer {
         id: customer_id,
@@ -40,7 +37,7 @@ pub async fn create_customer(
 
 /// POST /v1/customers/:id - Update a customer
 pub async fn update_customer(
-    Extension(state): Extension<CatalogState>,
+    Extension(_state): Extension<CatalogState>,
     Path(customer_id): Path<String>,
     body: Bytes,
 ) -> impl IntoResponse {

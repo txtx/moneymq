@@ -106,6 +106,7 @@ impl Diagnostic {
     }
 
     /// Set the line number
+    #[allow(dead_code)]
     pub fn with_line(mut self, line: usize) -> Self {
         self.line = Some(line);
         self
@@ -354,9 +355,11 @@ fn lint_products(products_dir: &Path) -> Vec<Diagnostic> {
                 }
 
                 // Check recurring prices have interval
-                if let Some(pricing_type) = price.get("pricing_type").and_then(|v| v.as_str()) {
-                    if pricing_type == "recurring" && price.get("interval").is_none() {
-                        diagnostics.push(
+                if let Some(pricing_type) = price.get("pricing_type").and_then(|v| v.as_str())
+                    && pricing_type == "recurring"
+                    && price.get("interval").is_none()
+                {
+                    diagnostics.push(
                             Diagnostic::error(
                                 "recurring-price-requires-interval",
                                 format!(
@@ -367,7 +370,6 @@ fn lint_products(products_dir: &Path) -> Vec<Diagnostic> {
                             .with_file(file_name.to_string())
                             .with_entity("price", &price_id),
                         );
-                    }
                 }
             }
         }

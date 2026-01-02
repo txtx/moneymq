@@ -26,11 +26,11 @@ pub struct TransactionCustomerModel {
     pub address: String,
 }
 
-impl Into<TransactionCustomer> for TransactionCustomerModel {
-    fn into(self) -> TransactionCustomer {
+impl From<TransactionCustomerModel> for TransactionCustomer {
+    fn from(val: TransactionCustomerModel) -> Self {
         TransactionCustomer {
-            label: self.label,
-            address: self.address,
+            label: val.label,
+            address: val.address,
         }
     }
 }
