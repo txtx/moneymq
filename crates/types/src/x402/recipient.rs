@@ -50,7 +50,7 @@ impl Recipient {
             Some(address_str) => {
                 let mixed_address = match network {
                     Network::Solana => {
-                        let pubkey = Pubkey::from_str(&address_str).map_err(|e| {
+                        let pubkey = Pubkey::from_str(address_str).map_err(|e| {
                             RecipientError::InvalidProvidedAddress(
                                 address_str.to_string(),
                                 e.to_string(),
@@ -89,7 +89,7 @@ impl Recipient {
             Some(address_str) => {
                 let mixed_address = match network {
                     Network::Solana => {
-                        let pubkey = Pubkey::from_str(&address_str).map_err(|e| {
+                        let pubkey = Pubkey::from_str(address_str).map_err(|e| {
                             RecipientError::InvalidProvidedAddress(
                                 address_str.to_string(),
                                 e.to_string(),

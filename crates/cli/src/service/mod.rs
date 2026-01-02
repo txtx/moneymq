@@ -37,6 +37,7 @@ pub enum RunCommandError {
     #[error("Failed to start provider server: {0}")]
     ProviderStartError(Box<dyn std::error::Error>),
     #[error("No payment networks configured")]
+    #[allow(dead_code)]
     NoPaymentNetworksConfigured,
     #[error("Environment '{0}' not found in manifest")]
     EnvironmentNotFound(String),
@@ -190,7 +191,12 @@ pub trait ServiceCommand {
         Ok((products, meters))
     }
 
-    async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
+    /// Execute with optional pre-loaded products (e.g., from embedded examples)
+    async fn execute_with_products(
+        &self,
+        ctx: &Context,
+        example_products: Option<Vec<Product>>,
+    ) -> Result<(), RunCommandError> {
         let env_name = self.environment_name();
         let port = self.port(&ctx.manifest);
         let is_sandbox = self.is_sandbox(&ctx.manifest);
@@ -210,9 +216,12 @@ pub trait ServiceCommand {
             })
             .ok_or_else(|| RunCommandError::EnvironmentNotFound(env_name.to_string()))?;
 
-        // If we're using the default manifest, there are no products/meters configured,
-        // so the associated warnings are noisy and not helpful. Skip loading catalog in that case.
-        let (products, meters) = if !ctx.is_default_manifest {
+        // Use example products if provided, otherwise load from disk
+        let (products, meters) = if let Some(products) = example_products {
+            (products, Vec::new())
+        } else if !ctx.is_default_manifest {
+            // If we're using the default manifest, there are no products/meters configured,
+            // so the associated warnings are noisy and not helpful. Skip loading catalog in that case.
             self.load_catalog(ctx, port)?
         } else {
             (Vec::new(), Vec::new())
@@ -236,7 +245,7 @@ pub trait ServiceCommand {
         let networks_config = self.networks_config(&ctx.manifest, payment_networks)?;
 
         // Setup payment API
-        let (_payment_api_url, facilitator_pubkey, validator_rpc_urls, mut payment_api_state) =
+        let (_payment_api_url, _facilitator_pubkey, _validator_rpc_urls, mut payment_api_state) =
             self.setup_payment_api(&ctx.manifest.payments, &environment, &networks_config, port)
                 .await?;
 
@@ -320,5 +329,10 @@ pub trait ServiceCommand {
         .map_err(RunCommandError::ProviderStartError)?;
 
         Ok(())
+    }
+
+    /// Execute the service command (delegates to execute_with_products with no pre-loaded products)
+    async fn execute(&self, ctx: &Context) -> Result<(), RunCommandError> {
+        self.execute_with_products(ctx, None).await
     }
 }

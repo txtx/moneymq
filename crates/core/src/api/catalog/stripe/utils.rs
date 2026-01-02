@@ -34,7 +34,7 @@ pub fn generate_stripe_id(prefix: &str) -> String {
 pub fn timestamp_to_datetime(timestamp: Option<i64>) -> DateTime<Utc> {
     timestamp
         .and_then(|ts| DateTime::from_timestamp(ts, 0))
-        .unwrap_or_else(|| Utc::now())
+        .unwrap_or_else(Utc::now)
 }
 
 #[cfg(test)]

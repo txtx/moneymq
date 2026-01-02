@@ -162,8 +162,8 @@ impl FetchCommand {
                     println!("No products found in your Stripe catalog.");
                 } else {
                     println!(
-                        "{:<40} {:<15} {:<10} {}",
-                        "Product ID", "Name", "Active", "Description"
+                        "{:<40} {:<15} {:<10} Description",
+                        "Product ID", "Name", "Active"
                     );
                     println!("{}", "-".repeat(100));
 

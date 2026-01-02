@@ -38,13 +38,14 @@ impl diesel::r2d2::CustomizeConnection<DbConnection, diesel::r2d2::Error>
         // WAL mode allows concurrent reads while writing
         // busy_timeout waits up to 5 seconds for locks instead of failing immediately
         conn.batch_execute("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;")
-            .map_err(|e| diesel::r2d2::Error::QueryError(e))?;
+            .map_err(diesel::r2d2::Error::QueryError)?;
         Ok(())
     }
 }
 
 #[derive(Debug)]
 pub struct DbManager {
+    #[allow(dead_code)]
     control_db_conn: DbPool,
     payment_db_conn: DbPool,
 }
@@ -164,7 +165,7 @@ impl DbManager {
     pub fn insert_transaction(
         &self,
         verify_request: &moneymq_types::x402::VerifyRequest,
-        verify_response: &moneymq_types::x402::VerifyResponse,
+        _verify_response: &moneymq_types::x402::VerifyResponse,
         payment_requirement_base64: String,
         verify_request_base64: String,
         verify_response_base64: String,
@@ -289,7 +290,7 @@ impl DbManager {
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
         let payment_hash =
-            calculate_payment_hash(x402_transaction).map_err(|e| DbError::ConnectionError(e))?;
+            calculate_payment_hash(x402_transaction).map_err(DbError::ConnectionError)?;
 
         models::facilitated_transaction::is_transaction_already_settled(&mut conn, &payment_hash)
             .map_err(DbError::FindTxError)
@@ -307,7 +308,7 @@ impl DbManager {
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
         let payment_hash =
-            calculate_payment_hash(x402_transaction).map_err(|e| DbError::ConnectionError(e))?;
+            calculate_payment_hash(x402_transaction).map_err(DbError::ConnectionError)?;
 
         models::facilitated_transaction::find_transaction_id_by_payment_hash(
             &mut conn,

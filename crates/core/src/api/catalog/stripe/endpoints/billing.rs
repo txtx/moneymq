@@ -74,7 +74,7 @@ impl BillingMeterEventRequest {
 
 /// POST /v1/billing/meter_events - Record a meter event
 pub async fn create_meter_event(
-    Extension(state): Extension<CatalogState>,
+    Extension(_state): Extension<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     let BillingMeterEventRequest { event_name } = BillingMeterEventRequest::parse(&body);

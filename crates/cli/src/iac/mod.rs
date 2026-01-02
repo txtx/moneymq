@@ -12,31 +12,31 @@
 pub mod lint;
 mod sync;
 
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use axum::{Json, Router, extract::State, http::StatusCode, response::IntoResponse, routing::get};
 use indexmap::IndexMap;
 // Re-export types from moneymq_types::iac for backwards compatibility
+#[allow(unused_imports)]
 pub use moneymq_types::iac::{
     AggregationFormula,
     AggregationSchema,
-    // Catalog schema
     CatalogSchema,
     // Enums
     Chain,
-    Currency,
     CustomerMappingSchema,
     DeploymentType,
     KeyManagement,
-    // Meter schemas
     MeterSchema,
-    OneTimePriceSchema,
     PriceSchema,
     PricingType,
     // Product/Price schemas
     ProductSchema,
+    RecurringConfig,
     RecurringInterval,
-    RecurringPriceSchema,
     SourceType,
     Stablecoin,
     ValueSettingsSchema,
@@ -402,6 +402,145 @@ pub async fn get_schema() -> impl IntoResponse {
     (StatusCode::OK, Json(schema))
 }
 
+/// Recursively load variants from a directory, supporting nested variant structures.
+///
+/// For a variant with nested variants (e.g., variants/lite/variants/a/), this function:
+/// 1. Merges the intermediate variant with the base
+/// 2. Recursively loads nested variants using the merged base
+/// 3. Returns only leaf variants (those without nested variants)
+fn load_variants_recursive_json(
+    variants_dir: &Path,
+    base_json: &serde_json::Value,
+    product_dir_name: &str,
+    variant_prefix: &str,
+    source_prefix: &str,
+) -> Vec<serde_json::Value> {
+    let mut products = Vec::new();
+
+    let entries = match std::fs::read_dir(variants_dir) {
+        Ok(e) => e,
+        Err(_) => return products,
+    };
+
+    for entry in entries.flatten() {
+        let variant_path = entry.path();
+
+        // Determine variant name and yaml path based on layout:
+        // Old: variants/{variant}.yaml (file)
+        // New: variants/{variant}/product.yaml (directory)
+        let (variant_name, yaml_path, is_directory) = if variant_path.is_dir() {
+            // New layout: variants/{variant}/product.yaml
+            let yaml_file = variant_path.join("product.yaml");
+            if !yaml_file.exists() {
+                continue;
+            }
+            let name = variant_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            (name, yaml_file, true)
+        } else if variant_path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+            // Old layout: variants/{variant}.yaml
+            let name = variant_path
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            (name, variant_path.clone(), false)
+        } else {
+            continue;
+        };
+
+        // Build full variant ID path (e.g., "lite" or "lite-a")
+        let full_variant_id = if variant_prefix.is_empty() {
+            variant_name.clone()
+        } else {
+            format!("{}-{}", variant_prefix, variant_name)
+        };
+
+        // Build source file path
+        let source_file = if source_prefix.is_empty() {
+            format!("{}/variants/{}/product", product_dir_name, variant_name)
+        } else {
+            format!("{}/variants/{}/product", source_prefix, variant_name)
+        };
+
+        // Read variant content
+        let content = match std::fs::read_to_string(&yaml_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+
+        let variant_yaml: serde_yml::Value = match serde_yml::from_str(&content) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let variant_json = match serde_json::to_value(&variant_yaml) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // Check for nested variants (only for directory layout)
+        let nested_variants_dir = variant_path.join("variants");
+        if is_directory && nested_variants_dir.exists() {
+            // This variant has nested variants - merge and recurse
+            let merged = moneymq_types::deep_merge_json(base_json.clone(), variant_json);
+
+            let nested_source_prefix = format!(
+                "{}/variants/{}",
+                if source_prefix.is_empty() {
+                    product_dir_name
+                } else {
+                    source_prefix
+                },
+                variant_name
+            );
+
+            let nested_products = load_variants_recursive_json(
+                &nested_variants_dir,
+                &merged,
+                product_dir_name,
+                &full_variant_id,
+                &nested_source_prefix,
+            );
+            products.extend(nested_products);
+        } else {
+            // Leaf variant - merge with base and add metadata
+            let mut merged = moneymq_types::deep_merge_json(base_json.clone(), variant_json);
+
+            if let Some(obj) = merged.as_object_mut() {
+                // Set ID for variant (matches loader format)
+                if !obj.contains_key("id") {
+                    obj.insert(
+                        "id".to_string(),
+                        serde_json::Value::String(format!(
+                            "{}-{}",
+                            product_dir_name, full_variant_id
+                        )),
+                    );
+                }
+                obj.insert(
+                    "_source_file".to_string(),
+                    serde_json::Value::String(source_file),
+                );
+                obj.insert(
+                    "_product_dir".to_string(),
+                    serde_json::Value::String(product_dir_name.to_string()),
+                );
+                obj.insert(
+                    "_variant".to_string(),
+                    serde_json::Value::String(full_variant_id),
+                );
+            }
+            products.push(merged);
+        }
+    }
+
+    products
+}
+
 /// GET /iac/data - Retrieve current manifest configuration as JSON.
 ///
 /// This endpoint returns the manifest configuration with resolved catalog data.
@@ -460,239 +599,123 @@ pub async fn get_iac(State(state): State<IacState>) -> impl IntoResponse {
     };
 
     // Resolve catalog products from catalog_path directories
-    if let Some(catalogs) = json_config.get_mut("catalogs") {
-        if let Some(catalogs_obj) = catalogs.as_object_mut() {
-            for (_catalog_name, catalog_value) in catalogs_obj.iter_mut() {
-                if let Some(catalog_obj) = catalog_value.as_object_mut() {
-                    // Get catalog_path (default to "billing/v1")
-                    let catalog_path = catalog_obj
-                        .get("catalog_path")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("billing/v1");
+    if let Some(catalogs) = json_config.get_mut("catalogs")
+        && let Some(catalogs_obj) = catalogs.as_object_mut()
+    {
+        for (_catalog_name, catalog_value) in catalogs_obj.iter_mut() {
+            if let Some(catalog_obj) = catalog_value.as_object_mut() {
+                // Get catalog_path (default to "billing/v1")
+                let catalog_path = catalog_obj
+                    .get("catalog_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("billing/v1");
 
-                    // Load products from {catalog_path}/products/
-                    // Supports both legacy flat files (*.yaml) and variant-based directories
-                    let products_dir = manifest_dir.join(catalog_path).join("products");
-                    if products_dir.exists() {
-                        if let Ok(entries) = std::fs::read_dir(&products_dir) {
-                            let mut products: Vec<serde_json::Value> = Vec::new();
+                // Load products from {catalog_path}/products/
+                // Supports both legacy flat files (*.yaml) and variant-based directories
+                let products_dir = manifest_dir.join(catalog_path).join("products");
+                if products_dir.exists()
+                    && let Ok(entries) = std::fs::read_dir(&products_dir)
+                {
+                    let mut products: Vec<serde_json::Value> = Vec::new();
 
-                            for entry in entries.flatten() {
-                                let path = entry.path();
+                    for entry in entries.flatten() {
+                        let path = entry.path();
 
-                                if path.is_dir() {
-                                    // Check for variant-based product directory (product.yaml + variants/)
-                                    let product_yaml = path.join("product.yaml");
-                                    if product_yaml.exists() {
-                                        if let Ok(base_content) =
-                                            std::fs::read_to_string(&product_yaml)
-                                        {
-                                            // Parse base product.yaml
-                                            if let Ok(base_yaml) =
-                                                serde_yml::from_str::<serde_yml::Value>(
-                                                    &base_content,
-                                                )
-                                            {
-                                                if let Ok(mut base_json) =
-                                                    serde_json::to_value(&base_yaml)
-                                                {
-                                                    // Add _source_file and _product_dir for the base
-                                                    if let Some(obj) = base_json.as_object_mut() {
-                                                        if let Some(dir_name) = path.file_name() {
-                                                            let dir_name_str = dir_name
-                                                                .to_string_lossy()
-                                                                .to_string();
-                                                            // Set ID for base product (used for grouping in UI)
-                                                            obj.insert(
-                                                                "id".to_string(),
-                                                                serde_json::Value::String(format!(
-                                                                    "{}/product",
-                                                                    dir_name_str
-                                                                )),
-                                                            );
-                                                            // Set name for base product if not present
-                                                            // (base products typically don't have names)
-                                                            if !obj.contains_key("name") {
-                                                                // Capitalize first letter of dir name
-                                                                let name = dir_name_str
-                                                                    .chars()
-                                                                    .next()
-                                                                    .map(|c| {
-                                                                        c.to_uppercase().to_string()
-                                                                    })
-                                                                    .unwrap_or_default()
-                                                                    + &dir_name_str[1..];
-                                                                obj.insert(
-                                                                    "name".to_string(),
-                                                                    serde_json::Value::String(name),
-                                                                );
-                                                            }
-                                                            obj.insert(
-                                                                "_source_file".to_string(),
-                                                                serde_json::Value::String(format!(
-                                                                    "{}/product",
-                                                                    dir_name_str
-                                                                )),
-                                                            );
-                                                            obj.insert(
-                                                                "_product_dir".to_string(),
-                                                                serde_json::Value::String(
-                                                                    dir_name_str,
-                                                                ),
-                                                            );
-                                                        }
-                                                    }
-                                                    products.push(base_json);
-                                                }
-                                            }
-                                        }
-
-                                        // Also load variants
-                                        let variants_dir = path.join("variants");
-                                        if variants_dir.exists() {
-                                            if let Ok(variant_entries) =
-                                                std::fs::read_dir(&variants_dir)
-                                            {
-                                                for variant_entry in variant_entries.flatten() {
-                                                    let variant_path = variant_entry.path();
-
-                                                    // Determine variant name and yaml path based on layout:
-                                                    // Old: variants/{variant}.yaml (file)
-                                                    // New: variants/{variant}/product.yaml (directory)
-                                                    let (variant_name, yaml_path) =
-                                                        if variant_path.is_dir() {
-                                                            // New layout: variants/{variant}/product.yaml
-                                                            let yaml_file =
-                                                                variant_path.join("product.yaml");
-                                                            if !yaml_file.exists() {
-                                                                continue;
-                                                            }
-                                                            let name = variant_path
-                                                                .file_name()
-                                                                .and_then(|n| n.to_str())
-                                                                .unwrap_or("unknown")
-                                                                .to_string();
-                                                            (name, yaml_file)
-                                                        } else if variant_path
-                                                            .extension()
-                                                            .and_then(|s| s.to_str())
-                                                            == Some("yaml")
-                                                        {
-                                                            // Old layout: variants/{variant}.yaml
-                                                            let name = variant_path
-                                                                .file_stem()
-                                                                .and_then(|n| n.to_str())
-                                                                .unwrap_or("unknown")
-                                                                .to_string();
-                                                            (name, variant_path.clone())
-                                                        } else {
-                                                            continue;
-                                                        };
-
-                                                    if let Ok(content) =
-                                                        std::fs::read_to_string(&yaml_path)
-                                                    {
-                                                        if let Ok(variant_yaml) =
-                                                            serde_yml::from_str::<serde_yml::Value>(
-                                                                &content,
-                                                            )
-                                                        {
-                                                            if let Ok(mut variant_json) =
-                                                                serde_json::to_value(&variant_yaml)
-                                                            {
-                                                                if let Some(obj) =
-                                                                    variant_json.as_object_mut()
-                                                                {
-                                                                    if let Some(dir_name) =
-                                                                        path.file_name()
-                                                                    {
-                                                                        let dir_name_str = dir_name
-                                                                            .to_string_lossy()
-                                                                            .to_string();
-                                                                        // Set ID for variant (matches loader format)
-                                                                        // Only set if not already present in YAML
-                                                                        if !obj.contains_key("id") {
-                                                                            obj.insert(
-                                                                                "id".to_string(),
-                                                                                serde_json::Value::String(
-                                                                                    format!(
-                                                                                        "{}-{}",
-                                                                                        dir_name_str,
-                                                                                        variant_name
-                                                                                    ),
-                                                                                ),
-                                                                            );
-                                                                        }
-                                                                        obj.insert(
-                                                                            "_source_file"
-                                                                                .to_string(),
-                                                                            serde_json::Value::String(
-                                                                                format!(
-                                                                                    "{}/variants/{}/product",
-                                                                                    dir_name_str,
-                                                                                    variant_name
-                                                                                ),
-                                                                            ),
-                                                                        );
-                                                                        obj.insert(
-                                                                            "_product_dir"
-                                                                                .to_string(),
-                                                                            serde_json::Value::String(
-                                                                                dir_name_str,
-                                                                            ),
-                                                                        );
-                                                                        obj.insert(
-                                                                            "_variant".to_string(),
-                                                                            serde_json::Value::String(
-                                                                                variant_name.clone(),
-                                                                            ),
-                                                                        );
-                                                                    }
-                                                                }
-                                                                products.push(variant_json);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                } else if path.extension().and_then(|s| s.to_str()) == Some("yaml")
+                        if path.is_dir() {
+                            // Check for variant-based product directory (product.yaml + variants/)
+                            let product_yaml = path.join("product.yaml");
+                            if product_yaml.exists()
+                                && let Ok(base_content) = std::fs::read_to_string(&product_yaml)
+                            {
+                                // Parse base product.yaml
+                                if let Ok(base_yaml) =
+                                    serde_yml::from_str::<serde_yml::Value>(&base_content)
+                                    && let Ok(base_json) = serde_json::to_value(&base_yaml)
                                 {
-                                    // Legacy flat file format
-                                    if let Ok(content) = std::fs::read_to_string(&path) {
-                                        if let Ok(product_yaml) =
-                                            serde_yml::from_str::<serde_yml::Value>(&content)
-                                        {
-                                            if let Ok(mut product_json) =
-                                                serde_json::to_value(&product_yaml)
-                                            {
-                                                // Add _source_file to track the original filename
-                                                if let Some(obj) = product_json.as_object_mut() {
-                                                    if let Some(stem) = path.file_stem() {
-                                                        obj.insert(
-                                                            "_source_file".to_string(),
-                                                            serde_json::Value::String(
-                                                                stem.to_string_lossy().to_string(),
-                                                            ),
-                                                        );
-                                                    }
-                                                }
-                                                products.push(product_json);
-                                            }
+                                    let dir_name_str = path
+                                        .file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| "unknown".to_string());
+
+                                    // Create base product entry for the UI
+                                    let mut base_product = base_json.clone();
+                                    if let Some(obj) = base_product.as_object_mut() {
+                                        // Set ID for base product (used for grouping in UI)
+                                        obj.insert(
+                                            "id".to_string(),
+                                            serde_json::Value::String(format!(
+                                                "{}/product",
+                                                dir_name_str
+                                            )),
+                                        );
+                                        // Set name for base product if not present
+                                        if !obj.contains_key("name") {
+                                            let name = dir_name_str
+                                                .chars()
+                                                .next()
+                                                .map(|c| c.to_uppercase().to_string())
+                                                .unwrap_or_default()
+                                                + &dir_name_str[1..];
+                                            obj.insert(
+                                                "name".to_string(),
+                                                serde_json::Value::String(name),
+                                            );
                                         }
+                                        obj.insert(
+                                            "_source_file".to_string(),
+                                            serde_json::Value::String(format!(
+                                                "{}/product",
+                                                dir_name_str
+                                            )),
+                                        );
+                                        obj.insert(
+                                            "_product_dir".to_string(),
+                                            serde_json::Value::String(dir_name_str.clone()),
+                                        );
+                                    }
+                                    products.push(base_product);
+
+                                    // Load variants recursively (supports nested variants)
+                                    let variants_dir = path.join("variants");
+                                    if variants_dir.exists() {
+                                        let variant_products = load_variants_recursive_json(
+                                            &variants_dir,
+                                            &base_json,
+                                            &dir_name_str,
+                                            "",
+                                            "",
+                                        );
+                                        products.extend(variant_products);
                                     }
                                 }
                             }
-
-                            // Add products to catalog
-                            if !products.is_empty() {
-                                catalog_obj.insert(
-                                    "products".to_string(),
-                                    serde_json::Value::Array(products),
-                                );
+                        } else if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
+                            // Legacy flat file format
+                            if let Ok(content) = std::fs::read_to_string(&path)
+                                && let Ok(product_yaml) =
+                                    serde_yml::from_str::<serde_yml::Value>(&content)
+                                && let Ok(mut product_json) = serde_json::to_value(&product_yaml)
+                            {
+                                // Add _source_file to track the original filename
+                                if let Some(obj) = product_json.as_object_mut()
+                                    && let Some(stem) = path.file_stem()
+                                {
+                                    obj.insert(
+                                        "_source_file".to_string(),
+                                        serde_json::Value::String(
+                                            stem.to_string_lossy().to_string(),
+                                        ),
+                                    );
+                                }
+                                products.push(product_json);
                             }
                         }
+                    }
+
+                    // Add products to catalog
+                    if !products.is_empty() {
+                        catalog_obj
+                            .insert("products".to_string(), serde_json::Value::Array(products));
                     }
                 }
             }
@@ -800,21 +823,21 @@ pub async fn put_iac(
             let product_file = products_dir.join(format!("{}.yaml", filename));
 
             // Ensure parent directory exists (for nested variant paths like surfnet/variants/light/product.yaml)
-            if let Some(parent) = product_file.parent() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(IacResponse {
-                            success: false,
-                            message: format!(
-                                "Failed to create directory for product '{}': {}",
-                                product.id, e
-                            ),
-                            config: None,
-                            diagnostics: None,
-                        }),
-                    );
-                }
+            if let Some(parent) = product_file.parent()
+                && let Err(e) = std::fs::create_dir_all(parent)
+            {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(IacResponse {
+                        success: false,
+                        message: format!(
+                            "Failed to create directory for product '{}': {}",
+                            product.id, e
+                        ),
+                        config: None,
+                        diagnostics: None,
+                    }),
+                );
             }
 
             // Merge with existing file content if it exists
@@ -917,18 +940,16 @@ pub async fn put_iac(
 /// Extract the catalog_path from manifest content (defaults to "billing/v1")
 fn get_catalog_path(content: &str) -> String {
     // Parse the manifest to find catalog_path
-    if let Ok(manifest) = serde_yml::from_str::<serde_yml::Value>(content) {
-        if let Some(catalogs) = manifest.get("catalogs") {
-            if let Some(catalogs_map) = catalogs.as_mapping() {
-                // Get the first catalog's catalog_path
-                if let Some((_, catalog)) = catalogs_map.iter().next() {
-                    if let Some(path) = catalog.get("catalog_path") {
-                        if let Some(path_str) = path.as_str() {
-                            return path_str.to_string();
-                        }
-                    }
-                }
-            }
+    if let Ok(manifest) = serde_yml::from_str::<serde_yml::Value>(content)
+        && let Some(catalogs) = manifest.get("catalogs")
+        && let Some(catalogs_map) = catalogs.as_mapping()
+    {
+        // Get the first catalog's catalog_path
+        if let Some((_, catalog)) = catalogs_map.iter().next()
+            && let Some(path) = catalog.get("catalog_path")
+            && let Some(path_str) = path.as_str()
+        {
+            return path_str.to_string();
         }
     }
     "billing/v1".to_string()
@@ -1226,8 +1247,7 @@ network:
         // Verify product/price types are included
         assert!(json.contains("ProductSchema"));
         assert!(json.contains("PriceSchema"));
-        assert!(json.contains("OneTimePriceSchema"));
-        assert!(json.contains("RecurringPriceSchema"));
+        assert!(json.contains("RecurringConfig"));
         assert!(json.contains("MeterSchema"));
         assert!(json.contains("CatalogSchema"));
 
@@ -1236,7 +1256,6 @@ network:
         assert!(json.contains("\"recurring\""));
         assert!(json.contains("\"month\""));
         assert!(json.contains("\"year\""));
-        assert!(json.contains("\"usd\""));
     }
 
     #[test]
@@ -1251,7 +1270,8 @@ network:
             unit_label: Some("per seat".to_string()),
             images: Some(vec!["https://example.com/pro.png".to_string()]),
             metadata: None,
-            prices: None,
+            features: None,
+            price: None,
             _source_file: None,
             _product_dir: None,
             _variant: None,
@@ -1267,39 +1287,50 @@ network:
 
     #[test]
     fn test_yaml_format_one_time_price() {
-        let price = PriceSchema::OneTime(OneTimePriceSchema {
+        let mut amounts = indexmap::IndexMap::new();
+        amounts.insert("usd".to_string(), 99.00);
+
+        let price = PriceSchema {
             id: Some("price_123".to_string()),
-            currency: Currency::Usd,
-            unit_amount: 9900, // $99.00
+            amounts,
+            pricing_type: Some(PricingType::OneTime),
+            recurring: None,
+            overage: None,
+            trial: None,
             active: Some(true),
             nickname: Some("Lifetime access".to_string()),
             metadata: None,
-        });
+        };
 
         let yaml = serde_yml::to_string(&price).unwrap();
         assert!(yaml.contains("pricing_type: one_time"));
-        assert!(yaml.contains("currency: usd"));
-        assert!(yaml.contains("unit_amount: 9900"));
+        assert!(yaml.contains("usd: 99.0"));
         assert!(yaml.contains("nickname: Lifetime access"));
     }
 
     #[test]
     fn test_yaml_format_recurring_price() {
-        let price = PriceSchema::Recurring(RecurringPriceSchema {
+        let mut amounts = indexmap::IndexMap::new();
+        amounts.insert("usd".to_string(), 29.00);
+
+        let price = PriceSchema {
             id: Some("price_456".to_string()),
-            currency: Currency::Usd,
-            unit_amount: 2900, // $29.00
-            interval: RecurringInterval::Month,
-            interval_count: Some(1),
+            amounts,
+            pricing_type: Some(PricingType::Recurring),
+            recurring: Some(RecurringConfig {
+                interval: RecurringInterval::Month,
+                interval_count: Some(1),
+            }),
+            overage: None,
+            trial: None,
             active: Some(true),
             nickname: Some("Monthly Pro".to_string()),
             metadata: None,
-        });
+        };
 
         let yaml = serde_yml::to_string(&price).unwrap();
         assert!(yaml.contains("pricing_type: recurring"));
-        assert!(yaml.contains("currency: usd"));
-        assert!(yaml.contains("unit_amount: 2900"));
+        assert!(yaml.contains("usd: 29.0"));
         assert!(yaml.contains("interval: month"));
     }
 
@@ -1332,6 +1363,9 @@ network:
 
     #[test]
     fn test_yaml_format_catalog() {
+        let mut amounts = indexmap::IndexMap::new();
+        amounts.insert("usd".to_string(), 9.99);
+
         let catalog = CatalogSchema {
             description: Some("Main product catalog".to_string()),
             catalog_path: Some("billing/v1".to_string()),
@@ -1346,16 +1380,21 @@ network:
                 unit_label: None,
                 images: None,
                 metadata: None,
-                prices: Some(vec![PriceSchema::Recurring(RecurringPriceSchema {
+                features: None,
+                price: Some(PriceSchema {
                     id: None,
-                    currency: Currency::Usd,
-                    unit_amount: 999,
-                    interval: RecurringInterval::Month,
-                    interval_count: None,
+                    amounts,
+                    pricing_type: Some(PricingType::Recurring),
+                    recurring: Some(RecurringConfig {
+                        interval: RecurringInterval::Month,
+                        interval_count: None,
+                    }),
+                    overage: None,
+                    trial: None,
                     active: None,
                     nickname: None,
                     metadata: None,
-                })]),
+                }),
                 _source_file: None,
                 _product_dir: None,
                 _variant: None,
@@ -1368,7 +1407,7 @@ network:
         assert!(yaml.contains("catalog_path: billing/v1"));
         assert!(yaml.contains("source_type: stripe"));
         assert!(yaml.contains("name: Basic Plan"));
-        assert!(yaml.contains("unit_amount: 999"));
+        assert!(yaml.contains("usd: 9.99"));
     }
 
     #[test]
@@ -1393,42 +1432,34 @@ product_type: service
     fn test_yaml_deserialize_one_time_price() {
         let yaml = r#"
 pricing_type: one_time
-currency: usd
-unit_amount: 4999
+amounts:
+  usd: 49.99
 nickname: One-time purchase
 "#;
 
         let price: PriceSchema = serde_yml::from_str(yaml).unwrap();
-        match price {
-            PriceSchema::OneTime(config) => {
-                assert_eq!(config.currency, Currency::Usd);
-                assert_eq!(config.unit_amount, 4999);
-                assert_eq!(config.nickname, Some("One-time purchase".to_string()));
-            }
-            _ => panic!("Expected OneTime variant"),
-        }
+        assert_eq!(price.pricing_type, Some(PricingType::OneTime));
+        assert_eq!(price.amounts.get("usd"), Some(&49.99));
+        assert_eq!(price.nickname, Some("One-time purchase".to_string()));
     }
 
     #[test]
     fn test_yaml_deserialize_recurring_price() {
         let yaml = r#"
 pricing_type: recurring
-currency: eur
-unit_amount: 1999
-interval: year
-interval_count: 1
+amounts:
+  eur: 19.99
+recurring:
+  interval: year
+  interval_count: 1
 "#;
 
         let price: PriceSchema = serde_yml::from_str(yaml).unwrap();
-        match price {
-            PriceSchema::Recurring(config) => {
-                assert_eq!(config.currency, Currency::Eur);
-                assert_eq!(config.unit_amount, 1999);
-                assert_eq!(config.interval, RecurringInterval::Year);
-                assert_eq!(config.interval_count, Some(1));
-            }
-            _ => panic!("Expected Recurring variant"),
-        }
+        assert_eq!(price.pricing_type, Some(PricingType::Recurring));
+        assert_eq!(price.amounts.get("eur"), Some(&19.99));
+        let recurring = price.recurring.unwrap();
+        assert_eq!(recurring.interval, RecurringInterval::Year);
+        assert_eq!(recurring.interval_count, Some(1));
     }
 
     #[test]

@@ -181,8 +181,8 @@ fn fund_facilitator_accounts(
         };
         info!("Funding currency {} (mint {})", symbol, mint);
         let _ = surfnet_set_token_account(
-            &rpc_client,
-            SetTokenAccountRequest::new(facilitator_pubkey.clone(), *mint, *token_program),
+            rpc_client,
+            SetTokenAccountRequest::new(facilitator_pubkey, *mint, *token_program),
         );
     }
 }

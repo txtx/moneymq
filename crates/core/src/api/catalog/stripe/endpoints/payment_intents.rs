@@ -268,7 +268,7 @@ pub async fn confirm_payment_intent(
 
 /// POST /v1/payment_intents/:id/cancel - Cancel a payment intent
 pub async fn cancel_payment_intent(
-    Extension(state): Extension<CatalogState>,
+    Extension(_state): Extension<CatalogState>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
     let payment_intent = StripePaymentIntent {

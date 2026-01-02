@@ -41,6 +41,7 @@ pub fn convert_product(
         description: stripe_product.description,
         active: stripe_product.active.unwrap_or(true),
         metadata: metadata_to_sorted_indexmap(stripe_product.metadata.unwrap_or_default()),
+        features: IndexMap::new(),
         created_at,
         updated_at,
         product_type: stripe_product.type_.map(|t| format!("{:?}", t)),

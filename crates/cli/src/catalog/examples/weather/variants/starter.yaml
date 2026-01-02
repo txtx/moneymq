@@ -1,0 +1,19 @@
+name: Weather Starter
+description: Perfect for hobby projects and prototypes.
+
+features:
+  requests_per_day:
+    value: 100
+  forecast_days:
+    value: 3
+  historical_data:
+    value: false
+  alerts:
+    value: false
+
+price:
+  amounts:
+    usd: 0
+  pricing_type: recurring
+  recurring:
+    interval: month

@@ -146,12 +146,9 @@ impl SurfnetRpcConfig {
 
 impl SolanaSurfnetFacilitatorConfig {
     pub fn extra(&self) -> Option<SupportedPaymentKindExtra> {
-        match self.payer_pubkey {
-            Some(pubkey) => Some(SupportedPaymentKindExtra {
-                fee_payer: pubkey.into(),
-            }),
-            None => None,
-        }
+        self.payer_pubkey.map(|pubkey| SupportedPaymentKindExtra {
+            fee_payer: pubkey.into(),
+        })
     }
 }
 
@@ -163,12 +160,9 @@ pub struct SolanaMainnetFacilitatorConfig {
 
 impl SolanaMainnetFacilitatorConfig {
     pub fn extra(&self) -> Option<SupportedPaymentKindExtra> {
-        match self.payer_pubkey {
-            Some(pubkey) => Some(SupportedPaymentKindExtra {
-                fee_payer: pubkey.into(),
-            }),
-            None => None,
-        }
+        self.payer_pubkey.map(|pubkey| SupportedPaymentKindExtra {
+            fee_payer: pubkey.into(),
+        })
     }
 }
 

@@ -13,7 +13,7 @@ use futures::stream::Stream;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::api::payment::db::DbManager;
 
@@ -336,14 +336,14 @@ impl EventBroadcaster {
 
     /// Broadcast an event to all SSE clients and store for replay
     pub fn broadcast(&self, event: &Event) {
-        if let Some(json_event) = CloudEventEnvelope::from_sdk_event(event) {
-            if let Ok(json_str) = serde_json::to_string(&json_event) {
-                let event_id = json_event.id.clone();
-                // Store for replay
-                self.store.store(event_id.clone(), json_str.clone());
-                // Broadcast to live subscribers (ignore send errors - no subscribers)
-                let _ = self.tx.send((event_id, json_str));
-            }
+        if let Some(json_event) = CloudEventEnvelope::from_sdk_event(event)
+            && let Ok(json_str) = serde_json::to_string(&json_event)
+        {
+            let event_id = json_event.id.clone();
+            // Store for replay
+            self.store.store(event_id.clone(), json_str.clone());
+            // Broadcast to live subscribers (ignore send errors - no subscribers)
+            let _ = self.tx.send((event_id, json_str));
         }
     }
 
@@ -472,57 +472,57 @@ impl StatefulEventBroadcaster {
 
     /// Broadcast an event to all SSE clients, store in memory AND persist to database
     pub fn broadcast(&self, event: &Event) {
-        if let Some(json_event) = CloudEventEnvelope::from_sdk_event(event) {
-            if let Ok(json_str) = serde_json::to_string(&json_event) {
-                let event_id = json_event.id.clone();
-                let event_type = json_event.ty.clone();
-                let event_source = json_event.source.clone();
-                let event_time = json_event.time.timestamp_millis();
+        if let Some(json_event) = CloudEventEnvelope::from_sdk_event(event)
+            && let Ok(json_str) = serde_json::to_string(&json_event)
+        {
+            let event_id = json_event.id.clone();
+            let event_type = json_event.ty.clone();
+            let event_source = json_event.source.clone();
+            let event_time = json_event.time.timestamp_millis();
 
-                info!(
-                    event_id = %event_id,
-                    event_type = %event_type,
-                    "Broadcasting event to SSE clients"
-                );
+            info!(
+                event_id = %event_id,
+                event_type = %event_type,
+                "Broadcasting event to SSE clients"
+            );
 
-                // Store in memory for stateless clients
-                self.inner.store.store(event_id.clone(), json_str.clone());
+            // Store in memory for stateless clients
+            self.inner.store.store(event_id.clone(), json_str.clone());
 
-                // Persist to database for stateful clients
-                if let Err(e) = self.db_manager.insert_cloud_event(
-                    event_id.clone(),
-                    event_type.clone(),
-                    event_source,
-                    event_time,
-                    json_str.clone(),
-                    &self.context.payment_stack_id,
-                    self.context.is_sandbox,
-                ) {
-                    error!("Failed to persist CloudEvent to database: {}", e);
+            // Persist to database for stateful clients
+            if let Err(e) = self.db_manager.insert_cloud_event(
+                event_id.clone(),
+                event_type.clone(),
+                event_source,
+                event_time,
+                json_str.clone(),
+                &self.context.payment_stack_id,
+                self.context.is_sandbox,
+            ) {
+                error!("Failed to persist CloudEvent to database: {}", e);
+            }
+
+            // Broadcast to live subscribers
+            let subscriber_count = self.inner.tx.receiver_count();
+            info!(
+                event_id = %event_id,
+                subscriber_count = %subscriber_count,
+                "Sending to broadcast channel"
+            );
+            match self.inner.tx.send((event_id.clone(), json_str)) {
+                Ok(sent_to) => {
+                    info!(
+                        event_id = %event_id,
+                        sent_to = %sent_to,
+                        "Event sent to subscribers"
+                    );
                 }
-
-                // Broadcast to live subscribers
-                let subscriber_count = self.inner.tx.receiver_count();
-                info!(
-                    event_id = %event_id,
-                    subscriber_count = %subscriber_count,
-                    "Sending to broadcast channel"
-                );
-                match self.inner.tx.send((event_id.clone(), json_str)) {
-                    Ok(sent_to) => {
-                        info!(
-                            event_id = %event_id,
-                            sent_to = %sent_to,
-                            "Event sent to subscribers"
-                        );
-                    }
-                    Err(e) => {
-                        error!(
-                            event_id = %event_id,
-                            error = %e,
-                            "Failed to send to broadcast channel (no subscribers?)"
-                        );
-                    }
+                Err(e) => {
+                    error!(
+                        event_id = %event_id,
+                        error = %e,
+                        "Failed to send to broadcast channel (no subscribers?)"
+                    );
                 }
             }
         }
@@ -829,7 +829,7 @@ pub fn create_stateful_sse_stream(
                 "Updating cursor for last replay event before entering live loop"
             );
             let event_time = chrono::Utc::now().timestamp_millis();
-            b.update_stream_cursor(sid, &last_id, event_time);
+            b.update_stream_cursor(sid, last_id, event_time);
         }
 
         info!(stream_id = ?stream_id, "Entering live event loop");

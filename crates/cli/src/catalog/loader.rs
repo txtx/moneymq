@@ -16,7 +16,9 @@
 use std::{collections::HashMap, fs, path::Path};
 
 use console::style;
-use moneymq_types::{Currency, Price, PricingType, Product, merge_product_with_variant};
+use moneymq_types::{
+    Currency, Price, PricingType, Product, ProductFeature, merge_product_with_variant,
+};
 use serde_json::Value as JsonValue;
 
 /// Load all products from a catalog directory
@@ -93,7 +95,7 @@ fn load_legacy_product(path: &Path) -> Result<Product, String> {
         .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
 }
 
-/// Load a product directory with variants
+/// Load a product directory with variants (supports recursive/nested variants)
 fn load_product_with_variants(product_dir: &Path, dir_name: &str) -> Result<Vec<Product>, String> {
     // Load base product.yaml content
     let product_yaml_path = product_dir.join("product.yaml");
@@ -106,9 +108,21 @@ fn load_product_with_variants(product_dir: &Path, dir_name: &str) -> Result<Vec<
         return Err("No variants directory found".to_string());
     }
 
+    // Recursively load variants with an empty path prefix
+    load_variants_recursive(&variants_dir, &base_content, dir_name, "")
+}
+
+/// Recursively load variants from a directory
+/// `id_prefix` accumulates the path for nested variants (e.g., "lite" -> "lite-a")
+fn load_variants_recursive(
+    variants_dir: &Path,
+    base_content: &str,
+    product_dir_name: &str,
+    id_prefix: &str,
+) -> Result<Vec<Product>, String> {
     let mut products = Vec::new();
 
-    let entries = fs::read_dir(&variants_dir)
+    let entries = fs::read_dir(variants_dir)
         .map_err(|e| format!("Failed to read variants directory: {}", e))?;
 
     for entry in entries {
@@ -118,39 +132,106 @@ fn load_product_with_variants(product_dir: &Path, dir_name: &str) -> Result<Vec<
         // Support both layouts:
         // Old: variants/{variant}.yaml (file)
         // New: variants/{variant}/product.yaml (directory)
-        let (variant_name, variant_path) = if path.is_dir() {
+        if path.is_dir() {
             // New layout: variants/{variant}/product.yaml
             let variant_yaml = path.join("product.yaml");
             if !variant_yaml.exists() {
                 continue;
             }
-            let name = path
+            let variant_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
-            (name.to_string(), variant_yaml)
+
+            // Build the full variant identifier (e.g., "lite" or "lite-a")
+            let full_variant_id = if id_prefix.is_empty() {
+                variant_name.to_string()
+            } else {
+                format!("{}-{}", id_prefix, variant_name)
+            };
+
+            // Check for nested variants
+            let nested_variants_dir = path.join("variants");
+            if nested_variants_dir.exists() {
+                // This variant has its own variants - merge this level first, then recurse
+                let variant_content = fs::read_to_string(&variant_yaml)
+                    .map_err(|e| format!("Failed to read variant file: {}", e))?;
+
+                // Merge base with this variant to create intermediate base
+                let merged_base = moneymq_types::deep_merge_json(
+                    serde_yml::from_str(base_content)
+                        .map_err(|e| format!("Failed to parse base YAML: {}", e))?,
+                    serde_yml::from_str(&variant_content)
+                        .map_err(|e| format!("Failed to parse variant YAML: {}", e))?,
+                );
+                let merged_base_str = serde_json::to_string(&merged_base)
+                    .map_err(|e| format!("Failed to serialize merged base: {}", e))?;
+
+                // Recursively load nested variants with the merged base
+                match load_variants_recursive(
+                    &nested_variants_dir,
+                    &merged_base_str,
+                    product_dir_name,
+                    &full_variant_id,
+                ) {
+                    Ok(nested_products) => {
+                        products.extend(nested_products);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{} Failed to load nested variants in {}: {}",
+                            style("Warning:").yellow(),
+                            path.display(),
+                            e
+                        );
+                    }
+                }
+            } else {
+                // Leaf variant - no nested variants
+                match load_and_merge_variant(
+                    &variant_yaml,
+                    base_content,
+                    product_dir_name,
+                    &full_variant_id,
+                ) {
+                    Ok(product) => {
+                        products.push(product);
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{} Failed to parse variant {}: {}",
+                            style("Warning:").yellow(),
+                            variant_yaml.display(),
+                            e
+                        );
+                    }
+                }
+            }
         } else if path.extension().and_then(|s| s.to_str()) == Some("yaml") {
             // Old layout: variants/{variant}.yaml
-            let name = path
+            let variant_name = path
                 .file_stem()
                 .and_then(|n| n.to_str())
                 .unwrap_or("unknown");
-            (name.to_string(), path.clone())
-        } else {
-            continue;
-        };
 
-        match load_and_merge_variant(&variant_path, &base_content, dir_name, &variant_name) {
-            Ok(product) => {
-                products.push(product);
-            }
-            Err(e) => {
-                eprintln!(
-                    "{} Failed to parse variant {}: {}",
-                    style("Warning:").yellow(),
-                    variant_path.display(),
-                    e
-                );
+            let full_variant_id = if id_prefix.is_empty() {
+                variant_name.to_string()
+            } else {
+                format!("{}-{}", id_prefix, variant_name)
+            };
+
+            match load_and_merge_variant(&path, base_content, product_dir_name, &full_variant_id) {
+                Ok(product) => {
+                    products.push(product);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "{} Failed to parse variant {}: {}",
+                        style("Warning:").yellow(),
+                        path.display(),
+                        e
+                    );
+                }
             }
         }
     }
@@ -181,7 +262,7 @@ fn load_and_merge_variant(
 }
 
 /// Convert merged JSON to a Product struct
-fn json_to_product(json: JsonValue) -> Result<Product, String> {
+pub fn json_to_product(json: JsonValue) -> Result<Product, String> {
     let obj = json.as_object().ok_or("Expected JSON object")?;
 
     // Extract ID (required - should be set by merge function)
@@ -228,8 +309,11 @@ fn json_to_product(json: JsonValue) -> Result<Product, String> {
     // Extract and convert metadata to the expected format
     let metadata = extract_metadata(obj.get("metadata"));
 
-    // Extract and convert prices
-    let prices = extract_prices(obj.get("prices"))?;
+    // Extract and convert features
+    let features = extract_features(obj.get("features"));
+
+    // Extract and convert price (singular)
+    let prices = extract_price(obj.get("price"))?;
 
     // Build Product using Product::new() for proper timestamps
     let mut product = Product::new()
@@ -243,6 +327,7 @@ fn json_to_product(json: JsonValue) -> Result<Product, String> {
     product.active = active;
     product.images = images;
     product.metadata = metadata;
+    product.features = features;
     product.prices = prices;
 
     Ok(product)
@@ -266,34 +351,83 @@ fn extract_metadata(metadata_value: Option<&JsonValue>) -> indexmap::IndexMap<St
     result
 }
 
-/// Extract prices from the merged JSON
-/// Handles the case where prices is an array of price objects
-fn extract_prices(prices_value: Option<&JsonValue>) -> Result<Vec<Price>, String> {
-    let mut prices = Vec::new();
+/// Extract features from JSON, converting to IndexMap<String, ProductFeature>
+/// Features are deep merged: base product defines name/description, variants add values
+fn extract_features(
+    features_value: Option<&JsonValue>,
+) -> indexmap::IndexMap<String, ProductFeature> {
+    let mut result = indexmap::IndexMap::new();
 
-    // If prices is an array, extract each price
-    if let Some(JsonValue::Array(price_arr)) = prices_value {
-        for price_json in price_arr {
-            let price = json_to_price(price_json)?;
-            prices.push(price);
+    if let Some(JsonValue::Object(features)) = features_value {
+        for (key, value) in features {
+            if let JsonValue::Object(feature_obj) = value {
+                let name = feature_obj
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let description = feature_obj
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                let feature_value = feature_obj.get("value").cloned();
+
+                result.insert(
+                    key.clone(),
+                    ProductFeature {
+                        name,
+                        description,
+                        value: feature_value,
+                    },
+                );
+            }
         }
     }
 
-    Ok(prices)
+    result
+}
+
+/// Extract price from the merged JSON (singular price object)
+/// New format uses `price: { amounts: { usd: 49.00 }, recurring: { interval: month } }`
+fn extract_price(price_value: Option<&JsonValue>) -> Result<Vec<Price>, String> {
+    // If price is present, convert to a single-element vector
+    if let Some(JsonValue::Object(price_obj)) = price_value {
+        let price = json_to_price(&JsonValue::Object(price_obj.clone()))?;
+        Ok(vec![price])
+    } else {
+        Ok(vec![])
+    }
 }
 
 /// Convert a price JSON object to a Price struct
+/// New format: { amounts: { usd: 49.00 }, pricing_type: "recurring", recurring: { interval: "month" } }
 fn json_to_price(json: &JsonValue) -> Result<Price, String> {
     let obj = json.as_object().ok_or("Expected price to be an object")?;
 
-    // Extract currency
-    let currency_str = obj
-        .get("currency")
-        .and_then(|v| v.as_str())
-        .unwrap_or("usd");
-    let currency = Currency::from_str(currency_str).unwrap_or(Currency::Usd);
+    // Extract amounts map - new format uses `amounts: { usd: 49.00 }`
+    let (currency, unit_amount) = if let Some(JsonValue::Object(amounts)) = obj.get("amounts") {
+        // Get the first currency/amount pair
+        if let Some((currency_str, amount_value)) = amounts.iter().next() {
+            let currency = Currency::parse(currency_str).unwrap_or(Currency::Usd);
+            // Convert float dollars to integer cents
+            let amount = amount_value.as_f64().map(|a| (a * 100.0).round() as i64);
+            (currency, amount)
+        } else {
+            (Currency::Usd, None)
+        }
+    } else {
+        // Fallback to legacy format for backwards compatibility
+        let currency_str = obj
+            .get("currency")
+            .and_then(|v| v.as_str())
+            .unwrap_or("usd");
+        let currency = Currency::parse(currency_str).unwrap_or(Currency::Usd);
+        let amount = obj.get("unit_amount").and_then(|v| v.as_i64());
+        (currency, amount)
+    };
 
-    // Extract pricing type
+    // Extract pricing type (defaults to one_time if not specified)
     let pricing_type_str = obj
         .get("pricing_type")
         .and_then(|v| v.as_str())
@@ -302,9 +436,6 @@ fn json_to_price(json: &JsonValue) -> Result<Price, String> {
         "recurring" => PricingType::Recurring,
         _ => PricingType::OneTime,
     };
-
-    // Extract unit amount
-    let unit_amount = obj.get("unit_amount").and_then(|v| v.as_i64());
 
     // Build price using Price::new() for proper timestamps
     let mut price = Price::new(currency, pricing_type).with_some_amount(unit_amount);
@@ -318,19 +449,34 @@ fn json_to_price(json: &JsonValue) -> Result<Price, String> {
         price.active = active;
     }
 
-    // Recurring interval handling
-    if let Some(interval) = obj.get("recurring_interval").and_then(|v| v.as_str()) {
-        price.recurring_interval = match interval {
-            "day" => Some(moneymq_types::RecurringInterval::Day),
-            "week" => Some(moneymq_types::RecurringInterval::Week),
-            "month" => Some(moneymq_types::RecurringInterval::Month),
-            "year" => Some(moneymq_types::RecurringInterval::Year),
-            _ => None,
-        };
-    }
-
-    if let Some(count) = obj.get("recurring_interval_count").and_then(|v| v.as_i64()) {
-        price.recurring_interval_count = Some(count);
+    // Recurring config handling - new format uses nested `recurring: { interval: "month" }`
+    if let Some(JsonValue::Object(recurring)) = obj.get("recurring") {
+        if let Some(interval) = recurring.get("interval").and_then(|v| v.as_str()) {
+            price.recurring_interval = match interval {
+                "day" => Some(moneymq_types::RecurringInterval::Day),
+                "week" => Some(moneymq_types::RecurringInterval::Week),
+                "month" => Some(moneymq_types::RecurringInterval::Month),
+                "year" => Some(moneymq_types::RecurringInterval::Year),
+                _ => None,
+            };
+        }
+        if let Some(count) = recurring.get("interval_count").and_then(|v| v.as_i64()) {
+            price.recurring_interval_count = Some(count);
+        }
+    } else {
+        // Fallback to legacy flat format for backwards compatibility
+        if let Some(interval) = obj.get("recurring_interval").and_then(|v| v.as_str()) {
+            price.recurring_interval = match interval {
+                "day" => Some(moneymq_types::RecurringInterval::Day),
+                "week" => Some(moneymq_types::RecurringInterval::Week),
+                "month" => Some(moneymq_types::RecurringInterval::Month),
+                "year" => Some(moneymq_types::RecurringInterval::Year),
+                _ => None,
+            };
+        }
+        if let Some(count) = obj.get("recurring_interval_count").and_then(|v| v.as_i64()) {
+            price.recurring_interval_count = Some(count);
+        }
     }
 
     Ok(price)
@@ -413,9 +559,9 @@ active: true
         let light_yaml = r#"---
 name: Surfnet Starter
 description: Perfect for testing and small projects.
-prices:
-  - currency: usd
-    unit_amount: 399
+price:
+  amounts:
+    usd: 3.99
 "#;
         fs::write(variants_dir.join("light.yaml"), light_yaml).unwrap();
 
@@ -423,9 +569,9 @@ prices:
         let pro_yaml = r#"---
 name: Surfnet Pro
 description: For active development.
-prices:
-  - currency: usd
-    unit_amount: 998
+price:
+  amounts:
+    usd: 9.98
 "#;
         fs::write(variants_dir.join("pro.yaml"), pro_yaml).unwrap();
 
@@ -439,12 +585,12 @@ prices:
         assert_eq!(light.product_type, Some("service".to_string()));
         assert_eq!(light.unit_label, Some("per network".to_string()));
         assert_eq!(light.prices.len(), 1);
-        assert_eq!(light.prices[0].unit_amount, Some(399));
+        assert_eq!(light.prices[0].unit_amount, Some(399)); // 3.99 * 100
 
         // Check pro variant
         let pro = products.get("surfnet-pro").unwrap();
         assert_eq!(pro.name, Some("Surfnet Pro".to_string()));
-        assert_eq!(pro.prices[0].unit_amount, Some(998));
+        assert_eq!(pro.prices[0].unit_amount, Some(998)); // 9.98 * 100
     }
 
     #[test]
@@ -473,9 +619,9 @@ active: true
         let light_yaml = r#"---
 name: Surfnet Starter
 description: Perfect for testing and small projects.
-prices:
-  - currency: usd
-    unit_amount: 399
+price:
+  amounts:
+    usd: 3.99
 "#;
         fs::write(light_dir.join("product.yaml"), light_yaml).unwrap();
 
@@ -483,9 +629,9 @@ prices:
         let pro_yaml = r#"---
 name: Surfnet Pro
 description: For active development.
-prices:
-  - currency: usd
-    unit_amount: 999
+price:
+  amounts:
+    usd: 9.99
 "#;
         fs::write(pro_dir.join("product.yaml"), pro_yaml).unwrap();
 
@@ -499,12 +645,12 @@ prices:
         assert_eq!(light.product_type, Some("service".to_string()));
         assert_eq!(light.unit_label, Some("per network".to_string()));
         assert_eq!(light.prices.len(), 1);
-        assert_eq!(light.prices[0].unit_amount, Some(399));
+        assert_eq!(light.prices[0].unit_amount, Some(399)); // 3.99 * 100
 
         // Check pro variant
         let pro = products.get("surfnet-pro").unwrap();
         assert_eq!(pro.name, Some("Surfnet Pro".to_string()));
-        assert_eq!(pro.prices[0].unit_amount, Some(999));
+        assert_eq!(pro.prices[0].unit_amount, Some(999)); // 9.99 * 100
     }
 
     #[test]
@@ -522,11 +668,13 @@ active: true
 "#;
         fs::write(myproduct_dir.join("product.yaml"), product_yaml).unwrap();
 
-        // Create variant with explicit ID
+        // Create variant with explicit ID (no price - not a valid product)
         let variant_yaml = r#"---
 id: custom_explicit_id
 name: Custom Product
-prices: []
+price:
+  amounts:
+    usd: 0
 "#;
         fs::write(variants_dir.join("standard.yaml"), variant_yaml).unwrap();
 
@@ -566,7 +714,9 @@ metadata:
     value: 500
   community_support:
     value: true
-prices: []
+price:
+  amounts:
+    usd: 9.99
 "#;
         fs::write(variants_dir.join("pro.yaml"), variant_yaml).unwrap();
 
@@ -589,7 +739,7 @@ prices: []
         let products_dir = temp_dir.path().join("products");
         fs::create_dir_all(&products_dir).unwrap();
 
-        // Create a legacy flat file
+        // Create a legacy flat file (with price)
         let legacy_yaml = r#"---
 id: prod_legacy
 name: Legacy Product
@@ -598,7 +748,9 @@ metadata: {}
 created_at: 1700000000
 updated_at: null
 images: []
-prices: []
+price:
+  amounts:
+    usd: 0
 "#;
         fs::write(products_dir.join("legacy.yaml"), legacy_yaml).unwrap();
 
@@ -615,7 +767,9 @@ active: true
 
         let variant_yaml = r#"---
 name: Modern Variant
-prices: []
+price:
+  amounts:
+    usd: 0
 "#;
         fs::write(variants_dir.join("basic.yaml"), variant_yaml).unwrap();
 
@@ -625,5 +779,152 @@ prices: []
         assert_eq!(products.len(), 2);
         assert!(products.contains_key("prod_legacy"));
         assert!(products.contains_key("modern-basic"));
+    }
+
+    #[test]
+    fn test_recursive_variants() {
+        let temp_dir = TempDir::new().unwrap();
+        let products_dir = temp_dir.path().join("products");
+        let surfnet_dir = products_dir.join("surfnet");
+        let variants_dir = surfnet_dir.join("variants");
+        let lite_dir = variants_dir.join("lite");
+        let lite_variants_dir = lite_dir.join("variants");
+        let lite_a_dir = lite_variants_dir.join("a");
+        let lite_b_dir = lite_variants_dir.join("b");
+
+        fs::create_dir_all(&lite_a_dir).unwrap();
+        fs::create_dir_all(&lite_b_dir).unwrap();
+
+        // Base product
+        let base_yaml = r#"---
+product_type: service
+unit_label: per network
+active: true
+features:
+  transaction_limit:
+    name: Transaction Limit
+    description: Total transactions
+"#;
+        fs::write(surfnet_dir.join("product.yaml"), base_yaml).unwrap();
+
+        // Lite variant (intermediate - has its own variants)
+        let lite_yaml = r#"---
+name: Surfnet Lite
+description: Lite tier
+"#;
+        fs::write(lite_dir.join("product.yaml"), lite_yaml).unwrap();
+
+        // Lite-A variant (leaf)
+        let lite_a_yaml = r#"---
+features:
+  transaction_limit:
+    value: 50
+price:
+  amounts:
+    usd: 3.99
+"#;
+        fs::write(lite_a_dir.join("product.yaml"), lite_a_yaml).unwrap();
+
+        // Lite-B variant (leaf)
+        let lite_b_yaml = r#"---
+features:
+  transaction_limit:
+    value: 100
+price:
+  amounts:
+    usd: 5.99
+"#;
+        fs::write(lite_b_dir.join("product.yaml"), lite_b_yaml).unwrap();
+
+        let products = load_products_from_directory(&products_dir).unwrap();
+
+        // Should have 2 products: surfnet-lite-a and surfnet-lite-b
+        assert_eq!(products.len(), 2);
+        assert!(products.contains_key("surfnet-lite-a"));
+        assert!(products.contains_key("surfnet-lite-b"));
+
+        // Check lite-a
+        let lite_a = products.get("surfnet-lite-a").unwrap();
+        assert_eq!(lite_a.name, Some("Surfnet Lite".to_string())); // inherited from lite
+        assert_eq!(lite_a.product_type, Some("service".to_string())); // inherited from base
+        assert_eq!(lite_a.unit_label, Some("per network".to_string())); // inherited from base
+        assert_eq!(lite_a.prices[0].unit_amount, Some(399)); // 3.99 * 100
+
+        // Check features are merged correctly
+        assert!(lite_a.features.contains_key("transaction_limit"));
+        let tx_limit = &lite_a.features["transaction_limit"];
+        assert_eq!(tx_limit.name, Some("Transaction Limit".to_string())); // from base
+        assert_eq!(tx_limit.value, Some(serde_json::json!(50))); // from lite-a
+
+        // Check lite-b
+        let lite_b = products.get("surfnet-lite-b").unwrap();
+        assert_eq!(lite_b.prices[0].unit_amount, Some(599)); // 5.99 * 100
+        let tx_limit_b = &lite_b.features["transaction_limit"];
+        assert_eq!(tx_limit_b.value, Some(serde_json::json!(100))); // from lite-b
+    }
+
+    #[test]
+    fn test_features_deep_merge() {
+        let temp_dir = TempDir::new().unwrap();
+        let products_dir = temp_dir.path().join("products");
+        let myproduct_dir = products_dir.join("myproduct");
+        let variants_dir = myproduct_dir.join("variants");
+        let pro_dir = variants_dir.join("pro");
+
+        fs::create_dir_all(&pro_dir).unwrap();
+
+        // Base product with feature definitions
+        let base_yaml = r#"---
+product_type: service
+features:
+  community_support:
+    name: Community Support
+    description: Access to community Discord
+    value: true
+  dedicated_support:
+    name: Dedicated Support
+    description: Direct access to team
+  transaction_limit:
+    name: Transaction Limit
+    description: Total transactions allowed
+"#;
+        fs::write(myproduct_dir.join("product.yaml"), base_yaml).unwrap();
+
+        // Pro variant with feature values
+        let pro_yaml = r#"---
+name: Pro Plan
+features:
+  dedicated_support:
+    value: true
+  transaction_limit:
+    value: 500
+price:
+  amounts:
+    usd: 9.99
+"#;
+        fs::write(pro_dir.join("product.yaml"), pro_yaml).unwrap();
+
+        let products = load_products_from_directory(&products_dir).unwrap();
+
+        assert_eq!(products.len(), 1);
+        let pro = products.get("myproduct-pro").unwrap();
+
+        // Check all features are present
+        assert_eq!(pro.features.len(), 3);
+
+        // community_support: should have both definition and value from base
+        let community = &pro.features["community_support"];
+        assert_eq!(community.name, Some("Community Support".to_string()));
+        assert_eq!(community.value, Some(serde_json::json!(true)));
+
+        // dedicated_support: should have definition from base, value from variant
+        let dedicated = &pro.features["dedicated_support"];
+        assert_eq!(dedicated.name, Some("Dedicated Support".to_string()));
+        assert_eq!(dedicated.value, Some(serde_json::json!(true)));
+
+        // transaction_limit: should have definition from base, value from variant
+        let tx_limit = &pro.features["transaction_limit"];
+        assert_eq!(tx_limit.name, Some("Transaction Limit".to_string()));
+        assert_eq!(tx_limit.value, Some(serde_json::json!(500)));
     }
 }

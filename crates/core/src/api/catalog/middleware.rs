@@ -55,10 +55,10 @@ pub enum X402MiddlewareError {
     InvalidPaymentHeader(String),
 }
 
-impl Into<Response> for X402MiddlewareError {
-    fn into(self) -> Response {
+impl From<X402MiddlewareError> for Response {
+    fn from(val: X402MiddlewareError) -> Self {
         // For PaymentRequired, return x402 protocol standard format
-        if let X402MiddlewareError::PaymentRequired(requirements) = &self {
+        if let X402MiddlewareError::PaymentRequired(requirements) = &val {
             let body = json!({
                 "x402Version": 1,
                 "accepts": requirements,
@@ -67,7 +67,7 @@ impl Into<Response> for X402MiddlewareError {
         }
 
         // For other errors, return standard error format
-        let (status, code, err_type) = match &self {
+        let (status, code, err_type) = match &val {
             X402MiddlewareError::SupportedFetchError(_) => (
                 StatusCode::BAD_GATEWAY,
                 "get_supported_failed",
@@ -91,7 +91,7 @@ impl Into<Response> for X402MiddlewareError {
             ),
         };
 
-        let message = self.to_string();
+        let message = val.to_string();
         let body = json!({
             "error": {
                 "code": code,
@@ -114,7 +114,7 @@ async fn fetch_supported(
         .get(&supported_url)
         .send()
         .await
-        .map_err(|e| X402FacilitatorRequestError::FailedToContactFacilitator(e))?;
+        .map_err(X402FacilitatorRequestError::FailedToContactFacilitator)?;
 
     if !response.status().is_success() {
         let error = response.error_for_status().unwrap_err();
@@ -124,7 +124,7 @@ async fn fetch_supported(
     let supported: SupportedResponse = response
         .json()
         .await
-        .map_err(|e| X402FacilitatorRequestError::FacilitatorResponseParseError(e))?;
+        .map_err(X402FacilitatorRequestError::FacilitatorResponseParseError)?;
 
     debug!(
         "Fetched supported payment kinds from facilitator: {:?}",
@@ -422,7 +422,7 @@ pub async fn payment_middleware(
             }
         } else {
             let subscription_req = SubscriptionRequest::parse(&request_bytes);
-            if let Some(_) = subscription_req.customer {
+            if subscription_req.customer.is_some() {
                 debug!(
                     "Parsed subscription request from request, price IDs: {:?}",
                     subscription_req.price_ids
@@ -439,10 +439,10 @@ pub async fn payment_middleware(
                                 price.deployed_id.as_ref()
                             }
                             .unwrap_or(&price.id);
-                            if subscription_req.price_ids.contains(&price_id) && price.active {
+                            if subscription_req.price_ids.contains(price_id) && price.active {
                                 // Note: "margin" pricing type is not currently supported
                                 let is_margin = false;
-                                let price = price.unit_amount.clone().unwrap_or(1);
+                                let price = price.unit_amount.unwrap_or(1);
                                 let description =
                                     product.statement_descriptor.clone().unwrap_or_else(|| {
                                         product.name.clone().unwrap_or("Product".to_string())

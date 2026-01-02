@@ -23,10 +23,7 @@ pub async fn create_checkout_session(
         .as_secs() as i64;
 
     // Generate session ID
-    let session_id = format!(
-        "cs_{}",
-        Uuid::new_v4().to_string().replace("-", "")[..24].to_string()
-    );
+    let session_id = format!("cs_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
 
     // Process line items and calculate totals
     let mut line_items: Vec<CheckoutLineItem> = Vec::new();
@@ -39,13 +36,10 @@ pub async fn create_checkout_session(
         .unwrap_or_else(|| "usd".to_string());
 
     for (index, item) in request.line_items.iter().enumerate() {
-        let line_item_id = format!(
-            "li_{}",
-            Uuid::new_v4().to_string().replace("-", "")[..24].to_string()
-        );
+        let line_item_id = format!("li_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
 
         // Get price info from price_data or look up by price ID
-        let (unit_amount, item_currency, product_name, product_description, product_id) =
+        let (unit_amount, item_currency, _product_name, product_description, product_id) =
             if let Some(price_data) = &item.price_data {
                 (
                     price_data.unit_amount,
@@ -132,14 +126,11 @@ pub async fn create_checkout_session(
     let amount_total = amount_subtotal; // No tax/discount for now
 
     // Create the underlying payment intent
-    let payment_intent_id = format!(
-        "pi_{}",
-        Uuid::new_v4().to_string().replace("-", "")[..24].to_string()
-    );
+    let payment_intent_id = format!("pi_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
     let client_secret = format!(
         "{}_secret_{}",
         payment_intent_id,
-        Uuid::new_v4().to_string().replace("-", "")[..24].to_string()
+        &Uuid::new_v4().to_string().replace("-", "")[..24]
     );
 
     // Build description from line items
@@ -227,15 +218,15 @@ pub async fn retrieve_checkout_session(
         // Check if we need to update status based on payment intent
         let mut session = session.clone();
 
-        if let Some(pi_id) = &session.payment_intent {
-            if let Some(pi) = state.payment_intents.lock().unwrap().get(pi_id) {
-                session.payment_status = match pi.status {
-                    PaymentIntentStatus::Succeeded => PaymentStatus::Paid,
-                    _ => PaymentStatus::Unpaid,
-                };
-                if session.payment_status == PaymentStatus::Paid {
-                    session.status = CheckoutSessionStatus::Complete;
-                }
+        if let Some(pi_id) = &session.payment_intent
+            && let Some(pi) = state.payment_intents.lock().unwrap().get(pi_id)
+        {
+            session.payment_status = match pi.status {
+                PaymentIntentStatus::Succeeded => PaymentStatus::Paid,
+                _ => PaymentStatus::Unpaid,
+            };
+            if session.payment_status == PaymentStatus::Paid {
+                session.status = CheckoutSessionStatus::Complete;
             }
         }
 

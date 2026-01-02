@@ -38,7 +38,7 @@ pub async fn handler(
                 network_config
                     .network()
                     .eq(&request.payment_requirements.network)
-                    .then(|| network_config)
+                    .then_some(network_config)
             })
     else {
         return (
@@ -76,7 +76,7 @@ pub async fn handler(
             ));
             match networks::solana::settle_solana_payment(
                 &request,
-                &network_config,
+                network_config,
                 &rpc_client,
                 &state.kora_config,
                 &state.signer_pool,

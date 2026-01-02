@@ -69,21 +69,19 @@ pub fn extract_customer_from_transaction(transaction_str: &str) -> Result<Pubkey
     let payer_pubkey = if let Ok(versioned_tx) =
         bincode::deserialize::<VersionedTransaction>(&transaction_bytes)
     {
-        versioned_tx
+        *versioned_tx
             .message
             .static_account_keys()
             .get(1)
             .context("Transaction must have at least 2 accounts")?
-            .clone()
     } else {
         let legacy_tx: Transaction = bincode::deserialize(&transaction_bytes)
             .context("Failed to deserialize transaction")?;
-        legacy_tx
+        *legacy_tx
             .message
             .account_keys
             .get(1)
             .context("Transaction must have at least 2 accounts")?
-            .clone()
     };
 
     Ok(payer_pubkey)
@@ -97,9 +95,7 @@ pub async fn verify_solana_payment(
     signer_pool: &Arc<SignerPool>,
 ) -> Result<VerifyResponse> {
     info!("Verifying Solana payment");
-    let solana_payload = match &request.payment_payload.payload {
-        ExactPaymentPayload::Solana(payload) => payload,
-    };
+    let ExactPaymentPayload::Solana(solana_payload) = &request.payment_payload.payload;
     let transaction = TransactionUtil::decode_b64_transaction(&solana_payload.transaction)?;
     info!(
         "Decoded transaction with {} signatures",
@@ -122,7 +118,7 @@ pub async fn verify_solana_payment(
     .await?;
 
     let _ = resolved_transaction
-        .sign_transaction(&kora_config, &Arc::clone(&meta_signer), rpc_client)
+        .sign_transaction(kora_config, &Arc::clone(&meta_signer), rpc_client)
         .await?;
 
     let payer = MixedAddress::Solana(meta_signer.pubkey());
@@ -139,9 +135,7 @@ pub async fn settle_solana_payment(
     signer_pool: &Arc<SignerPool>,
 ) -> Result<SettleResponse> {
     info!("Settling Solana payment");
-    let solana_payload = match &request.payment_payload.payload {
-        ExactPaymentPayload::Solana(payload) => payload,
-    };
+    let ExactPaymentPayload::Solana(solana_payload) = &request.payment_payload.payload;
     let transaction = TransactionUtil::decode_b64_transaction(&solana_payload.transaction)?;
     info!(
         "Decoded transaction with {} signatures",

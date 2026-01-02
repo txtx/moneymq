@@ -1,0 +1,207 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-1
+  S3_BUCKET: txtx-public
+
+concurrency:
+  group: ${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  get_release_info:
+    name: Get Release Info
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.new_release_tag.outputs.TAG }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get latest release
+        if: startsWith(github.ref, 'refs/heads/main')
+        id: release
+        uses: pozetroninc/github-action-get-latest-release@master
+        with:
+          repository: ${{ github.repository }}
+          excludes: prerelease, draft
+        continue-on-error: true
+
+      - name: Determine if release build
+        if: startsWith(github.ref, 'refs/heads/main')
+        id: new_release_tag
+        env:
+          LATEST_RELEASE: ${{ steps.release.outputs.release }}
+        run: |
+          CARGO_VERSION=v$(grep "^version" Cargo.toml | head -n 1 | cut -d\" -f2)
+          if [[ "${CARGO_VERSION}" != "${LATEST_RELEASE}" ]]; then
+            echo "TAG=${CARGO_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Will create release for version: ${CARGO_VERSION}"
+          else
+            echo "::notice::Version ${CARGO_VERSION} already released, skipping"
+          fi
+
+  build:
+    name: Build ${{ matrix.platform }}-${{ matrix.architecture }}
+    runs-on: ${{ matrix.os }}
+    outputs:
+      LINUX_X64_SHA: ${{ steps.linux_x64_sha.outputs.LINUX_X64_SHA }}
+      MACOS_X64_SHA: ${{ steps.macos_x64_sha.outputs.MACOS_X64_SHA }}
+      MACOS_ARM64_SHA: ${{ steps.macos_arm64_sha.outputs.MACOS_ARM64_SHA }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            platform: linux
+            target: x86_64-unknown-linux-gnu
+            architecture: x64
+          - os: macos-latest
+            platform: darwin
+            target: x86_64-apple-darwin
+            architecture: x64
+          - os: macos-latest
+            platform: darwin
+            target: aarch64-apple-darwin
+            architecture: arm64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install stable --profile minimal --target ${{ matrix.target }}
+
+      - name: Install Rust Target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Get Rust version
+        run: echo "RUST_VERSION_HASH=$(rustc --version | shasum -a 256 | awk '{print $1}')" >> $GITHUB_ENV
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/
+            ./target/${{ matrix.target }}/release/
+          key: ${{ runner.os }}-${{ matrix.architecture }}-rust-${{ env.RUST_VERSION_HASH }}-cargo-${{ hashFiles('./Cargo.lock') }}
+
+      - name: Configure macos-arm64 cross compile
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          echo "SDKROOT=$(xcrun -sdk macosx --show-sdk-path)" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(xcrun -sdk macosx --show-sdk-platform-version)" >> $GITHUB_ENV
+
+      - name: Install dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Configure artifact names
+        run: |
+          echo "SHORT_TARGET_NAME=${{ matrix.platform }}-${{ matrix.architecture }}" >> $GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Compress artifact
+        run: tar -C target/${{ matrix.target }}/release -zcvf moneymq-${{ env.SHORT_TARGET_NAME }}.tar.gz moneymq
+
+      - name: Store SHA256 Hash (Linux x64)
+        if: matrix.platform == 'linux'
+        id: linux_x64_sha
+        run: |
+          echo "LINUX_X64_SHA=$(sha256sum moneymq-${{ env.SHORT_TARGET_NAME }}.tar.gz | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
+
+      - name: Store SHA256 Hash (Mac x64)
+        if: matrix.os == 'macos-latest' && matrix.architecture == 'x64'
+        id: macos_x64_sha
+        run: |
+          echo "MACOS_X64_SHA=$(shasum -a 256 moneymq-${{ env.SHORT_TARGET_NAME }}.tar.gz | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
+
+      - name: Store SHA256 Hash (Mac arm64)
+        if: matrix.os == 'macos-latest' && matrix.architecture == 'arm64'
+        id: macos_arm64_sha
+        run: |
+          echo "MACOS_ARM64_SHA=$(shasum -a 256 moneymq-${{ env.SHORT_TARGET_NAME }}.tar.gz | awk '{ print $1 }')" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moneymq-${{ env.SHORT_TARGET_NAME }}
+          path: moneymq-${{ env.SHORT_TARGET_NAME }}.tar.gz
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != ''
+    needs:
+      - build
+      - get_release_info
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "**/*.tar.gz"
+          tag: ${{ needs.get_release_info.outputs.tag }}
+          commit: ${{ github.sha }}
+          generateReleaseNotes: true
+
+  upload_s3:
+    name: Upload to S3
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/heads/main') && needs.get_release_info.outputs.tag != ''
+    needs:
+      - build
+      - get_release_info
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Upload to S3
+        run: |
+          TAG=${{ needs.get_release_info.outputs.tag }}
+          echo "Uploading artifacts to S3 for release $TAG"
+
+          for dir in ./artifacts/*/; do
+            for file in "$dir"*.tar.gz; do
+              if [ -f "$file" ]; then
+                BASENAME=$(basename "$file")
+                echo "→ Uploading $BASENAME ..."
+                aws s3 cp "$file" "s3://${{ env.S3_BUCKET }}/releases/$BASENAME" \
+                  --acl public-read \
+                  --cache-control "public, max-age=31536000"
+              fi
+            done
+          done
+
+      - name: Print public URLs
+        run: |
+          echo "✅ Uploaded artifacts are available at:"
+          echo "  - http://${{ env.S3_BUCKET }}.s3.amazonaws.com/releases/moneymq-linux-x64.tar.gz"
+          echo "  - http://${{ env.S3_BUCKET }}.s3.amazonaws.com/releases/moneymq-darwin-x64.tar.gz"
+          echo "  - http://${{ env.S3_BUCKET }}.s3.amazonaws.com/releases/moneymq-darwin-arm64.tar.gz"

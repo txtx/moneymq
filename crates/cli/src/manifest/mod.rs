@@ -143,7 +143,7 @@ pub enum CatalogSourceType {
 }
 
 /// Stripe sandbox/test configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StripeSandboxConfig {
     /// Optional description of this sandbox environment
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,18 +165,6 @@ pub struct StripeSandboxConfig {
     /// Webhook secret for signature verification (should be in .env)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub webhook_secret_env: Option<String>,
-}
-
-impl Default for StripeSandboxConfig {
-    fn default() -> Self {
-        Self {
-            description: None,
-            api_key: None,
-            api_version: None,
-            webhook_endpoint: None,
-            webhook_secret_env: None,
-        }
-    }
 }
 
 impl StripeSandboxConfig {

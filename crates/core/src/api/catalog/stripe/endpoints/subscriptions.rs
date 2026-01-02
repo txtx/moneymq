@@ -9,7 +9,6 @@ use crate::api::catalog::{
 };
 
 #[allow(dead_code)]
-
 pub struct SubscriptionRequest {
     pub customer: Option<String>,
     pub price_ids: Vec<String>,
@@ -47,7 +46,7 @@ impl SubscriptionRequest {
 
 /// POST /v1/subscriptions - Create a subscription
 pub async fn create_subscription(
-    Extension(state): Extension<CatalogState>,
+    Extension(_state): Extension<CatalogState>,
     body: Bytes,
 ) -> impl IntoResponse {
     let SubscriptionRequest {

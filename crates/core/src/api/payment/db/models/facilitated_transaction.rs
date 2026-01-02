@@ -132,17 +132,22 @@ impl FacilitatedTransactionWithCustomer {
     ) -> QueryResult<(Vec<FacilitatedTransactionWithCustomer>, bool)> {
         let raw_limit = (limit + 1) as i64;
 
+        let mut query = facilitated_transactions::table
+            .left_join(transaction_customers::table)
+            .filter(facilitated_transactions::payment_stack_id.eq(payment_stack_id))
+            .filter(facilitated_transactions::is_sandbox.eq(is_sandbox))
+            .order(facilitated_transactions::id.desc())
+            .into_boxed();
+
+        // For descending order pagination, filter for IDs less than starting_after
+        if let Some(after_id) = starting_after {
+            query = query.filter(facilitated_transactions::id.lt(after_id));
+        }
+
         let mut rows: Vec<(
             FacilitatedTransactionModel,
             Option<TransactionCustomerModel>,
-        )> = facilitated_transactions::table
-            .left_join(transaction_customers::table)
-            .filter(facilitated_transactions::id.gt(starting_after.unwrap_or(0)))
-            .filter(facilitated_transactions::payment_stack_id.eq(payment_stack_id))
-            .filter(facilitated_transactions::is_sandbox.eq(is_sandbox))
-            .order(facilitated_transactions::id.asc())
-            .limit(raw_limit)
-            .load(conn)?;
+        )> = query.limit(raw_limit).load(conn)?;
 
         let has_more = rows.len() > limit;
         if has_more {
@@ -163,25 +168,25 @@ impl FacilitatedTransactionWithCustomer {
     }
 }
 
-impl Into<FacilitatedTransaction> for FacilitatedTransactionWithCustomer {
-    fn into(self) -> FacilitatedTransaction {
+impl From<FacilitatedTransactionWithCustomer> for FacilitatedTransaction {
+    fn from(val: FacilitatedTransactionWithCustomer) -> Self {
         FacilitatedTransaction {
-            id: self.facilitated.id,
-            created_at: self.facilitated.created_at,
-            updated_at: self.facilitated.updated_at,
-            product: self.facilitated.product,
-            customer: self.customer.map(|c| c.into()),
-            amount: self.facilitated.amount,
-            currency: self.facilitated.currency,
-            status: self.facilitated.status,
-            signature: self.facilitated.signature,
-            x402_payment_requirement: Some(self.facilitated.x402_payment_requirement),
-            x402_verify_request: self.facilitated.x402_verify_request,
-            x402_verify_response: self.facilitated.x402_verify_response,
-            x402_settle_request: self.facilitated.x402_settle_request,
-            x402_settle_response: self.facilitated.x402_settle_response,
-            payment_stack_id: self.facilitated.payment_stack_id,
-            is_sandbox: self.facilitated.is_sandbox,
+            id: val.facilitated.id,
+            created_at: val.facilitated.created_at,
+            updated_at: val.facilitated.updated_at,
+            product: val.facilitated.product,
+            customer: val.customer.map(|c| c.into()),
+            amount: val.facilitated.amount,
+            currency: val.facilitated.currency,
+            status: val.facilitated.status,
+            signature: val.facilitated.signature,
+            x402_payment_requirement: Some(val.facilitated.x402_payment_requirement),
+            x402_verify_request: val.facilitated.x402_verify_request,
+            x402_verify_response: val.facilitated.x402_verify_response,
+            x402_settle_request: val.facilitated.x402_settle_request,
+            x402_settle_response: val.facilitated.x402_settle_response,
+            payment_stack_id: val.facilitated.payment_stack_id,
+            is_sandbox: val.facilitated.is_sandbox,
         }
     }
 }

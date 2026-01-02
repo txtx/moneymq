@@ -1,0 +1,19 @@
+name: Weather Enterprise
+description: Unlimited forecasts with dedicated support.
+
+features:
+  requests_per_day:
+    value: -1
+  forecast_days:
+    value: 30
+  historical_data:
+    value: true
+  alerts:
+    value: true
+
+price:
+  amounts:
+    usd: 199.00
+  pricing_type: recurring
+  recurring:
+    interval: month
