@@ -1,0 +1,1458 @@
+# =============================================================================
+# MoneyMQ Global Tax Configuration
+# =============================================================================
+#
+# This file contains tax rates for sales tax, VAT, GST, and digital services
+# taxes across all major jurisdictions.
+#
+# Structure:
+#   - countries: Tax rates by country (ISO 3166-1 alpha-2 codes)
+#   - digital_services_tax: Countries with specific DST rules
+#   - tax_categories: Product/service categories with special rates
+#
+# Rate Types:
+#   - standard: Default rate for most goods/services
+#   - reduced: Lower rate for specific categories (food, books, etc.)
+#   - zero: 0% rate (exports, specific exemptions)
+#   - exempt: No tax applies
+#
+# Last Updated: 2025-01-01
+# =============================================================================
+
+version: "1.0"
+last_updated: "2025-01-01"
+
+# =============================================================================
+# COUNTRIES
+# =============================================================================
+
+countries:
+
+  # ===========================================================================
+  # UNITED STATES
+  # ===========================================================================
+  # No federal sales tax. State and local taxes vary significantly.
+  # Digital goods taxation varies by state.
+
+  US:
+    name: United States
+    currency: USD
+    tax_type: sales_tax
+    federal_rate: 0  # No federal sales tax
+    has_state_taxes: true
+    digital_goods_taxable: varies  # Depends on state
+
+    states:
+      # States with NO sales tax
+      AK:
+        name: Alaska
+        rate: 0
+        has_local_tax: true  # Local jurisdictions may levy tax
+        notes: "No state tax, but local taxes up to 7.5%"
+
+      DE:
+        name: Delaware
+        rate: 0
+        has_local_tax: false
+        notes: "No sales tax"
+
+      MT:
+        name: Montana
+        rate: 0
+        has_local_tax: true
+        notes: "No state tax, limited local resort taxes"
+
+      NH:
+        name: New Hampshire
+        rate: 0
+        has_local_tax: false
+        notes: "No sales tax"
+
+      OR:
+        name: Oregon
+        rate: 0
+        has_local_tax: false
+        notes: "No sales tax"
+
+      # States WITH sales tax (alphabetical)
+      AL:
+        name: Alabama
+        rate: 4.0
+        has_local_tax: true
+        avg_local_rate: 5.24
+        combined_avg: 9.24
+        digital_goods_taxable: true
+
+      AZ:
+        name: Arizona
+        rate: 5.6
+        has_local_tax: true
+        avg_local_rate: 2.80
+        combined_avg: 8.40
+        digital_goods_taxable: false
+
+      AR:
+        name: Arkansas
+        rate: 6.5
+        has_local_tax: true
+        avg_local_rate: 2.97
+        combined_avg: 9.47
+        digital_goods_taxable: true
+
+      CA:
+        name: California
+        rate: 7.25
+        has_local_tax: true
+        avg_local_rate: 1.57
+        combined_avg: 8.82
+        digital_goods_taxable: false
+        notes: "Highest state rate in US"
+
+      CO:
+        name: Colorado
+        rate: 2.9
+        has_local_tax: true
+        avg_local_rate: 4.87
+        combined_avg: 7.77
+        digital_goods_taxable: true
+
+      CT:
+        name: Connecticut
+        rate: 6.35
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      DC:
+        name: District of Columbia
+        rate: 6.0
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      FL:
+        name: Florida
+        rate: 6.0
+        has_local_tax: true
+        avg_local_rate: 1.02
+        combined_avg: 7.02
+        digital_goods_taxable: false
+
+      GA:
+        name: Georgia
+        rate: 4.0
+        has_local_tax: true
+        avg_local_rate: 3.32
+        combined_avg: 7.32
+        digital_goods_taxable: true
+
+      HI:
+        name: Hawaii
+        rate: 4.0
+        has_local_tax: true
+        avg_local_rate: 0.44
+        combined_avg: 4.44
+        tax_type: GET  # General Excise Tax
+        digital_goods_taxable: true
+
+      ID:
+        name: Idaho
+        rate: 6.0
+        has_local_tax: true
+        avg_local_rate: 0.02
+        combined_avg: 6.02
+        digital_goods_taxable: true
+
+      IL:
+        name: Illinois
+        rate: 6.25
+        has_local_tax: true
+        avg_local_rate: 2.57
+        combined_avg: 8.82
+        digital_goods_taxable: true
+
+      IN:
+        name: Indiana
+        rate: 7.0
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      IA:
+        name: Iowa
+        rate: 6.0
+        has_local_tax: true
+        avg_local_rate: 0.94
+        combined_avg: 6.94
+        digital_goods_taxable: true
+
+      KS:
+        name: Kansas
+        rate: 6.5
+        has_local_tax: true
+        avg_local_rate: 2.19
+        combined_avg: 8.69
+        digital_goods_taxable: true
+
+      KY:
+        name: Kentucky
+        rate: 6.0
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      LA:
+        name: Louisiana
+        rate: 4.45
+        has_local_tax: true
+        avg_local_rate: 5.10
+        combined_avg: 9.55
+        digital_goods_taxable: true
+
+      ME:
+        name: Maine
+        rate: 5.5
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      MD:
+        name: Maryland
+        rate: 6.0
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      MA:
+        name: Massachusetts
+        rate: 6.25
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      MI:
+        name: Michigan
+        rate: 6.0
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      MN:
+        name: Minnesota
+        rate: 6.875
+        has_local_tax: true
+        avg_local_rate: 0.60
+        combined_avg: 7.475
+        digital_goods_taxable: true
+
+      MS:
+        name: Mississippi
+        rate: 7.0
+        has_local_tax: true
+        avg_local_rate: 0.07
+        combined_avg: 7.07
+        digital_goods_taxable: true
+
+      MO:
+        name: Missouri
+        rate: 4.225
+        has_local_tax: true
+        avg_local_rate: 4.06
+        combined_avg: 8.285
+        digital_goods_taxable: false
+
+      NE:
+        name: Nebraska
+        rate: 5.5
+        has_local_tax: true
+        avg_local_rate: 1.44
+        combined_avg: 6.94
+        digital_goods_taxable: true
+
+      NV:
+        name: Nevada
+        rate: 6.85
+        has_local_tax: true
+        avg_local_rate: 1.38
+        combined_avg: 8.23
+        digital_goods_taxable: false
+
+      NJ:
+        name: New Jersey
+        rate: 6.625
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      NM:
+        name: New Mexico
+        rate: 4.875
+        has_local_tax: true
+        avg_local_rate: 2.72
+        combined_avg: 7.595
+        tax_type: GRT  # Gross Receipts Tax
+        digital_goods_taxable: true
+
+      NY:
+        name: New York
+        rate: 4.0
+        has_local_tax: true
+        avg_local_rate: 4.52
+        combined_avg: 8.52
+        digital_goods_taxable: true
+
+      NC:
+        name: North Carolina
+        rate: 4.75
+        has_local_tax: true
+        avg_local_rate: 2.22
+        combined_avg: 6.97
+        digital_goods_taxable: true
+
+      ND:
+        name: North Dakota
+        rate: 5.0
+        has_local_tax: true
+        avg_local_rate: 1.96
+        combined_avg: 6.96
+        digital_goods_taxable: true
+
+      OH:
+        name: Ohio
+        rate: 5.75
+        has_local_tax: true
+        avg_local_rate: 1.48
+        combined_avg: 7.23
+        digital_goods_taxable: true
+
+      OK:
+        name: Oklahoma
+        rate: 4.5
+        has_local_tax: true
+        avg_local_rate: 4.47
+        combined_avg: 8.97
+        digital_goods_taxable: true
+
+      PA:
+        name: Pennsylvania
+        rate: 6.0
+        has_local_tax: true
+        avg_local_rate: 0.34
+        combined_avg: 6.34
+        digital_goods_taxable: true
+
+      RI:
+        name: Rhode Island
+        rate: 7.0
+        has_local_tax: false
+        digital_goods_taxable: true
+
+      SC:
+        name: South Carolina
+        rate: 6.0
+        has_local_tax: true
+        avg_local_rate: 1.43
+        combined_avg: 7.43
+        digital_goods_taxable: true
+
+      SD:
+        name: South Dakota
+        rate: 4.5
+        has_local_tax: true
+        avg_local_rate: 1.90
+        combined_avg: 6.40
+        digital_goods_taxable: true
+
+      TN:
+        name: Tennessee
+        rate: 7.0
+        has_local_tax: true
+        avg_local_rate: 2.55
+        combined_avg: 9.55
+        digital_goods_taxable: true
+
+      TX:
+        name: Texas
+        rate: 6.25
+        has_local_tax: true
+        avg_local_rate: 1.94
+        combined_avg: 8.19
+        digital_goods_taxable: true
+
+      UT:
+        name: Utah
+        rate: 6.1
+        has_local_tax: true
+        avg_local_rate: 1.09
+        combined_avg: 7.19
+        digital_goods_taxable: true
+
+      VT:
+        name: Vermont
+        rate: 6.0
+        has_local_tax: true
+        avg_local_rate: 0.24
+        combined_avg: 6.24
+        digital_goods_taxable: true
+
+      VA:
+        name: Virginia
+        rate: 5.3
+        has_local_tax: true
+        avg_local_rate: 0.45
+        combined_avg: 5.75
+        digital_goods_taxable: false
+
+      WA:
+        name: Washington
+        rate: 6.5
+        has_local_tax: true
+        avg_local_rate: 2.73
+        combined_avg: 9.23
+        digital_goods_taxable: true
+
+      WV:
+        name: West Virginia
+        rate: 6.0
+        has_local_tax: true
+        avg_local_rate: 0.52
+        combined_avg: 6.52
+        digital_goods_taxable: true
+
+      WI:
+        name: Wisconsin
+        rate: 5.0
+        has_local_tax: true
+        avg_local_rate: 0.44
+        combined_avg: 5.44
+        digital_goods_taxable: true
+
+      WY:
+        name: Wyoming
+        rate: 4.0
+        has_local_tax: true
+        avg_local_rate: 1.36
+        combined_avg: 5.36
+        digital_goods_taxable: true
+
+  # ===========================================================================
+  # CANADA
+  # ===========================================================================
+  # GST (federal) + PST/HST (provincial)
+
+  CA:
+    name: Canada
+    currency: CAD
+    tax_type: GST_PST_HST
+    federal_rate: 5.0  # GST
+    digital_goods_taxable: true
+
+    provinces:
+      AB:
+        name: Alberta
+        gst: 5.0
+        pst: 0
+        total: 5.0
+        tax_type: GST
+
+      BC:
+        name: British Columbia
+        gst: 5.0
+        pst: 7.0
+        total: 12.0
+        tax_type: GST_PST
+
+      MB:
+        name: Manitoba
+        gst: 5.0
+        pst: 7.0
+        total: 12.0
+        tax_type: GST_PST
+
+      NB:
+        name: New Brunswick
+        hst: 15.0
+        total: 15.0
+        tax_type: HST
+
+      NL:
+        name: Newfoundland and Labrador
+        hst: 15.0
+        total: 15.0
+        tax_type: HST
+
+      NT:
+        name: Northwest Territories
+        gst: 5.0
+        pst: 0
+        total: 5.0
+        tax_type: GST
+
+      NS:
+        name: Nova Scotia
+        hst: 15.0
+        total: 15.0
+        tax_type: HST
+
+      NU:
+        name: Nunavut
+        gst: 5.0
+        pst: 0
+        total: 5.0
+        tax_type: GST
+
+      ON:
+        name: Ontario
+        hst: 13.0
+        total: 13.0
+        tax_type: HST
+
+      PE:
+        name: Prince Edward Island
+        hst: 15.0
+        total: 15.0
+        tax_type: HST
+
+      QC:
+        name: Quebec
+        gst: 5.0
+        qst: 9.975
+        total: 14.975
+        tax_type: GST_QST
+
+      SK:
+        name: Saskatchewan
+        gst: 5.0
+        pst: 6.0
+        total: 11.0
+        tax_type: GST_PST
+
+      YT:
+        name: Yukon
+        gst: 5.0
+        pst: 0
+        total: 5.0
+        tax_type: GST
+
+  # ===========================================================================
+  # EUROPEAN UNION
+  # ===========================================================================
+  # VAT rates - digital services taxed at customer location rate
+
+  AT:
+    name: Austria
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 20.0
+      reduced: [10.0, 13.0]
+      super_reduced: null
+      parking: 13.0
+    digital_goods_taxable: true
+    dst_rate: 5.0  # Digital Services Tax
+
+  BE:
+    name: Belgium
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 21.0
+      reduced: [6.0, 12.0]
+      super_reduced: null
+      parking: 12.0
+    digital_goods_taxable: true
+
+  BG:
+    name: Bulgaria
+    currency: BGN
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 20.0
+      reduced: [9.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  HR:
+    name: Croatia
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 25.0
+      reduced: [5.0, 13.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  CY:
+    name: Cyprus
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 19.0
+      reduced: [5.0, 9.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  CZ:
+    name: Czech Republic
+    currency: CZK
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 21.0
+      reduced: [12.0, 15.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  DK:
+    name: Denmark
+    currency: DKK
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 25.0
+      reduced: null
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+    notes: "No reduced rates - single rate system"
+
+  EE:
+    name: Estonia
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 22.0
+      reduced: [9.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  FI:
+    name: Finland
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 24.0
+      reduced: [10.0, 14.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  FR:
+    name: France
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 20.0
+      reduced: [5.5, 10.0]
+      super_reduced: 2.1
+      parking: null
+    digital_goods_taxable: true
+    dst_rate: 3.0  # Digital Services Tax
+
+  DE:
+    name: Germany
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 19.0
+      reduced: [7.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  GR:
+    name: Greece
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 24.0
+      reduced: [6.0, 13.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  HU:
+    name: Hungary
+    currency: HUF
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 27.0
+      reduced: [5.0, 18.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+    notes: "Highest VAT rate in EU"
+    dst_rate: 7.5  # Digital Services Tax (advertising)
+
+  IE:
+    name: Ireland
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 23.0
+      reduced: [9.0, 13.5]
+      super_reduced: 4.8
+      parking: 13.5
+    digital_goods_taxable: true
+
+  IT:
+    name: Italy
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 22.0
+      reduced: [5.0, 10.0]
+      super_reduced: 4.0
+      parking: null
+    digital_goods_taxable: true
+    dst_rate: 3.0  # Digital Services Tax
+
+  LV:
+    name: Latvia
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 21.0
+      reduced: [5.0, 12.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  LT:
+    name: Lithuania
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 21.0
+      reduced: [5.0, 9.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  LU:
+    name: Luxembourg
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 17.0
+      reduced: [8.0]
+      super_reduced: 3.0
+      parking: 14.0
+    digital_goods_taxable: true
+    notes: "Lowest standard VAT rate in EU"
+
+  MT:
+    name: Malta
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 18.0
+      reduced: [5.0, 7.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  NL:
+    name: Netherlands
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 21.0
+      reduced: [9.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  PL:
+    name: Poland
+    currency: PLN
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 23.0
+      reduced: [5.0, 8.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+    dst_rate: 1.5  # Digital Services Tax (advertising)
+
+  PT:
+    name: Portugal
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 23.0
+      reduced: [6.0, 13.0]
+      super_reduced: null
+      parking: 13.0
+    digital_goods_taxable: true
+
+  RO:
+    name: Romania
+    currency: RON
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 19.0
+      reduced: [5.0, 9.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  SK:
+    name: Slovakia
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 20.0
+      reduced: [10.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  SI:
+    name: Slovenia
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 22.0
+      reduced: [5.0, 9.5]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  ES:
+    name: Spain
+    currency: EUR
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 21.0
+      reduced: [10.0]
+      super_reduced: 4.0
+      parking: null
+    digital_goods_taxable: true
+    dst_rate: 3.0  # Digital Services Tax
+
+    # Spanish territories with different rates
+    territories:
+      canary_islands:
+        name: Canary Islands
+        tax_type: IGIC
+        rate: 7.0
+        notes: "Not part of EU VAT area"
+      ceuta:
+        name: Ceuta
+        tax_type: IPSI
+        rate: 0.5
+      melilla:
+        name: Melilla
+        tax_type: IPSI
+        rate: 0.5
+
+  SE:
+    name: Sweden
+    currency: SEK
+    tax_type: VAT
+    eu_member: true
+    rates:
+      standard: 25.0
+      reduced: [6.0, 12.0]
+      super_reduced: null
+      parking: null
+    digital_goods_taxable: true
+
+  # ===========================================================================
+  # UNITED KINGDOM
+  # ===========================================================================
+
+  GB:
+    name: United Kingdom
+    currency: GBP
+    tax_type: VAT
+    eu_member: false  # Post-Brexit
+    rates:
+      standard: 20.0
+      reduced: [5.0]
+      zero: 0
+    digital_goods_taxable: true
+    dst_rate: 2.0  # Digital Services Tax
+    dst_threshold_global: 500000000  # £500M global revenue
+    dst_threshold_uk: 25000000  # £25M UK revenue
+    notes: "DST applies to social media, search engines, online marketplaces"
+
+  # ===========================================================================
+  # AUSTRALIA
+  # ===========================================================================
+
+  AU:
+    name: Australia
+    currency: AUD
+    tax_type: GST
+    federal_rate: 10.0
+    has_state_taxes: false
+    digital_goods_taxable: true
+    gst_threshold: 75000  # AUD
+
+    states:
+      ACT:
+        name: Australian Capital Territory
+        additional_tax: 0
+      NSW:
+        name: New South Wales
+        additional_tax: 0
+      NT:
+        name: Northern Territory
+        additional_tax: 0
+      QLD:
+        name: Queensland
+        additional_tax: 0
+      SA:
+        name: South Australia
+        additional_tax: 0
+      TAS:
+        name: Tasmania
+        additional_tax: 0
+      VIC:
+        name: Victoria
+        additional_tax: 0
+      WA:
+        name: Western Australia
+        additional_tax: 0
+
+  # ===========================================================================
+  # NEW ZEALAND
+  # ===========================================================================
+
+  NZ:
+    name: New Zealand
+    currency: NZD
+    tax_type: GST
+    rates:
+      standard: 15.0
+    digital_goods_taxable: true
+    gst_threshold: 60000  # NZD
+
+  # ===========================================================================
+  # ASIA PACIFIC
+  # ===========================================================================
+
+  JP:
+    name: Japan
+    currency: JPY
+    tax_type: consumption_tax
+    rates:
+      standard: 10.0
+      reduced: [8.0]  # Food, newspapers
+    digital_goods_taxable: true
+    notes: "Consumption tax increased from 8% to 10% in October 2019"
+
+  SG:
+    name: Singapore
+    currency: SGD
+    tax_type: GST
+    rates:
+      standard: 9.0
+    digital_goods_taxable: true
+    gst_threshold: 1000000  # SGD
+    notes: "GST increased from 8% to 9% in January 2024"
+
+  KR:
+    name: South Korea
+    currency: KRW
+    tax_type: VAT
+    rates:
+      standard: 10.0
+    digital_goods_taxable: true
+
+  CN:
+    name: China
+    currency: CNY
+    tax_type: VAT
+    rates:
+      standard: 13.0
+      reduced: [9.0, 6.0]
+    digital_goods_taxable: true
+    notes: "6% for digital services"
+
+  HK:
+    name: Hong Kong
+    currency: HKD
+    tax_type: none
+    rates:
+      standard: 0
+    digital_goods_taxable: false
+    notes: "No sales tax or VAT"
+
+  IN:
+    name: India
+    currency: INR
+    tax_type: GST
+    rates:
+      standard: 18.0
+      rates_by_category:
+        essential: 0
+        low: 5.0
+        standard: 12.0
+        standard_plus: 18.0
+        luxury: 28.0
+    digital_goods_taxable: true
+    digital_goods_rate: 18.0
+    dst_rate: 2.0  # Equalization Levy
+    notes: "GST has multiple rate slabs based on product category"
+
+  MY:
+    name: Malaysia
+    currency: MYR
+    tax_type: SST  # Sales and Service Tax
+    rates:
+      sales_tax: 10.0
+      service_tax: 8.0
+    digital_goods_taxable: true
+    digital_goods_rate: 8.0
+
+  TH:
+    name: Thailand
+    currency: THB
+    tax_type: VAT
+    rates:
+      standard: 7.0
+    digital_goods_taxable: true
+
+  ID:
+    name: Indonesia
+    currency: IDR
+    tax_type: VAT
+    rates:
+      standard: 11.0
+    digital_goods_taxable: true
+    notes: "VAT increased from 10% to 11% in April 2022"
+
+  PH:
+    name: Philippines
+    currency: PHP
+    tax_type: VAT
+    rates:
+      standard: 12.0
+    digital_goods_taxable: true
+
+  VN:
+    name: Vietnam
+    currency: VND
+    tax_type: VAT
+    rates:
+      standard: 10.0
+      reduced: [5.0]
+    digital_goods_taxable: true
+
+  TW:
+    name: Taiwan
+    currency: TWD
+    tax_type: VAT
+    rates:
+      standard: 5.0
+    digital_goods_taxable: true
+    notes: "One of the lowest VAT rates globally"
+
+  # ===========================================================================
+  # MIDDLE EAST
+  # ===========================================================================
+
+  AE:
+    name: United Arab Emirates
+    currency: AED
+    tax_type: VAT
+    rates:
+      standard: 5.0
+    digital_goods_taxable: true
+    notes: "VAT introduced in January 2018"
+
+  SA:
+    name: Saudi Arabia
+    currency: SAR
+    tax_type: VAT
+    rates:
+      standard: 15.0
+    digital_goods_taxable: true
+    notes: "VAT increased from 5% to 15% in July 2020"
+
+  IL:
+    name: Israel
+    currency: ILS
+    tax_type: VAT
+    rates:
+      standard: 17.0
+    digital_goods_taxable: true
+
+  TR:
+    name: Turkey
+    currency: TRY
+    tax_type: VAT
+    rates:
+      standard: 20.0
+      reduced: [1.0, 10.0]
+    digital_goods_taxable: true
+    dst_rate: 7.5  # Digital Services Tax
+
+  # ===========================================================================
+  # LATIN AMERICA
+  # ===========================================================================
+
+  BR:
+    name: Brazil
+    currency: BRL
+    tax_type: complex
+    rates:
+      icms_avg: 18.0  # State sales tax (varies 7-25%)
+      ipi_avg: 10.0   # Federal excise tax (varies)
+      pis_cofins: 9.25  # Federal contributions
+    digital_goods_taxable: true
+    notes: "Complex multi-layer tax system; major reform pending"
+
+    states:
+      AC: { name: Acre, icms: 17.0 }
+      AL: { name: Alagoas, icms: 18.0 }
+      AM: { name: Amazonas, icms: 18.0 }
+      AP: { name: Amapá, icms: 18.0 }
+      BA: { name: Bahia, icms: 18.0 }
+      CE: { name: Ceará, icms: 18.0 }
+      DF: { name: Distrito Federal, icms: 18.0 }
+      ES: { name: Espírito Santo, icms: 17.0 }
+      GO: { name: Goiás, icms: 17.0 }
+      MA: { name: Maranhão, icms: 18.0 }
+      MG: { name: Minas Gerais, icms: 18.0 }
+      MS: { name: Mato Grosso do Sul, icms: 17.0 }
+      MT: { name: Mato Grosso, icms: 17.0 }
+      PA: { name: Pará, icms: 17.0 }
+      PB: { name: Paraíba, icms: 18.0 }
+      PE: { name: Pernambuco, icms: 18.0 }
+      PI: { name: Piauí, icms: 18.0 }
+      PR: { name: Paraná, icms: 18.0 }
+      RJ: { name: Rio de Janeiro, icms: 20.0 }
+      RN: { name: Rio Grande do Norte, icms: 18.0 }
+      RO: { name: Rondônia, icms: 17.5 }
+      RR: { name: Roraima, icms: 17.0 }
+      RS: { name: Rio Grande do Sul, icms: 18.0 }
+      SC: { name: Santa Catarina, icms: 17.0 }
+      SE: { name: Sergipe, icms: 18.0 }
+      SP: { name: São Paulo, icms: 18.0 }
+      TO: { name: Tocantins, icms: 18.0 }
+
+  MX:
+    name: Mexico
+    currency: MXN
+    tax_type: IVA
+    rates:
+      standard: 16.0
+      border_zone: 8.0
+    digital_goods_taxable: true
+    notes: "8% rate applies in northern border zone"
+
+  AR:
+    name: Argentina
+    currency: ARS
+    tax_type: IVA
+    rates:
+      standard: 21.0
+      reduced: [10.5]
+    digital_goods_taxable: true
+    dst_rate: 8.0  # Digital services withholding
+
+  CL:
+    name: Chile
+    currency: CLP
+    tax_type: IVA
+    rates:
+      standard: 19.0
+    digital_goods_taxable: true
+
+  CO:
+    name: Colombia
+    currency: COP
+    tax_type: IVA
+    rates:
+      standard: 19.0
+      reduced: [5.0]
+    digital_goods_taxable: true
+
+  PE:
+    name: Peru
+    currency: PEN
+    tax_type: IGV
+    rates:
+      standard: 18.0
+    digital_goods_taxable: true
+
+  # ===========================================================================
+  # AFRICA
+  # ===========================================================================
+
+  ZA:
+    name: South Africa
+    currency: ZAR
+    tax_type: VAT
+    rates:
+      standard: 15.0
+    digital_goods_taxable: true
+
+  NG:
+    name: Nigeria
+    currency: NGN
+    tax_type: VAT
+    rates:
+      standard: 7.5
+    digital_goods_taxable: true
+
+  KE:
+    name: Kenya
+    currency: KES
+    tax_type: VAT
+    rates:
+      standard: 16.0
+    digital_goods_taxable: true
+    dst_rate: 1.5  # Digital Services Tax
+
+  EG:
+    name: Egypt
+    currency: EGP
+    tax_type: VAT
+    rates:
+      standard: 14.0
+    digital_goods_taxable: true
+
+  # ===========================================================================
+  # OTHER NOTABLE JURISDICTIONS
+  # ===========================================================================
+
+  CH:
+    name: Switzerland
+    currency: CHF
+    tax_type: VAT
+    eu_member: false
+    rates:
+      standard: 8.1
+      reduced: [2.6, 3.8]
+    digital_goods_taxable: true
+    notes: "Not EU but participates in many EU agreements"
+
+  NO:
+    name: Norway
+    currency: NOK
+    tax_type: VAT
+    eu_member: false
+    rates:
+      standard: 25.0
+      reduced: [12.0, 15.0]
+    digital_goods_taxable: true
+
+  IS:
+    name: Iceland
+    currency: ISK
+    tax_type: VAT
+    eu_member: false
+    rates:
+      standard: 24.0
+      reduced: [11.0]
+    digital_goods_taxable: true
+
+  RU:
+    name: Russia
+    currency: RUB
+    tax_type: VAT
+    rates:
+      standard: 20.0
+      reduced: [10.0]
+    digital_goods_taxable: true
+
+  UA:
+    name: Ukraine
+    currency: UAH
+    tax_type: VAT
+    rates:
+      standard: 20.0
+      reduced: [7.0]
+    digital_goods_taxable: true
+
+# =============================================================================
+# DIGITAL SERVICES TAX (DST)
+# =============================================================================
+# Countries with specific taxes on digital services beyond standard VAT/sales tax
+
+digital_services_tax:
+  description: |
+    Digital Services Taxes are additional taxes imposed on revenue from
+    certain digital services, typically targeting large tech companies.
+    Usually applies to: online advertising, digital marketplaces, user data.
+
+  countries_with_dst:
+    AT:
+      rate: 5.0
+      threshold_global_eur: 750000000
+      threshold_local_eur: 25000000
+      applies_to: [online_advertising]
+
+    FR:
+      rate: 3.0
+      threshold_global_eur: 750000000
+      threshold_local_eur: 25000000
+      applies_to: [online_advertising, digital_marketplaces, user_data]
+
+    GB:
+      rate: 2.0
+      threshold_global_gbp: 500000000
+      threshold_local_gbp: 25000000
+      applies_to: [social_media, search_engines, online_marketplaces]
+
+    IT:
+      rate: 3.0
+      threshold_global_eur: 750000000
+      threshold_local_eur: 5500000
+      applies_to: [online_advertising, digital_marketplaces, user_data]
+
+    ES:
+      rate: 3.0
+      threshold_global_eur: 750000000
+      threshold_local_eur: 3000000
+      applies_to: [online_advertising, data_transmission, digital_intermediation]
+
+    HU:
+      rate: 7.5
+      threshold_huf: 100000000  # ~€250,000
+      applies_to: [online_advertising]
+
+    PL:
+      rate: 1.5
+      applies_to: [online_advertising]
+
+    TR:
+      rate: 7.5
+      threshold_global_try: 750000000
+      threshold_local_try: 20000000
+      applies_to: [online_advertising, digital_content, social_media]
+
+    IN:
+      name: Equalization Levy
+      rate: 2.0
+      threshold_inr: 20000000
+      applies_to: [e-commerce]
+
+    KE:
+      rate: 1.5
+      applies_to: [digital_marketplace, digital_content]
+
+# =============================================================================
+# TAX CATEGORIES
+# =============================================================================
+# Special rates that may apply to specific product/service categories
+
+tax_categories:
+  # Categories that often have reduced or zero rates
+  essential_goods:
+    - food_basic
+    - medicine
+    - medical_equipment
+    - children_clothing
+
+  reduced_rate_common:
+    - books
+    - newspapers
+    - public_transport
+    - cultural_events
+    - hotels_accommodation
+
+  zero_rated_common:
+    - exports
+    - international_transport
+    - certain_financial_services
+
+  exempt_common:
+    - education
+    - healthcare
+    - financial_services
+    - insurance
+    - real_estate_residential
+
+  digital_services:
+    description: |
+      Digital services for B2C typically taxed at customer location.
+      For B2B, reverse charge may apply (customer accounts for tax).
+    categories:
+      - software_saas
+      - streaming_media
+      - ebooks
+      - online_gaming
+      - cloud_services
+      - digital_advertising
+      - app_downloads
+
+# =============================================================================
+# THRESHOLDS AND REGISTRATION
+# =============================================================================
+
+registration_thresholds:
+  description: |
+    Many jurisdictions have thresholds below which registration is not required.
+    These are annual revenue thresholds in local currency.
+
+  eu_oss:
+    description: "EU One-Stop Shop for cross-border B2C digital services"
+    threshold_eur: 10000
+    notes: "Below €10k can use home country VAT rate for all EU sales"
+
+  examples:
+    GB: { threshold_gbp: 85000 }
+    AU: { threshold_aud: 75000 }
+    NZ: { threshold_nzd: 60000 }
+    SG: { threshold_sgd: 1000000 }
+    CA: { threshold_cad: 30000 }
+
+# =============================================================================
+# SPECIAL ECONOMIC ZONES
+# =============================================================================
+
+special_zones:
+  description: |
+    Territories with special tax treatment, often lower or zero rates.
+
+  zones:
+    - code: ES-IC
+      name: Canary Islands (Spain)
+      tax_type: IGIC
+      rate: 7.0
+
+    - code: PT-MA
+      name: Madeira (Portugal)
+      tax_type: VAT
+      rate: 22.0  # Reduced from mainland
+
+    - code: PT-AZ
+      name: Azores (Portugal)
+      tax_type: VAT
+      rate: 18.0  # Reduced from mainland
+
+    - code: FR-GP
+      name: Guadeloupe (France)
+      tax_type: TVA
+      rate: 8.5
+
+    - code: FR-MQ
+      name: Martinique (France)
+      tax_type: TVA
+      rate: 8.5

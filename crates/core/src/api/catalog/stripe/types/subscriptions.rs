@@ -2,6 +2,7 @@ use serde::Serialize;
 
 /// Stripe-compatible subscription response
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeSubscription {
     pub id: String,
     pub object: String,
@@ -16,12 +17,14 @@ pub struct StripeSubscription {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubscriptionItems {
     pub object: String,
     pub data: Vec<SubscriptionItemData>,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubscriptionItemData {
     pub id: String,
     pub object: String,
@@ -29,6 +32,7 @@ pub struct SubscriptionItemData {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubscriptionPrice {
     pub id: String,
     pub object: String,

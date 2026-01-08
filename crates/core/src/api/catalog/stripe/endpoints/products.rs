@@ -1,4 +1,7 @@
+use std::collections::HashMap;
+
 use axum::{Extension, Json, extract::Path, response::IntoResponse};
+use rand::Rng;
 use serde::Serialize;
 
 use crate::api::catalog::{
@@ -16,48 +19,137 @@ fn get_min_price(product: &moneymq_types::Product) -> i64 {
         .unwrap_or(i64::MAX) // Products without prices go last
 }
 
+/// Select an experiment variant based on exposure percentages
+/// Returns the selected experiment or None if no experiment should be selected
+fn select_experiment<'a>(
+    experiments: &[&'a moneymq_types::Product],
+) -> Option<&'a moneymq_types::Product> {
+    if experiments.is_empty() {
+        return None;
+    }
+
+    let mut rng = rand::rng();
+    let roll: f64 = rng.random(); // 0.0 to 1.0
+
+    // Sort experiments by exposure (deterministic selection)
+    let mut sorted_experiments: Vec<_> = experiments.to_vec();
+    sorted_experiments.sort_by(|a, b| {
+        let exp_a = a.experiment.as_ref().map(|e| e.exposure).unwrap_or(0.0);
+        let exp_b = b.experiment.as_ref().map(|e| e.exposure).unwrap_or(0.0);
+        exp_a
+            .partial_cmp(&exp_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Cumulative probability selection
+    let mut cumulative = 0.0;
+    for exp in &sorted_experiments {
+        let exposure = exp.experiment.as_ref().map(|e| e.exposure).unwrap_or(0.0);
+        cumulative += exposure;
+        if roll < cumulative {
+            return Some(exp);
+        }
+    }
+
+    // If total exposure < 1.0, there's a chance no experiment is selected
+    // In that case, return the first experiment as fallback
+    sorted_experiments.first().copied()
+}
+
 /// GET /v1/products - List products (sorted by price ASC)
+///
+/// Experiment variants are materialized: instead of returning all experiment variants,
+/// the server randomly selects one based on exposure percentages and returns it with:
+/// - id: the parent product ID (e.g., "surfnet-lite")
+/// - experiment_id: the selected experiment variant ID (e.g., "surfnet-lite#a")
 pub async fn list_products(
     Extension(state): Extension<CatalogState>,
     axum::extract::Query(params): axum::extract::Query<ListParams>,
 ) -> impl IntoResponse {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
 
-    // Sort products by minimum price (ascending)
-    let mut sorted_products: Vec<_> = state.products.iter().collect();
-    sorted_products.sort_by_key(|p| get_min_price(p));
+    // Separate products into:
+    // 1. Regular products (no experiment config)
+    // 2. Experiment variants (have experiment config and parent_id)
+    let mut regular_products: Vec<&moneymq_types::Product> = Vec::new();
+    let mut experiments_by_parent: HashMap<String, Vec<&moneymq_types::Product>> = HashMap::new();
+
+    for product in state.products.iter() {
+        if product.experiment.is_some() {
+            // This is an experiment variant - group by parent_id
+            if let Some(ref parent_id) = product.parent_id {
+                experiments_by_parent
+                    .entry(parent_id.clone())
+                    .or_default()
+                    .push(product);
+            }
+        } else {
+            // Regular product
+            regular_products.push(product);
+        }
+    }
+
+    // Build final product list with materialized experiments
+    let mut final_products: Vec<StripeProduct> = Vec::new();
+
+    for product in &regular_products {
+        // Check if this product has experiment variants
+        if let Some(experiments) = experiments_by_parent.get(&product.id) {
+            // Select an experiment variant
+            if let Some(selected_experiment) = select_experiment(experiments) {
+                // Return materialized product with experiment_id
+                final_products.push(StripeProduct::from_product_with_experiment(
+                    product,
+                    selected_experiment,
+                    state.use_sandbox,
+                ));
+            } else {
+                // No experiment selected, return regular product
+                final_products.push(StripeProduct::from_product(product, state.use_sandbox));
+            }
+        } else {
+            // No experiments for this product
+            final_products.push(StripeProduct::from_product(product, state.use_sandbox));
+        }
+    }
+
+    // Sort by minimum price (ascending)
+    final_products.sort_by_key(|p| {
+        // Find original product to get price
+        state
+            .products
+            .iter()
+            .find(|prod| {
+                let external_id = if state.use_sandbox {
+                    prod.sandboxes.get("default")
+                } else {
+                    prod.deployed_id.as_ref()
+                };
+                external_id.map(|id| id == &p.id).unwrap_or(false) || prod.id == p.id
+            })
+            .map(|prod| get_min_price(prod))
+            .unwrap_or(i64::MAX)
+    });
 
     // Find starting position
     let start_idx = if let Some(starting_after) = params.starting_after {
-        sorted_products
+        final_products
             .iter()
-            .position(|p| {
-                let external_id = if state.use_sandbox {
-                    p.sandboxes.get("default")
-                } else {
-                    p.deployed_id.as_ref()
-                };
-                external_id.map(|id| id == &starting_after).unwrap_or(false)
-            })
+            .position(|p| p.id == starting_after)
             .map(|idx| idx + 1)
             .unwrap_or(0)
     } else {
         0
     };
 
-    let end_idx = (start_idx + limit).min(sorted_products.len());
-    let products_slice = &sorted_products[start_idx..end_idx];
+    let end_idx = (start_idx + limit).min(final_products.len());
+    let products_slice = final_products[start_idx..end_idx].to_vec();
 
-    let stripe_products: Vec<StripeProduct> = products_slice
-        .iter()
-        .map(|p| StripeProduct::from_product(p, state.use_sandbox))
-        .collect();
-
-    let has_more = end_idx < sorted_products.len();
+    let has_more = end_idx < final_products.len();
 
     Json(ListResponse {
         object: "list".to_string(),
-        data: stripe_products,
+        data: products_slice,
         has_more,
         url: "/v1/products".to_string(),
     })

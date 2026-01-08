@@ -181,6 +181,7 @@ impl std::fmt::Display for Chain {
 /// - `port`: `8488`
 /// - `network.rpc_port`: `8899`
 /// - `network.ws_port`: `8900`
+/// - `jwt_secret`: `moneymq-sandbox-secret` (for local development)
 ///
 /// # Example
 ///
@@ -189,6 +190,7 @@ impl std::fmt::Display for Chain {
 ///   deployment: Sandbox
 ///   binding_address: 0.0.0.0
 ///   port: 8488
+///   jwt_secret: my-custom-secret  # optional, has default
 ///   facilitator:
 ///     fee: 0
 ///     key_management: TurnKey
@@ -213,6 +215,13 @@ pub struct SandboxEnvironment {
     #[serde(default = "default_api_port")]
     pub port: u16,
 
+    /// Secret key for signing JWT payment receipts.
+    ///
+    /// Defaults to `moneymq-sandbox-secret` for local development.
+    /// In production, use a secure random secret.
+    #[serde(default = "default_sandbox_jwt_secret")]
+    pub jwt_secret: String,
+
     /// Facilitator settings for payment processing.
     #[serde(default)]
     pub facilitator: FacilitatorEnvConfig,
@@ -227,6 +236,7 @@ impl Default for SandboxEnvironment {
         Self {
             binding_address: DEFAULT_BINDING_ADDRESS.to_string(),
             port: DEFAULT_MONEYMQ_PORT,
+            jwt_secret: default_sandbox_jwt_secret(),
             facilitator: FacilitatorEnvConfig::default(),
             network: SandboxNetworkConfig::default(),
         }
@@ -430,6 +440,10 @@ fn default_rpc_port() -> u16 {
 
 fn default_ws_port() -> u16 {
     DEFAULT_SOLANA_WS_PORT
+}
+
+fn default_sandbox_jwt_secret() -> String {
+    "moneymq-sandbox-secret".to_string()
 }
 
 /// Creates a default environments map containing only a sandbox environment.

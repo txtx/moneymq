@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Stripe-compatible payment intent response
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripePaymentIntent {
     pub id: String,
     pub object: String,
@@ -39,6 +40,7 @@ pub enum PaymentIntentStatus {
 
 /// Create payment intent request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreatePaymentIntentRequest {
     pub amount: i64,
     pub currency: String,
@@ -56,6 +58,7 @@ pub struct CreatePaymentIntentRequest {
 
 /// Confirm payment intent request
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConfirmPaymentIntentRequest {
     #[serde(default)]
     pub payment_method: Option<String>,

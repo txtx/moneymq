@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Request body for creating a customer
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCustomerRequest {
     pub email: String,
     #[serde(default)]
@@ -12,6 +13,7 @@ pub struct CreateCustomerRequest {
 
 /// Stripe-compatible customer response
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeCustomer {
     pub id: String,
     pub object: String,

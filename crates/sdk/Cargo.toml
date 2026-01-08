@@ -1,0 +1,37 @@
+[package]
+name = "moneymq-sdk"
+version.workspace = true
+edition.workspace = true
+description = "MoneyMQ SDK - Server-side payment event processing"
+license.workspace = true
+repository.workspace = true
+keywords = ["payments", "sdk", "processor", "events", "sse"]
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+futures = "0.3"
+async-stream = "0.3"
+
+# HTTP client for SSE and publishing
+reqwest = { workspace = true, features = ["json", "rustls-tls"] }
+reqwest-eventsource = "0.6"
+
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+# Shared types
+moneymq-types = { path = "../types" }
+
+# Utilities
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "test-util"] }

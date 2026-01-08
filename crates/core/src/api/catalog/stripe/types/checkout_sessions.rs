@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Stripe-compatible checkout session response
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeCheckoutSession {
     pub id: String,
     pub object: String,
@@ -52,6 +53,7 @@ pub enum PaymentStatus {
 
 /// Line items list wrapper (Stripe returns this as a list object)
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CheckoutLineItemList {
     pub object: String,
     pub data: Vec<CheckoutLineItem>,
@@ -72,6 +74,7 @@ impl Default for CheckoutLineItemList {
 
 /// Individual line item in a checkout session
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CheckoutLineItem {
     pub id: String,
     pub object: String,
@@ -90,6 +93,7 @@ pub struct CheckoutLineItem {
 
 /// Price information within a line item
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CheckoutLineItemPrice {
     pub id: String,
     pub object: String,
@@ -97,6 +101,9 @@ pub struct CheckoutLineItemPrice {
     pub unit_amount: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub product: Option<String>,
+    /// Experiment variant ID (e.g., "surfnet-lite#a") - for A/B test tracking
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experiment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nickname: Option<String>,
     #[serde(rename = "type")]
@@ -105,6 +112,7 @@ pub struct CheckoutLineItemPrice {
 
 /// Create checkout session request
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCheckoutSessionRequest {
     pub line_items: Vec<CreateLineItem>,
     #[serde(default)]
@@ -125,46 +133,27 @@ fn default_mode() -> String {
     "payment".to_string()
 }
 
-/// Line item in create request
+/// Line item in create request - references catalog products
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateLineItem {
-    /// Price ID (if using existing price)
+    /// Product ID (reference to catalog product)
+    pub product_id: String,
+    /// Experiment variant ID (e.g., "surfnet-lite#a") - for A/B test tracking
     #[serde(default)]
-    pub price: Option<String>,
+    pub experiment_id: Option<String>,
     /// Quantity of the item
     #[serde(default = "default_quantity")]
     pub quantity: i64,
-    /// Inline price data (if not using existing price)
-    #[serde(default)]
-    pub price_data: Option<CreateLineItemPriceData>,
 }
 
 fn default_quantity() -> i64 {
     1
 }
 
-/// Inline price data for line item
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CreateLineItemPriceData {
-    pub currency: String,
-    pub unit_amount: i64,
-    pub product_data: CreateLineItemProductData,
-}
-
-/// Inline product data for line item
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct CreateLineItemProductData {
-    pub name: String,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub images: Option<Vec<String>>,
-    #[serde(default)]
-    pub metadata: Option<HashMap<String, String>>,
-}
-
 /// Expire checkout session request (optional)
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExpireCheckoutSessionRequest {
     // Empty for now, but could include options
 }

@@ -37,46 +37,29 @@ pub fn find_transaction_id_by_payment_hash(
         .optional()
 }
 
-/// Legacy method - kept for backward compatibility but prefer find_transaction_id_by_payment_hash
-pub fn find_transaction_id_for_settlement_update(
+/// Find full transaction info by payment_hash (channel_id)
+/// Returns transaction with customer info if found (regardless of settlement status)
+pub fn find_transaction_by_payment_hash(
     conn: &mut PooledConnection,
-    product: Option<&str>,
-    customer_id: Option<i32>,
-    amount: &str,
-    currency: Option<&str>,
-    x402_payment_requirement: &str,
-) -> QueryResult<Option<i32>> {
-    let mut query = facilitated_transactions::table
-        .filter(facilitated_transactions::amount.eq(amount))
-        .filter(facilitated_transactions::x402_payment_requirement.eq(x402_payment_requirement))
-        .into_boxed();
-
-    if let Some(product) = product {
-        query = query.filter(facilitated_transactions::product.eq(product));
-    } else {
-        query = query.filter(facilitated_transactions::product.is_null());
-    }
-
-    if let Some(customer_id) = customer_id {
-        query = query.filter(facilitated_transactions::customer_id.eq(customer_id));
-    } else {
-        query = query.filter(facilitated_transactions::customer_id.is_null());
-    }
-
-    if let Some(currency) = currency {
-        query = query.filter(facilitated_transactions::currency.eq(currency));
-    } else {
-        query = query.filter(facilitated_transactions::currency.is_null());
-    }
-
-    query = query.filter(facilitated_transactions::x402_settle_request.is_null());
-    query = query.filter(facilitated_transactions::x402_settle_response.is_null());
-
-    query
+    payment_hash: &str,
+) -> QueryResult<Option<FacilitatedTransactionWithCustomer>> {
+    facilitated_transactions::table
+        .left_join(transaction_customers::table)
+        .filter(facilitated_transactions::payment_hash.eq(payment_hash))
         .order(facilitated_transactions::created_at.desc())
-        .select(facilitated_transactions::id)
-        .first::<i32>(conn)
+        .first::<(
+            FacilitatedTransactionModel,
+            Option<TransactionCustomerModel>,
+        )>(conn)
         .optional()
+        .map(|opt| {
+            opt.map(
+                |(facilitated, customer)| FacilitatedTransactionWithCustomer {
+                    facilitated,
+                    customer,
+                },
+            )
+        })
 }
 
 #[derive(Debug, Queryable, Identifiable, Selectable, Associations, Serialize, Deserialize)]

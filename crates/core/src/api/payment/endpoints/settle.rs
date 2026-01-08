@@ -11,7 +11,14 @@ use solana_commitment_config::CommitmentConfig;
 use tracing::{error, info};
 
 use crate::{
-    api::payment::{PaymentApiConfig, endpoints::serialize_to_base64, networks},
+    api::payment::{
+        PaymentApiConfig,
+        endpoints::{
+            channels::{ChannelEvent, event_types},
+            serialize_to_base64,
+        },
+        networks,
+    },
     events::{
         PaymentFlow, PaymentSettlementFailedData, PaymentSettlementSucceededData,
         create_payment_settlement_failed_event, create_payment_settlement_succeeded_event,
@@ -159,25 +166,35 @@ pub async fn handler(
         }
     }
 
-    // Emit CloudEvent for settlement result
-    if let Some(ref sender) = state.event_sender {
-        // Extract product_id from payment requirements extra metadata
-        let product_id = request
-            .payment_requirements
-            .extra
-            .as_ref()
-            .and_then(|extra| extra.get("product"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+    // Extract product_id and transaction_id from payment requirements extra metadata
+    let product_id = request
+        .payment_requirements
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("product"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
+    // Get transaction ID from extra context (same as verify)
+    let transaction_id = request
+        .payment_requirements
+        .extra
+        .as_ref()
+        .and_then(|extra| extra.get("transactionId"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Emit CloudEvent for settlement result (legacy event stream)
+    if let Some(ref sender) = state.event_sender {
         let event = if response.success {
             let event_data = PaymentSettlementSucceededData {
                 payer: response.payer.to_string(),
                 amount: request.payment_requirements.max_amount_required.0.clone(),
                 network: format!("{:?}", request.payment_requirements.network),
-                transaction_signature: signature,
-                product_id,
+                transaction_signature: signature.clone(),
+                product_id: product_id.clone(),
                 payment_flow: PaymentFlow::X402,
+                transaction_id: transaction_id.clone(),
             };
             create_payment_settlement_succeeded_event(event_data)
         } else {
@@ -190,13 +207,51 @@ pub async fn handler(
                     .as_ref()
                     .map(|r| format!("{:?}", r))
                     .unwrap_or_else(|| "Unknown error".to_string()),
-                product_id,
+                product_id: product_id.clone(),
                 payment_flow: PaymentFlow::X402,
             };
             create_payment_settlement_failed_event(event_data)
         };
         if let Err(e) = sender.send(event) {
             error!("Failed to send settlement event: {}", e);
+        }
+    }
+
+    // Publish to channel (new channel-based event system)
+    if let (Some(channel_manager), Some(tx_id)) = (&state.channel_manager, &transaction_id) {
+        if response.success {
+            // Extract currency and features from extra context
+            let currency = request
+                .payment_requirements
+                .extra
+                .as_ref()
+                .and_then(|extra| extra.get("currency"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("USDC")
+                .to_string();
+
+            // Emit payment:settled first - this notifies processors
+            // The processor will send transaction:attach, which triggers transaction:completed with attachments
+            let settled_event_data = serde_json::json!({
+                "payer": response.payer.to_string(),
+                "amount": request.payment_requirements.max_amount_required.0,
+                "currency": currency,
+                "network": format!("{:?}", request.payment_requirements.network),
+                "transactionSignature": signature,
+                "productId": product_id,
+            });
+            let settled_event = ChannelEvent::new(event_types::PAYMENT_SETTLED, settled_event_data);
+            channel_manager.publish(tx_id, settled_event);
+        } else {
+            let event_data = serde_json::json!({
+                "payer": response.payer.to_string(),
+                "amount": request.payment_requirements.max_amount_required.0,
+                "network": format!("{:?}", request.payment_requirements.network),
+                "reason": response.error_reason.as_ref().map(|r| format!("{:?}", r)),
+                "productId": product_id,
+            });
+            let channel_event = ChannelEvent::new(event_types::PAYMENT_FAILED, event_data);
+            channel_manager.publish(tx_id, channel_event);
         }
     }
 

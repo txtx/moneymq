@@ -3,4 +3,5 @@
 
 pub mod api;
 pub mod events;
+pub mod taxes;
 pub mod validator;

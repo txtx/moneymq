@@ -13,13 +13,13 @@ pub mod subscriptions;
 pub use billing::StripeMeterEvent;
 pub use checkout_sessions::{
     CheckoutLineItem, CheckoutLineItemList, CheckoutLineItemPrice, CheckoutSessionStatus,
-    CreateCheckoutSessionRequest, CreateLineItem, CreateLineItemPriceData,
-    CreateLineItemProductData, PaymentStatus, StripeCheckoutSession,
+    CreateCheckoutSessionRequest, CreateLineItem, PaymentStatus, StripeCheckoutSession,
 };
 pub use customers::{CreateCustomerRequest, StripeCustomer};
 pub use moneymq_types::stripe::{
-    ListParams, ListResponse, StripeBillingMeter, StripePrice, StripeProduct, StripeRecurring,
+    ListParams, ListResponse, StripeBillingMeter, StripePrice, StripeRecurring,
 };
+// Use local enhanced StripeProduct with experiment support
 pub use payment_intents::{
     ConfirmPaymentIntentRequest, CreatePaymentIntentRequest, PaymentIntentStatus,
     StripePaymentIntent,
@@ -27,6 +27,7 @@ pub use payment_intents::{
 pub use payment_methods::{
     AttachPaymentMethodRequest, CreatePaymentMethodRequest, StripeCard, StripePaymentMethod,
 };
+pub use products::{StripeExperimentConfig, StripeProduct};
 pub use subscriptions::{
     StripeSubscription, SubscriptionItemData, SubscriptionItems, SubscriptionPrice,
 };

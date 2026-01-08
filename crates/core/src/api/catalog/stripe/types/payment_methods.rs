@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Request body for creating a payment method
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CreatePaymentMethodRequest {
     #[serde(rename = "type")]
     pub payment_type: String,
@@ -10,6 +11,7 @@ pub struct CreatePaymentMethodRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CardDetails {
     #[serde(default)]
     pub token: Option<String>,
@@ -17,6 +19,7 @@ pub struct CardDetails {
 
 /// Stripe-compatible payment method response
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripePaymentMethod {
     pub id: String,
     pub object: String,
@@ -30,6 +33,7 @@ pub struct StripePaymentMethod {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeCard {
     pub brand: String,
     pub last4: String,
@@ -39,6 +43,7 @@ pub struct StripeCard {
 
 /// Request body for attaching a payment method
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AttachPaymentMethodRequest {
     pub customer: String,
 }

@@ -63,6 +63,9 @@ pub struct PaymentSettlementSucceededData {
     pub transaction_signature: Option<String>,
     pub product_id: Option<String>,
     pub payment_flow: PaymentFlow,
+    /// Transaction/channel ID for subscribing to processor events
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_id: Option<String>,
 }
 
 /// Data payload for payment settlement failed event

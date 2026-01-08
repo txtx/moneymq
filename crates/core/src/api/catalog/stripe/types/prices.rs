@@ -3,6 +3,7 @@ use serde::Serialize;
 
 /// Stripe-compatible price response
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripePrice {
     pub id: String,
     pub object: String,
@@ -23,6 +24,7 @@ pub struct StripePrice {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeRecurring {
     pub interval: String,
     pub interval_count: i64,

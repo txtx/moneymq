@@ -286,6 +286,23 @@ pub struct Product {
     /// Prices associated with this product
     #[serde(default)]
     pub prices: Vec<Price>,
+
+    /// Experiment configuration for A/B testing variants
+    /// When set, this product inherits parent features and can override them
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiment: Option<ExperimentConfig>,
+
+    /// Parent product ID for experiment variants (derived from directory structure)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
+}
+
+/// Configuration for A/B testing experiments
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExperimentConfig {
+    /// Traffic exposure percentage (0.0 to 1.0)
+    /// e.g., 0.5 means 50% of traffic sees this variant
+    pub exposure: f64,
 }
 
 fn random_id() -> String {
@@ -322,6 +339,8 @@ impl Product {
             statement_descriptor: None,
             unit_label: None,
             prices: vec![],
+            experiment: None,
+            parent_id: None,
         }
     }
 
@@ -562,4 +581,93 @@ impl MeterCollection {
             fetched_at: Utc::now(),
         }
     }
+}
+
+/// Line item price from payment intent metadata
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LineItemPrice {
+    /// Product ID
+    pub product: String,
+    /// Experiment variant ID
+    pub experiment_id: Option<String>,
+}
+
+/// Line item from payment intent metadata
+#[derive(Debug, Clone, Deserialize)]
+pub struct LineItem {
+    /// Price details with product and experiment info
+    pub price: LineItemPrice,
+    /// Quantity of items
+    #[serde(default = "default_quantity")]
+    pub quantity: u32,
+}
+
+fn default_quantity() -> u32 {
+    1
+}
+
+/// Basket item representing a product in a transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BasketItem {
+    /// Product ID from catalog
+    pub product_id: String,
+    /// Experiment variant ID (e.g., "surfnet-lite#a")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub experiment_id: Option<String>,
+    /// Product features (capabilities and limits purchased)
+    #[serde(default, skip_serializing_if = "is_features_empty")]
+    pub features: serde_json::Value,
+    /// Quantity of items
+    #[serde(default = "default_quantity")]
+    pub quantity: u32,
+}
+
+fn is_features_empty(v: &serde_json::Value) -> bool {
+    match v {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(m) => m.is_empty(),
+        serde_json::Value::Array(a) => a.is_empty(),
+        _ => false,
+    }
+}
+
+/// Known event types for payment channels
+pub mod event_types {
+    /// Payment has been verified
+    pub const PAYMENT_VERIFIED: &str = "payment:verified";
+
+    /// Payment has been settled
+    pub const PAYMENT_SETTLED: &str = "payment:settled";
+
+    /// Payment verification failed
+    pub const PAYMENT_VERIFICATION_FAILED: &str = "payment:verification_failed";
+
+    /// Payment settlement failed
+    pub const PAYMENT_SETTLEMENT_FAILED: &str = "payment:settlement_failed";
+
+    /// Payment failed (generic)
+    pub const PAYMENT_FAILED: &str = "payment:failed";
+
+    /// New transaction received (for processors)
+    pub const TRANSACTION: &str = "transaction";
+
+    /// Processor attaching data to transaction
+    pub const TRANSACTION_ATTACH: &str = "transaction:attach";
+
+    /// Transaction completed with receipt
+    pub const TRANSACTION_COMPLETED: &str = "transaction:completed";
+}
+
+/// Payment defaults
+pub mod defaults {
+    /// Default JWT expiration time in hours
+    pub const JWT_EXPIRATION_HOURS: u64 = 24;
+
+    /// Default currency code
+    pub const CURRENCY: &str = "USDC";
+
+    /// Default network (lowercase)
+    pub const NETWORK: &str = "solana";
 }

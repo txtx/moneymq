@@ -49,6 +49,8 @@ pub fn convert_product(
         statement_descriptor: stripe_product.statement_descriptor,
         unit_label: stripe_product.unit_label,
         prices,
+        experiment: None,
+        parent_id: None,
     }
 }
 

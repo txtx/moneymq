@@ -230,8 +230,13 @@ pub trait ServiceCommand {
         // Initialize tracing only if --log-level is set or RUST_LOG env var is present
         if let Some(log_level) = self.log_level() {
             use tracing_subscriber::EnvFilter;
-            let filter =
-                EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(log_level));
+            // Build filter with noisy crates set to warn to reduce noise
+            let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                EnvFilter::new(format!(
+                    "{},hyper=warn,hyper_util=warn,rpc=warn,solana_runtime=warn,reqwest=warn",
+                    log_level
+                ))
+            });
             let _ = tracing_subscriber::fmt().with_env_filter(filter).try_init();
         } else if std::env::var("RUST_LOG").is_ok() {
             use tracing_subscriber::EnvFilter;
@@ -245,9 +250,9 @@ pub trait ServiceCommand {
         let networks_config = self.networks_config(&ctx.manifest, payment_networks)?;
 
         // Setup payment API
-        let (_payment_api_url, _facilitator_pubkey, _validator_rpc_urls, mut payment_api_state) =
-            self.setup_payment_api(&ctx.manifest.payments, &environment, &networks_config, port)
-                .await?;
+        let (_payment_api_url, _facilitator_pubkey, _validator_rpc_urls, payment_api_state) = self
+            .setup_payment_api(&ctx.manifest.payments, &environment, &networks_config, port)
+            .await?;
 
         // Setup event channel and stateful broadcaster for SSE
         let (event_sender, event_receiver) = moneymq_core::events::create_event_channel();
@@ -261,9 +266,67 @@ pub trait ServiceCommand {
             std::sync::Arc::new(moneymq_core::events::StatefulEventBroadcaster::new(
                 256,
                 payment_api_state.db_manager.clone(),
-                event_stream_context,
+                event_stream_context.clone(),
             ));
-        payment_api_state = payment_api_state.with_event_sender(event_sender);
+
+        // Get JWT secret from environment config or env var
+        let jwt_secret = std::env::var("MONEYMQ_JWT_SECRET")
+            .ok()
+            .or_else(|| match &environment {
+                crate::manifest::EnvironmentConfig::Sandbox(sandbox) => {
+                    Some(sandbox.jwt_secret.clone())
+                }
+                _ => None,
+            });
+
+        println!();
+        if jwt_secret.is_some() {
+            println!(
+                "  {} JWT receipt signing: {}",
+                style("✓").green(),
+                style("enabled").green()
+            );
+        } else {
+            println!(
+                "  {} JWT receipt signing: {}",
+                style("⚠").yellow(),
+                style("disabled (no secret)").dim()
+            );
+        }
+
+        // Create JWT key pair from secret (if configured)
+        let jwt_key_pair = jwt_secret.as_ref().map(|secret| {
+            std::sync::Arc::new(
+                moneymq_core::api::payment::endpoints::jwt::JwtKeyPair::from_secret(secret),
+            )
+        });
+
+        // Create channel manager for pub/sub event streaming
+        let channel_context = moneymq_core::api::payment::endpoints::channels::ChannelContext {
+            payment_stack_id: event_stream_context.payment_stack_id,
+            is_sandbox: event_stream_context.is_sandbox,
+        };
+        let mut channel_manager =
+            moneymq_core::api::payment::endpoints::channels::ChannelManager::with_db(
+                None, // No auth secret for now
+                payment_api_state.db_manager.clone(),
+                channel_context,
+            );
+
+        // Pass JWT key pair to channel manager for signing processor events
+        if let Some(ref key_pair) = jwt_key_pair {
+            channel_manager = channel_manager.with_jwt_key_pair(key_pair.clone());
+        }
+
+        let channel_manager = std::sync::Arc::new(channel_manager);
+
+        let mut payment_api_state = payment_api_state
+            .with_event_sender(event_sender)
+            .with_channel_manager(channel_manager);
+
+        if let Some(secret) = jwt_secret {
+            payment_api_state = payment_api_state.with_jwt_secret(secret);
+        }
 
         // Spawn the stateful event consumer thread
         let broadcaster_clone = event_broadcaster.clone();

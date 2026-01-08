@@ -25,68 +25,39 @@ pub async fn create_checkout_session(
     // Generate session ID
     let session_id = format!("cs_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
 
-    // Process line items and calculate totals
+    // Process line items and calculate totals by looking up products from catalog
     let mut line_items: Vec<CheckoutLineItem> = Vec::new();
     let mut amount_subtotal: i64 = 0;
-    let currency = request
-        .line_items
-        .first()
-        .and_then(|item| item.price_data.as_ref())
-        .map(|pd| pd.currency.clone())
-        .unwrap_or_else(|| "usd".to_string());
+    let mut currency = "usdc".to_string();
 
-    for (index, item) in request.line_items.iter().enumerate() {
+    for item in request.line_items.iter() {
         let line_item_id = format!("li_{}", &Uuid::new_v4().to_string().replace("-", "")[..24]);
 
-        // Get price info from price_data or look up by price ID
-        let (unit_amount, item_currency, _product_name, product_description, product_id) =
-            if let Some(price_data) = &item.price_data {
+        // Look up product from catalog by product_id
+        // If experiment_id is provided, use that variant; otherwise use base product
+        let lookup_id = item.experiment_id.as_ref().unwrap_or(&item.product_id);
+        let product = state.products.iter().find(|p| p.id == *lookup_id);
+
+        let (unit_amount, item_currency, product_description, product_id, experiment_id) =
+            if let Some(product) = product {
+                let price = product.prices.first();
+                let unit_amount = price.and_then(|p| p.unit_amount).unwrap_or(0);
+                let item_currency = price
+                    .map(|p| p.currency.as_str().to_string())
+                    .unwrap_or_else(|| "usdc".to_string());
                 (
-                    price_data.unit_amount,
-                    price_data.currency.clone(),
-                    price_data.product_data.name.clone(),
-                    price_data.product_data.description.clone(),
-                    // Generate product ID from name if not provided
-                    price_data
-                        .product_data
-                        .metadata
-                        .as_ref()
-                        .and_then(|m| m.get("product_id").cloned())
-                        .unwrap_or_else(|| format!("prod_{}", index)),
+                    unit_amount,
+                    item_currency,
+                    product.description.clone(),
+                    item.product_id.clone(),
+                    item.experiment_id.clone(),
                 )
-            } else if let Some(price_id) = &item.price {
-                // Look up price from catalog
-                if let Some(product) = state
-                    .products
-                    .iter()
-                    .find(|p| p.prices.iter().any(|pr| pr.id == *price_id))
-                {
-                    let price = product.prices.iter().find(|pr| pr.id == *price_id).unwrap();
-                    (
-                        price.unit_amount.unwrap_or(0),
-                        price.currency.as_str().to_string(),
-                        product.name.clone().unwrap_or_else(|| product.id.clone()),
-                        product.description.clone(),
-                        product.id.clone(),
-                    )
-                } else {
-                    return (
-                        StatusCode::BAD_REQUEST,
-                        Json(serde_json::json!({
-                            "error": {
-                                "message": format!("Price {} not found", price_id),
-                                "type": "invalid_request_error"
-                            }
-                        })),
-                    )
-                        .into_response();
-                }
             } else {
                 return (
                     StatusCode::BAD_REQUEST,
                     Json(serde_json::json!({
                         "error": {
-                            "message": "Either price or price_data must be provided",
+                            "message": format!("Product {} not found in catalog", lookup_id),
                             "type": "invalid_request_error"
                         }
                     })),
@@ -94,9 +65,20 @@ pub async fn create_checkout_session(
                     .into_response();
             };
 
+        // Set currency from first item
+        if line_items.is_empty() {
+            currency = item_currency.clone();
+        }
+
         let quantity = item.quantity;
         let subtotal = unit_amount * quantity;
         amount_subtotal += subtotal;
+
+        // Generate price ID from product
+        let price_id = format!(
+            "price_{}",
+            &Uuid::new_v4().to_string().replace("-", "")[..24]
+        );
 
         line_items.push(CheckoutLineItem {
             id: line_item_id,
@@ -107,14 +89,12 @@ pub async fn create_checkout_session(
             quantity,
             description: product_description,
             price: CheckoutLineItemPrice {
-                id: item
-                    .price
-                    .clone()
-                    .unwrap_or_else(|| format!("price_{}", index)),
+                id: price_id,
                 object: "price".to_string(),
                 currency: item_currency,
                 unit_amount,
-                product: Some(product_id),
+                product: Some(product_id.clone()),
+                experiment_id: experiment_id.clone(),
                 nickname: None,
                 price_type: "one_time".to_string(),
             },

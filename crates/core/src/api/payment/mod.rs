@@ -4,6 +4,26 @@ pub mod networks;
 
 use std::sync::Arc;
 
+use sha2::{Digest, Sha256};
+
+/// Compute a deterministic channel ID from a Solana transaction.
+///
+/// This function hashes the transaction message bytes (excluding signatures)
+/// to produce a consistent ID that can be computed by both frontend and backend:
+/// - Frontend: Hash the unsigned transaction message before signing
+/// - Backend: Extract message bytes from signed transaction and hash
+///
+/// Returns a hex-encoded SHA256 hash that can be used as a channel ID.
+pub fn channel_id_from_transaction(transaction_str: &str) -> Result<String, String> {
+    let message_bytes = networks::solana::extract_transaction_message_bytes(transaction_str)
+        .map_err(|e| format!("Failed to extract transaction message: {}", e))?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(&message_bytes);
+    let result = hasher.finalize();
+    Ok(format!("{:x}", result))
+}
+
 use axum::{
     Extension, Router,
     routing::{get, post},
@@ -47,6 +67,10 @@ pub struct PaymentApiConfig {
     pub payment_stack_id: String,
     pub is_sandbox: bool,
     pub event_sender: Option<Sender<Event>>,
+    /// Channel manager for pub/sub event streaming
+    pub channel_manager: Option<Arc<endpoints::channels::ChannelManager>>,
+    /// JWT key pair for signing payment receipts (ES256)
+    pub jwt_key_pair: Option<Arc<endpoints::jwt::JwtKeyPair>>,
 }
 
 impl PaymentApiConfig {
@@ -74,6 +98,8 @@ impl PaymentApiConfig {
             payment_stack_id,
             is_sandbox: true, // Local mode defaults to sandbox
             event_sender: None,
+            channel_manager: None,
+            jwt_key_pair: None,
         }
     }
 
@@ -95,6 +121,8 @@ impl PaymentApiConfig {
             payment_stack_id,
             is_sandbox,
             event_sender: None,
+            channel_manager: None,
+            jwt_key_pair: None,
         }
     }
 
@@ -103,22 +131,61 @@ impl PaymentApiConfig {
         self.event_sender = Some(sender);
         self
     }
+
+    /// Set the channel manager for pub/sub event streaming
+    pub fn with_channel_manager(
+        mut self,
+        manager: Arc<endpoints::channels::ChannelManager>,
+    ) -> Self {
+        self.channel_manager = Some(manager);
+        self
+    }
+
+    /// Set the JWT key pair for signing payment receipts (ES256)
+    pub fn with_jwt_secret(mut self, secret: String) -> Self {
+        let key_pair = endpoints::jwt::JwtKeyPair::from_secret(&secret);
+        self.jwt_key_pair = Some(Arc::new(key_pair));
+        self
+    }
+}
+
+/// JWKS endpoint handler - returns public keys for JWT verification
+async fn jwks_handler(
+    Extension(state): Extension<PaymentApiConfig>,
+) -> axum::response::Json<endpoints::jwt::JwksResponse> {
+    let jwks = state
+        .jwt_key_pair
+        .as_ref()
+        .map(|kp| kp.jwks())
+        .unwrap_or_else(|| endpoints::jwt::JwksResponse { keys: vec![] });
+
+    axum::response::Json(jwks)
 }
 
 /// Create the facilitator router
 pub fn create_router(state: PaymentApiConfig) -> Router {
     let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any);
-    Router::new()
+    let channel_manager = state.channel_manager.clone();
+
+    let mut router = Router::new()
         .route("/health", get(endpoints::health::handler))
         .route("/verify", post(endpoints::verify::handler))
         .route("/settle", post(endpoints::settle::handler))
         .route("/supported", get(endpoints::supported::handler))
+        .route("/.well-known/jwks.json", get(jwks_handler))
         .route(
             "/admin/transactions",
             get(endpoints::admin::list_transactions),
         )
-        .layer(cors_layer)
-        .layer(Extension(state))
+        .layer(Extension(state));
+
+    // Add channel routes if manager is configured
+    if let Some(manager) = channel_manager {
+        let channel_routes = endpoints::channels::create_router(manager);
+        router = router.merge(channel_routes);
+    }
+
+    router.layer(cors_layer)
 }
 
 /// Create a PaymentApiConfig from a FacilitatorConfig without starting a server

@@ -6,6 +6,7 @@ members = [
     "crates/drivers/kit",
     "crates/drivers/stripe",
     "crates/mcp",
+    "crates/sdk",
     "crates/stream",
     "crates/studio",
     "crates/types",
@@ -14,9 +15,9 @@ exclude = ["examples/*"]
 default-members = ["crates/cli"]
 resolver = "2"
 [workspace.package]
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
-description = "MoneyMQ is ..."
+description = "MoneyMQ"
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/txtx/moneymq"
@@ -33,8 +34,8 @@ schemars = { version = "1.1", features = ["indexmap2"] }
 serde = "1.0"
 serde_json = "1.0"
 serde_yml = "0.0.12"
-surfpool-core = { git = "https://github.com/txtx/surfpool.git", branch = "main", default-features = false }
-surfpool-types = { git = "https://github.com/txtx/surfpool.git", branch = "main", default-features = false }
+surfpool-core = { git = "https://github.com/txtx/surfpool.git", branch = "feat/snapshot-events", default-features = false }
+surfpool-types = { git = "https://github.com/txtx/surfpool.git", branch = "feat/snapshot-events", default-features = false }
 thiserror = "2.0"
 tokio = "1"
 url = { version = "2.5", features = ["serde"] }

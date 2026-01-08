@@ -17,7 +17,8 @@ use std::{collections::HashMap, fs, path::Path};
 
 use console::style;
 use moneymq_types::{
-    Currency, Price, PricingType, Product, ProductFeature, merge_product_with_variant,
+    Currency, ExperimentConfig, Price, PricingType, Product, ProductFeature,
+    merge_product_with_variant,
 };
 use serde_json::Value as JsonValue;
 
@@ -175,6 +176,32 @@ fn load_variants_recursive(
                     &full_variant_id,
                 ) {
                     Ok(nested_products) => {
+                        // If any nested product has experiment config, also load the parent product
+                        // so that experiment materialization can work
+                        let has_experiments =
+                            nested_products.iter().any(|p| p.experiment.is_some());
+                        if has_experiments {
+                            // Load the intermediate level as a parent product (no experiment config)
+                            match load_and_merge_variant(
+                                &variant_yaml,
+                                base_content,
+                                product_dir_name,
+                                &full_variant_id,
+                                None, // No parent_id for intermediate products
+                            ) {
+                                Ok(parent_product) => {
+                                    products.push(parent_product);
+                                }
+                                Err(e) => {
+                                    eprintln!(
+                                        "{} Failed to load parent product {}: {}",
+                                        style("Warning:").yellow(),
+                                        variant_yaml.display(),
+                                        e
+                                    );
+                                }
+                            }
+                        }
                         products.extend(nested_products);
                     }
                     Err(e) => {
@@ -188,11 +215,19 @@ fn load_variants_recursive(
                 }
             } else {
                 // Leaf variant - no nested variants
+                // Calculate parent_id: for nested variants like "lite-a", parent is "surfnet-lite"
+                let parent_id = if !id_prefix.is_empty() {
+                    Some(format!("{}-{}", product_dir_name, id_prefix))
+                } else {
+                    None
+                };
+
                 match load_and_merge_variant(
                     &variant_yaml,
                     base_content,
                     product_dir_name,
                     &full_variant_id,
+                    parent_id.as_deref(),
                 ) {
                     Ok(product) => {
                         products.push(product);
@@ -220,7 +255,20 @@ fn load_variants_recursive(
                 format!("{}-{}", id_prefix, variant_name)
             };
 
-            match load_and_merge_variant(&path, base_content, product_dir_name, &full_variant_id) {
+            // Calculate parent_id for old layout
+            let parent_id = if !id_prefix.is_empty() {
+                Some(format!("{}-{}", product_dir_name, id_prefix))
+            } else {
+                None
+            };
+
+            match load_and_merge_variant(
+                &path,
+                base_content,
+                product_dir_name,
+                &full_variant_id,
+                parent_id.as_deref(),
+            ) {
                 Ok(product) => {
                     products.push(product);
                 }
@@ -245,17 +293,26 @@ fn load_and_merge_variant(
     base_content: &str,
     product_dir_name: &str,
     variant_name: &str,
+    parent_id: Option<&str>,
 ) -> Result<Product, String> {
     let variant_content = fs::read_to_string(variant_path)
         .map_err(|e| format!("Failed to read variant file: {}", e))?;
 
     // Deep merge base + variant using the shared utility
-    let merged = merge_product_with_variant(
+    let mut merged = merge_product_with_variant(
         base_content,
         &variant_content,
         product_dir_name,
         variant_name,
     )?;
+
+    // Set parent_id if this is a nested variant (derived from directory structure)
+    if let (Some(parent), Some(obj)) = (parent_id, merged.as_object_mut()) {
+        obj.insert(
+            "parent_id".to_string(),
+            JsonValue::String(parent.to_string()),
+        );
+    }
 
     // Convert merged JSON to Product
     json_to_product(merged)
@@ -315,6 +372,40 @@ pub fn json_to_product(json: JsonValue) -> Result<Product, String> {
     // Extract and convert price (singular)
     let prices = extract_price(obj.get("price"))?;
 
+    // Extract experiment config (for A/B testing variants that inherit features from parent)
+    let experiment = obj.get("experiment").and_then(|v| {
+        if let Some(obj) = v.as_object() {
+            let exposure = obj.get("exposure").and_then(|e| e.as_f64()).unwrap_or(0.5);
+            Some(ExperimentConfig { exposure })
+        } else {
+            None
+        }
+    });
+
+    // Extract parent_id (derived from directory structure for nested variants)
+    let parent_id = obj
+        .get("parent_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // Transform ID for experiment variants: "parent-suffix" → "parent#suffix"
+    // e.g., "surfnet-lite-a" with parent "surfnet-lite" → "surfnet-lite#a"
+    let id = if experiment.is_some() {
+        if let Some(ref parent) = parent_id {
+            let prefix_with_dash = format!("{}-", parent);
+            if id.starts_with(&prefix_with_dash) {
+                let suffix = &id[prefix_with_dash.len()..];
+                format!("{}#{}", parent, suffix)
+            } else {
+                id
+            }
+        } else {
+            id
+        }
+    } else {
+        id
+    };
+
     // Build Product using Product::new() for proper timestamps
     let mut product = Product::new()
         .with_some_name(name)
@@ -329,6 +420,8 @@ pub fn json_to_product(json: JsonValue) -> Result<Product, String> {
     product.metadata = metadata;
     product.features = features;
     product.prices = prices;
+    product.experiment = experiment;
+    product.parent_id = parent_id;
 
     Ok(product)
 }
@@ -838,7 +931,7 @@ price:
 
         let products = load_products_from_directory(&products_dir).unwrap();
 
-        // Should have 2 products: surfnet-lite-a and surfnet-lite-b
+        // Should have 2 products: surfnet-lite-a and surfnet-lite-b (not experiment variants, so use -)
         assert_eq!(products.len(), 2);
         assert!(products.contains_key("surfnet-lite-a"));
         assert!(products.contains_key("surfnet-lite-b"));
@@ -926,5 +1019,201 @@ price:
         let tx_limit = &pro.features["transaction_limit"];
         assert_eq!(tx_limit.name, Some("Transaction Limit".to_string()));
         assert_eq!(tx_limit.value, Some(serde_json::json!(500)));
+    }
+
+    #[test]
+    fn test_parent_id_set_for_nested_variants() {
+        let temp_dir = TempDir::new().unwrap();
+        let products_dir = temp_dir.path().join("products");
+        let surfnet_dir = products_dir.join("surfnet");
+        let variants_dir = surfnet_dir.join("variants");
+        let lite_dir = variants_dir.join("lite");
+        let lite_variants_dir = lite_dir.join("variants");
+        let lite_a_dir = lite_variants_dir.join("a");
+        let lite_b_dir = lite_variants_dir.join("b");
+
+        fs::create_dir_all(&lite_a_dir).unwrap();
+        fs::create_dir_all(&lite_b_dir).unwrap();
+
+        // Base product
+        let base_yaml = r#"---
+product_type: service
+active: true
+"#;
+        fs::write(surfnet_dir.join("product.yaml"), base_yaml).unwrap();
+
+        // Lite variant (intermediate - has its own variants)
+        let lite_yaml = r#"---
+name: Surfnet Lite
+"#;
+        fs::write(lite_dir.join("product.yaml"), lite_yaml).unwrap();
+
+        // Lite-A variant (leaf)
+        let lite_a_yaml = r#"---
+price:
+  amounts:
+    usd: 3.99
+"#;
+        fs::write(lite_a_dir.join("product.yaml"), lite_a_yaml).unwrap();
+
+        // Lite-B variant (leaf)
+        let lite_b_yaml = r#"---
+price:
+  amounts:
+    usd: 5.99
+"#;
+        fs::write(lite_b_dir.join("product.yaml"), lite_b_yaml).unwrap();
+
+        let products = load_products_from_directory(&products_dir).unwrap();
+
+        // Should have 2 products (not experiment variants, so use - in ID)
+        assert_eq!(products.len(), 2);
+
+        // Check parent_id is set correctly for nested variants
+        let lite_a = products.get("surfnet-lite-a").unwrap();
+        assert_eq!(lite_a.parent_id, Some("surfnet-lite".to_string()));
+
+        let lite_b = products.get("surfnet-lite-b").unwrap();
+        assert_eq!(lite_b.parent_id, Some("surfnet-lite".to_string()));
+    }
+
+    #[test]
+    fn test_top_level_variants_have_no_parent() {
+        let temp_dir = TempDir::new().unwrap();
+        let products_dir = temp_dir.path().join("products");
+        let surfnet_dir = products_dir.join("surfnet");
+        let variants_dir = surfnet_dir.join("variants");
+        let pro_dir = variants_dir.join("pro");
+        let lite_dir = variants_dir.join("lite");
+
+        fs::create_dir_all(&pro_dir).unwrap();
+        fs::create_dir_all(&lite_dir).unwrap();
+
+        // Base product
+        let base_yaml = r#"---
+product_type: service
+active: true
+"#;
+        fs::write(surfnet_dir.join("product.yaml"), base_yaml).unwrap();
+
+        // Pro variant (top-level, no nesting)
+        let pro_yaml = r#"---
+name: Surfnet Pro
+price:
+  amounts:
+    usd: 9.99
+"#;
+        fs::write(pro_dir.join("product.yaml"), pro_yaml).unwrap();
+
+        // Lite variant (top-level, no nesting)
+        let lite_yaml = r#"---
+name: Surfnet Lite
+price:
+  amounts:
+    usd: 4.99
+"#;
+        fs::write(lite_dir.join("product.yaml"), lite_yaml).unwrap();
+
+        let products = load_products_from_directory(&products_dir).unwrap();
+
+        assert_eq!(products.len(), 2);
+
+        // Top-level variants should have no parent_id
+        let pro = products.get("surfnet-pro").unwrap();
+        assert_eq!(pro.parent_id, None);
+
+        let lite = products.get("surfnet-lite").unwrap();
+        assert_eq!(lite.parent_id, None);
+    }
+
+    #[test]
+    fn test_experiment_field_parsed_from_yaml() {
+        let temp_dir = TempDir::new().unwrap();
+        let products_dir = temp_dir.path().join("products");
+        let surfnet_dir = products_dir.join("surfnet");
+        let variants_dir = surfnet_dir.join("variants");
+        let lite_dir = variants_dir.join("lite");
+        let lite_variants_dir = lite_dir.join("variants");
+        let lite_a_dir = lite_variants_dir.join("a");
+
+        fs::create_dir_all(&lite_a_dir).unwrap();
+
+        // Base product with features
+        let base_yaml = r#"---
+product_type: service
+features:
+  api_calls:
+    name: API Calls
+    description: Monthly API call limit
+    value: 1000
+"#;
+        fs::write(surfnet_dir.join("product.yaml"), base_yaml).unwrap();
+
+        // Lite variant (parent for A/B tests)
+        let lite_yaml = r#"---
+name: Surfnet Lite
+features:
+  api_calls:
+    value: 5000
+"#;
+        fs::write(lite_dir.join("product.yaml"), lite_yaml).unwrap();
+
+        // Lite-A variant with experiment config
+        let lite_a_yaml = r#"---
+experiment:
+  exposure: 0.5
+price:
+  amounts:
+    usd: 3.99
+"#;
+        fs::write(lite_a_dir.join("product.yaml"), lite_a_yaml).unwrap();
+
+        let products = load_products_from_directory(&products_dir).unwrap();
+
+        // Experiment variants use # in ID: surfnet-lite#a instead of surfnet-lite-a
+        let lite_a = products.get("surfnet-lite#a").unwrap();
+
+        // Check experiment config is set
+        assert!(lite_a.experiment.is_some());
+        assert_eq!(lite_a.experiment.as_ref().unwrap().exposure, 0.5);
+
+        // Check parent_id is set
+        assert_eq!(lite_a.parent_id, Some("surfnet-lite".to_string()));
+
+        // Verify the ID format
+        assert_eq!(lite_a.id, "surfnet-lite#a");
+    }
+
+    #[test]
+    fn test_experiment_defaults_to_none() {
+        let temp_dir = TempDir::new().unwrap();
+        let products_dir = temp_dir.path().join("products");
+        let surfnet_dir = products_dir.join("surfnet");
+        let variants_dir = surfnet_dir.join("variants");
+        let pro_dir = variants_dir.join("pro");
+
+        fs::create_dir_all(&pro_dir).unwrap();
+
+        // Base product
+        let base_yaml = r#"---
+product_type: service
+"#;
+        fs::write(surfnet_dir.join("product.yaml"), base_yaml).unwrap();
+
+        // Pro variant without experiment field
+        let pro_yaml = r#"---
+name: Surfnet Pro
+price:
+  amounts:
+    usd: 9.99
+"#;
+        fs::write(pro_dir.join("product.yaml"), pro_yaml).unwrap();
+
+        let products = load_products_from_directory(&products_dir).unwrap();
+
+        let pro = products.get("surfnet-pro").unwrap();
+
+        // experiment should default to None
+        assert!(pro.experiment.is_none());
     }
 }

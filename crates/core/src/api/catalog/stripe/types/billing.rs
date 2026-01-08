@@ -3,6 +3,7 @@ use serde::Serialize;
 
 /// Stripe-compatible billing meter response
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeBillingMeter {
     pub id: String,
     pub object: String,
@@ -23,6 +24,7 @@ pub struct StripeBillingMeter {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeMeterCustomerMapping {
     #[serde(rename = "type")]
     pub mapping_type: String,
@@ -30,17 +32,20 @@ pub struct StripeMeterCustomerMapping {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeMeterAggregation {
     pub formula: String,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeMeterValueSettings {
     pub event_payload_key: String,
 }
 
 /// Stripe-compatible meter event response
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StripeMeterEvent {
     pub id: String,
     pub object: String,

@@ -8,9 +8,12 @@ use axum::{
     routing::{MethodRouter, get, post},
 };
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
-use moneymq_types::x402::{
-    ExactPaymentPayload, FacilitatorErrorReason, PaymentPayload, PaymentRequirements,
-    SupportedResponse,
+use moneymq_types::{
+    LineItem,
+    x402::{
+        ExactPaymentPayload, FacilitatorErrorReason, PaymentPayload, PaymentRequirements,
+        SupportedResponse,
+    },
 };
 use serde_json::json;
 use tracing::{debug, error, info, warn};
@@ -23,7 +26,9 @@ use crate::api::{
         },
     },
     payment::{
-        endpoints::FacilitatorExtraContext, networks::solana::extract_customer_from_transaction,
+        channel_id_from_transaction,
+        endpoints::{FacilitatorExtraContext, channels::BasketItem},
+        networks::solana::extract_customer_from_transaction,
     },
 };
 
@@ -288,9 +293,11 @@ async fn settle_payment_with_facilitator(
 }
 
 /// Extract payment amount and description from request
-/// Returns (amount_in_cents, description)
-/// Returns (amount, description, product_id)
-fn extract_payment_details(state: &CatalogState, req_path: &str) -> Option<(i64, String, String)> {
+/// Returns (amount, description, product_quantities, payment_intent_id)
+fn extract_payment_details(
+    state: &CatalogState,
+    req_path: &str,
+) -> Option<(i64, String, String, Option<String>)> {
     // Check if this is a payment intent confirm request
     // Support both /payment_intents/{id}/confirm (nested under /catalog/v1)
     // and /v1/payment_intents/{id}/confirm (legacy)
@@ -318,59 +325,57 @@ fn extract_payment_details(state: &CatalogState, req_path: &str) -> Option<(i64,
                         .clone()
                         .unwrap_or_else(|| format!("Payment intent {}", payment_intent_id));
 
-                    // Build product quantities JSON from line_items (e.g., {"surfnet-max": 1, "other": 2})
+                    // Build basket from line_items with productId, experimentId, quantity
                     let product_quantities = intent
                         .metadata
                         .get("line_items")
                         .and_then(|line_items_json| {
-                            // Parse line_items JSON array and build product -> quantity map
-                            serde_json::from_str::<Vec<serde_json::Value>>(line_items_json)
+                            serde_json::from_str::<Vec<LineItem>>(line_items_json)
                                 .ok()
                                 .map(|items| {
-                                    let mut quantities: std::collections::HashMap<String, i64> =
-                                        std::collections::HashMap::new();
-                                    for item in items {
-                                        // Try to get product_id from item.price.product (checkout session format)
-                                        // or from item.product_id (legacy format)
-                                        let product_id = item
-                                            .get("price")
-                                            .and_then(|p| p.get("product"))
-                                            .and_then(|v| v.as_str())
-                                            .or_else(|| {
-                                                item.get("product_id").and_then(|v| v.as_str())
-                                            });
-
-                                        let quantity = item
-                                            .get("quantity")
-                                            .and_then(|v| v.as_i64())
-                                            .unwrap_or(1);
-
-                                        if let Some(pid) = product_id {
-                                            *quantities.entry(pid.to_string()).or_insert(0) +=
-                                                quantity;
-                                        }
-                                    }
-                                    serde_json::to_string(&quantities)
-                                        .unwrap_or_else(|_| "{}".to_string())
+                                    let basket: Vec<BasketItem> = items
+                                        .into_iter()
+                                        .map(|item| BasketItem {
+                                            product_id: item.price.product,
+                                            experiment_id: item.price.experiment_id,
+                                            features: Default::default(),
+                                            quantity: item.quantity,
+                                        })
+                                        .collect();
+                                    serde_json::to_string(&basket)
+                                        .unwrap_or_else(|_| "[]".to_string())
                                 })
                         })
                         // Fallback to legacy product_id field (single product, quantity 1)
                         .or_else(|| {
                             intent.metadata.get("product_id").map(|pid| {
-                                let mut map = std::collections::HashMap::new();
-                                map.insert(pid.clone(), 1i64);
-                                serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+                                serde_json::to_string(&vec![BasketItem {
+                                    product_id: pid.clone(),
+                                    experiment_id: None,
+                                    features: Default::default(),
+                                    quantity: 1,
+                                }])
+                                .unwrap_or_else(|_| "[]".to_string())
                             })
                         })
                         // Final fallback to payment intent ID
                         .unwrap_or_else(|| {
-                            let mut map = std::collections::HashMap::new();
-                            map.insert(payment_intent_id.to_string(), 1i64);
-                            serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+                            serde_json::to_string(&vec![BasketItem {
+                                product_id: payment_intent_id.to_string(),
+                                experiment_id: None,
+                                features: Default::default(),
+                                quantity: 1,
+                            }])
+                            .unwrap_or_else(|_| "[]".to_string())
                         });
 
                     // Return amount in cents - the middleware will do the conversion to token amount
-                    return Some((intent.amount, description, product_quantities));
+                    return Some((
+                        intent.amount,
+                        description,
+                        product_quantities,
+                        Some(payment_intent_id.to_string()),
+                    ));
                 } else {
                     println!(
                         "WARN: Payment intent {} not found in state",
@@ -398,7 +403,8 @@ pub async fn payment_middleware(
 
     let mut req = Request::from_parts(parts, Body::from(request_bytes.clone()));
 
-    let (description, amount, _is_margin, product_id) = {
+    // (description, amount, is_margin, product_id, payment_intent_id)
+    let (description, amount, _is_margin, product_id, payment_intent_id) = {
         let billing_event = BillingMeterEventRequest::parse(&request_bytes);
         if let Some(event_name) = billing_event.event_name {
             debug!("Parsed billing event name from request: {}", event_name);
@@ -415,10 +421,17 @@ pub async fn payment_middleware(
                     false,
                     // Use meter ID for tracking
                     billing_event.id.clone(),
+                    None, // No payment intent for billing events
                 )
             } else {
                 // Unknown billing event, default amount
-                ("Meter Event".into(), 100, false, "unknown-meter".into())
+                (
+                    "Meter Event".into(),
+                    100,
+                    false,
+                    "unknown-meter".into(),
+                    None,
+                )
             }
         } else {
             let subscription_req = SubscriptionRequest::parse(&request_bytes);
@@ -464,13 +477,13 @@ pub async fn payment_middleware(
                         "unknown".to_string(),
                     )); // TODO: handle multiple prices properly
 
-                (description, price, is_margin, product_id)
+                (description, price, is_margin, product_id, None) // No payment intent for subscriptions
             } else {
                 // Try payment intent first, then product access path
-                if let Some((price, description, product_id)) =
+                if let Some((price, description, product_id, pi_id)) =
                     extract_payment_details(&state, req.uri().path())
                 {
-                    (description, price, false, product_id)
+                    (description, price, false, product_id, pi_id)
                 } else {
                     // Check for product access path (e.g., /products/{id}/access)
                     match extract_product_from_path(&state, req.uri().path()) {
@@ -478,7 +491,7 @@ pub async fn payment_middleware(
                             amount,
                             description,
                             product_id,
-                        } => (description, amount, false, product_id),
+                        } => (description, amount, false, product_id, None), // No payment intent for direct product access
                         ProductAccessResult::ProductNotFound(product_id) => {
                             let body = json!({
                                 "error": {
@@ -569,14 +582,74 @@ pub async fn payment_middleware(
                 pay_to: recipient.address(),
                 max_timeout_seconds: 300,
                 asset,
-                extra: Some(json!({
-                    "feePayer": supported
-                    .kinds
-                    .iter()
-                    .find(|kind| kind.network == network)
-                    .and_then(|kind| kind.extra.as_ref().map(|e| e.fee_payer.clone())),
-                    "product": product_id,
-                })),
+                extra: Some({
+                    // Normalize product_id to basket array format
+                    // If already JSON array: [{"productId": "x", "experimentId": "y", "quantity": 1}]
+                    // If simple string: convert to [{"productId": "x", "quantity": 1}]
+                    let basket: Vec<serde_json::Value> = serde_json::from_str(&product_id)
+                        .unwrap_or_else(|_| {
+                            // Simple string - convert to single-item basket
+                            vec![json!({"productId": product_id, "quantity": 1})]
+                        });
+
+                    // Look up product features from basket
+                    let mut merged_features = serde_json::Map::new();
+                    let available_ids: Vec<&str> = state.products.iter().map(|p| p.id.as_str()).collect();
+
+                    for item in basket.iter() {
+                        // Use experimentId for lookup if present, otherwise productId
+                        let lookup_id = item
+                            .get("experimentId")
+                            .and_then(|v| v.as_str())
+                            .filter(|s| !s.is_empty())
+                            .or_else(|| item.get("productId").and_then(|v| v.as_str()));
+
+                        debug!(
+                            "Looking up features for lookup_id: {:?}, available products: {:?}",
+                            lookup_id,
+                            available_ids
+                        );
+
+                        if let Some(pid) = lookup_id {
+                            if let Some(product) = state.products.iter().find(|p| p.id == pid) {
+                                debug!(
+                                    "Found product '{}' (experiment: {:?}, parent: {:?}) with {} features",
+                                    pid, product.experiment, product.parent_id, product.features.len()
+                                );
+                                // Use helper to resolve features (handles experiment variants)
+                                if let Some(serde_json::Value::Object(product_features)) =
+                                    get_product_features(&state.products, product)
+                                {
+                                    for (k, v) in product_features {
+                                        merged_features.insert(k, v);
+                                    }
+                                }
+                            } else {
+                                debug!("Product '{}' not found in catalog", pid);
+                            }
+                        }
+                    }
+
+                    let features = if merged_features.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::Value::Object(merged_features))
+                    };
+
+                    // Store basket as JSON string for consistency
+                    let basket_json = serde_json::to_string(&basket).unwrap_or_else(|_| "[]".to_string());
+
+                    json!({
+                        "feePayer": supported
+                            .kinds
+                            .iter()
+                            .find(|kind| kind.network == network)
+                            .and_then(|kind| kind.extra.as_ref().map(|e| e.fee_payer.clone())),
+                        "product": basket_json,
+                        "paymentIntentId": payment_intent_id,
+                        "features": features,
+                    })
+                }),
             }
         })
         .collect::<Vec<_>>();
@@ -645,6 +718,29 @@ pub async fn payment_middleware(
             new_extra.customer_address = customer_pubkey.as_ref().map(|c| c.to_string());
             new_extra.customer_label = customer_label.clone();
             new_extra.currency = Some(currency.clone());
+            // Compute transaction ID from payment hash for channel-based event routing
+            // This allows frontend to compute the same ID and subscribe early
+            new_extra.transaction_id = match &payment_payload.payload {
+                ExactPaymentPayload::Solana(solana_payload) => {
+                    match channel_id_from_transaction(&solana_payload.transaction) {
+                        Ok(id) => {
+                            info!(
+                                "Middleware: Computed transaction_id from payment hash: {}",
+                                id
+                            );
+                            Some(id)
+                        }
+                        Err(e) => {
+                            warn!("Failed to compute channel ID: {}", e);
+                            Some(uuid::Uuid::new_v4().to_string()) // Fallback to UUID
+                        }
+                    }
+                }
+            };
+            info!(
+                "Middleware: Setting extra context with transaction_id: {:?}",
+                new_extra.transaction_id
+            );
             selected_payment_requirement.extra = Some(serde_json::to_value(new_extra).unwrap());
 
             // Verify payment with facilitator
@@ -757,6 +853,70 @@ pub enum ProductAccessResult {
     },
 }
 
+/// Get features for a product, merging parent features with experiment overrides
+/// For experiment variants: parent features as base, experiment features override
+fn get_product_features(
+    products: &[moneymq_types::Product],
+    product: &moneymq_types::Product,
+) -> Option<serde_json::Value> {
+    // If the product is an experiment variant, merge parent features with experiment overrides
+    if product.experiment.is_some() {
+        if let Some(ref parent_id) = product.parent_id {
+            if let Some(parent) = products.iter().find(|p| &p.id == parent_id) {
+                debug!(
+                    "Product '{}' is an experiment variant, merging features from parent '{}' with experiment overrides",
+                    product.id, parent_id
+                );
+
+                // Get parent features (recursively in case parent is also an experiment)
+                let parent_features = get_product_features(products, parent);
+
+                // If experiment has no features, just use parent features
+                if product.features.is_empty() {
+                    return parent_features;
+                }
+
+                // Merge: start with parent features, experiment features override
+                let mut merged = match parent_features {
+                    Some(serde_json::Value::Object(map)) => map,
+                    _ => serde_json::Map::new(),
+                };
+
+                // Experiment features override parent features
+                if let Ok(serde_json::Value::Object(experiment_features)) =
+                    serde_json::to_value(&product.features)
+                {
+                    for (key, value) in experiment_features {
+                        merged.insert(key, value);
+                    }
+                }
+
+                if merged.is_empty() {
+                    return None;
+                }
+                return Some(serde_json::Value::Object(merged));
+            } else {
+                debug!(
+                    "Experiment product '{}' has parent_id '{}' but parent not found",
+                    product.id, parent_id
+                );
+            }
+        } else {
+            debug!(
+                "Product '{}' is an experiment but has no parent_id set",
+                product.id
+            );
+        }
+    }
+
+    // Use this product's features
+    if product.features.is_empty() {
+        None
+    } else {
+        serde_json::to_value(&product.features).ok()
+    }
+}
+
 /// Extract product info from path like /products/{product_id}/access
 fn extract_product_from_path(state: &CatalogState, path: &str) -> ProductAccessResult {
     // Match pattern: /products/{product_id}/access
@@ -815,5 +975,217 @@ fn extract_product_from_path(state: &CatalogState, path: &str) -> ProductAccessR
         amount,
         description,
         product_id,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use moneymq_types::{Product, ProductFeature};
+
+    use super::*;
+
+    fn make_product(id: &str, features: Vec<(&str, i64)>) -> Product {
+        let mut product = Product::new();
+        product.id = id.to_string();
+        for (key, value) in features {
+            product.features.insert(
+                key.to_string(),
+                ProductFeature {
+                    name: Some(key.to_string()),
+                    description: None,
+                    value: Some(serde_json::json!(value)),
+                },
+            );
+        }
+        product
+    }
+
+    fn make_experiment_product(id: &str, parent_id: &str) -> Product {
+        let mut product = Product::new();
+        product.id = id.to_string();
+        product.experiment = Some(moneymq_types::ExperimentConfig { exposure: 0.5 });
+        product.parent_id = Some(parent_id.to_string());
+        product
+    }
+
+    #[test]
+    fn test_get_product_features_non_experiment() {
+        let product = make_product(
+            "surfnet-lite",
+            vec![("api_calls", 1000), ("storage_gb", 10)],
+        );
+        let products = vec![product.clone()];
+
+        let features = get_product_features(&products, &product);
+
+        assert!(features.is_some());
+        let features = features.unwrap();
+        let obj = features.as_object().unwrap();
+        assert_eq!(obj.len(), 2);
+        assert!(obj.contains_key("api_calls"));
+        assert!(obj.contains_key("storage_gb"));
+    }
+
+    #[test]
+    fn test_get_product_features_experiment_inherits_from_parent() {
+        // Experiment with no features inherits all from parent
+        let parent = make_product(
+            "surfnet-lite",
+            vec![("api_calls", 5000), ("storage_gb", 50)],
+        );
+        let child = make_experiment_product("surfnet-lite-a", "surfnet-lite");
+        let products = vec![parent, child.clone()];
+
+        let features = get_product_features(&products, &child);
+
+        // Should get parent's features
+        assert!(features.is_some());
+        let features = features.unwrap();
+        let obj = features.as_object().unwrap();
+        assert_eq!(obj.len(), 2);
+
+        // Check values are from parent
+        let api_calls = &obj["api_calls"];
+        assert_eq!(api_calls["value"], serde_json::json!(5000));
+    }
+
+    #[test]
+    fn test_get_product_features_experiment_overrides_parent() {
+        // Experiment features override parent features
+        let parent = make_product(
+            "surfnet-lite",
+            vec![("api_calls", 5000), ("storage_gb", 50)],
+        );
+        let mut child = make_experiment_product("surfnet-lite-a", "surfnet-lite");
+        // Add features to experiment that override parent
+        child.features.insert(
+            "api_calls".to_string(),
+            ProductFeature {
+                name: Some("api_calls".to_string()),
+                description: None,
+                value: Some(serde_json::json!(10000)), // Override parent's 5000
+            },
+        );
+        child.features.insert(
+            "priority_support".to_string(),
+            ProductFeature {
+                name: Some("priority_support".to_string()),
+                description: None,
+                value: Some(serde_json::json!(true)), // New feature not in parent
+            },
+        );
+        let products = vec![parent, child.clone()];
+
+        let features = get_product_features(&products, &child);
+
+        assert!(features.is_some());
+        let features = features.unwrap();
+        let obj = features.as_object().unwrap();
+        assert_eq!(obj.len(), 3); // 2 from parent + 1 new from experiment (api_calls is overridden)
+
+        // api_calls should be overridden by experiment
+        let api_calls = &obj["api_calls"];
+        assert_eq!(api_calls["value"], serde_json::json!(10000));
+
+        // storage_gb inherited from parent
+        let storage_gb = &obj["storage_gb"];
+        assert_eq!(storage_gb["value"], serde_json::json!(50));
+
+        // priority_support is new from experiment
+        let priority_support = &obj["priority_support"];
+        assert_eq!(priority_support["value"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn test_get_product_features_experiment_parent_not_found() {
+        let child = make_experiment_product("surfnet-lite-a", "surfnet-lite");
+        let products = vec![child.clone()]; // Parent not in list
+
+        let features = get_product_features(&products, &child);
+
+        // Should return None since parent not found and child has no features
+        assert!(features.is_none());
+    }
+
+    #[test]
+    fn test_get_product_features_experiment_no_parent_id() {
+        let mut child = Product::new();
+        child.id = "surfnet-lite-a".to_string();
+        child.experiment = Some(moneymq_types::ExperimentConfig { exposure: 0.5 });
+        child.parent_id = None; // Experiment but no parent_id
+        let products = vec![child.clone()];
+
+        let features = get_product_features(&products, &child);
+
+        // Should return None since no parent_id set
+        assert!(features.is_none());
+    }
+
+    #[test]
+    fn test_get_product_features_recursive_experiment() {
+        // grandparent has features
+        let grandparent = make_product("surfnet", vec![("base_feature", 100)]);
+
+        // parent is experiment, points to grandparent
+        let mut parent = Product::new();
+        parent.id = "surfnet-lite".to_string();
+        parent.experiment = Some(moneymq_types::ExperimentConfig { exposure: 0.5 });
+        parent.parent_id = Some("surfnet".to_string());
+
+        // child is experiment, points to parent
+        let child = make_experiment_product("surfnet-lite-a", "surfnet-lite");
+
+        let products = vec![grandparent, parent, child.clone()];
+
+        let features = get_product_features(&products, &child);
+
+        // Should recursively resolve to grandparent's features
+        assert!(features.is_some());
+        let features = features.unwrap();
+        let obj = features.as_object().unwrap();
+        assert!(obj.contains_key("base_feature"));
+        assert_eq!(obj["base_feature"]["value"], serde_json::json!(100));
+    }
+
+    #[test]
+    fn test_get_product_features_empty_returns_none() {
+        let mut product = Product::new();
+        product.id = "empty-product".to_string();
+        // No features set
+        let products = vec![product.clone()];
+
+        let features = get_product_features(&products, &product);
+
+        assert!(features.is_none());
+    }
+
+    #[test]
+    fn test_get_product_features_experiment_with_own_features_overrides_parent() {
+        // Experiment features should override parent features
+        let parent = make_product("surfnet-lite", vec![("api_calls", 5000)]);
+
+        let mut child = Product::new();
+        child.id = "surfnet-lite-a".to_string();
+        child.experiment = Some(moneymq_types::ExperimentConfig { exposure: 0.5 });
+        child.parent_id = Some("surfnet-lite".to_string());
+        // Child has its own features that override parent
+        child.features.insert(
+            "api_calls".to_string(),
+            ProductFeature {
+                name: Some("API Calls".to_string()),
+                description: None,
+                value: Some(serde_json::json!(100)), // Override parent's 5000
+            },
+        );
+
+        let products = vec![parent, child.clone()];
+
+        let features = get_product_features(&products, &child);
+
+        // Experiment features should override parent's
+        assert!(features.is_some());
+        let features = features.unwrap();
+        let obj = features.as_object().unwrap();
+        assert_eq!(obj["api_calls"]["value"], serde_json::json!(100)); // Experiment's value overrides
     }
 }

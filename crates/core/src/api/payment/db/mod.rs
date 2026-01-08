@@ -153,8 +153,14 @@ impl DbManager {
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
         debug!("Running database migrations...");
-        if let Err(e) = run_migrations(&mut pooled_connection) {
-            debug!("Migrations failure: {}", e);
+        match run_migrations(&mut pooled_connection) {
+            Ok(_) => debug!("Database migrations completed successfully"),
+            Err(e) => {
+                tracing::error!(
+                    "Database migrations failed: {}. Consider deleting payments.sqlite and restarting.",
+                    e
+                );
+            }
         }
         Ok(Self {
             control_db_conn: pool.clone(),
@@ -317,42 +323,20 @@ impl DbManager {
         .map_err(DbError::FindTxError)
     }
 
-    /// Legacy method - kept for backward compatibility but prefer find_transaction_id_by_payment_hash
-    pub fn find_transaction_id_for_settlement_update(
+    /// Find full transaction info by payment_hash (channel_id)
+    /// This is used when processors publish events to channels to look up payment context
+    pub fn find_transaction_by_payment_hash(
         &self,
-        amount: &str,
-        x402_payment_requirement: &str,
-        extra_ctx: Option<FacilitatorExtraContext>,
-    ) -> DbResult<Option<i32>> {
+        payment_hash: &str,
+    ) -> DbResult<Option<moneymq_types::x402::transactions::FacilitatedTransaction>> {
         let mut conn = self
             .payment_db_conn
             .get()
             .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
-        let customer_id = if let Some(extra_ctx) = &extra_ctx {
-            if let Some(customer_address) = &extra_ctx.customer_address {
-                models::transaction_customer::find_customer_by_address(&mut conn, customer_address)
-                    .ok()
-                    .flatten()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        models::facilitated_transaction::find_transaction_id_for_settlement_update(
-            &mut conn,
-            extra_ctx
-                .as_ref()
-                .and_then(|ctx| ctx.product.clone())
-                .as_deref(),
-            customer_id,
-            amount,
-            extra_ctx.as_ref().and_then(|ctx| ctx.currency.as_deref()),
-            x402_payment_requirement,
-        )
-        .map_err(DbError::FindTxError)
+        models::facilitated_transaction::find_transaction_by_payment_hash(&mut conn, payment_hash)
+            .map_err(DbError::FindTxError)
+            .map(|opt| opt.map(|tx_with_customer| tx_with_customer.into()))
     }
 
     pub fn update_transaction_after_settlement(
