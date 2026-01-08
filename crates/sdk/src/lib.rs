@@ -48,8 +48,8 @@
 //!         // Do your business logic here...
 //!         // e.g., fulfill an order, grant access, etc.
 //!
-//!         // Publish a completion event
-//!         actor.send("order:completed", serde_json::json!({
+//!         // Attach completion data - server creates JWT receipt and emits transaction:completed
+//!         actor.attach(serde_json::json!({
 //!             "order_id": tx_ctx.id(),
 //!             "status": "fulfilled"
 //!         })).await?;

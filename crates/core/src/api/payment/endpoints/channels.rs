@@ -125,13 +125,21 @@ pub struct TransactionsQuery {
     pub token: Option<String>,
 }
 
-/// Request body for publishing an event
+/// Request body for publishing an event (legacy, with type)
 #[derive(Debug, Clone, Deserialize)]
 pub struct PublishEventRequest {
     /// Event type
     #[serde(rename = "type")]
     pub ty: String,
     /// Event data payload
+    pub data: serde_json::Value,
+}
+
+/// Request body for attaching data to a transaction
+#[derive(Debug, Clone, Deserialize)]
+pub struct AttachDataRequest {
+    /// Data payload to attach
+    #[serde(flatten)]
     pub data: serde_json::Value,
 }
 
@@ -455,7 +463,7 @@ pub async fn publish_attachment_handler(
     Extension(manager): Extension<Arc<ChannelManager>>,
     headers: HeaderMap,
     Path(channel_id): Path<String>,
-    Json(request): Json<PublishEventRequest>,
+    Json(request): Json<AttachDataRequest>,
 ) -> impl IntoResponse {
     // Extract and validate token
     let token = ChannelManager::extract_token(&headers, None);
@@ -470,16 +478,14 @@ pub async fn publish_attachment_handler(
             .into_response();
     }
 
-    // Handle transaction:attach specially - create JWT and emit transaction:completed
-    let is_attach_event = request.ty == event_types::TRANSACTION_ATTACH;
-
-    let (event_type, event_data) = if is_attach_event {
+    // Attachments always create a JWT receipt and emit transaction:completed
+    let (event_type, event_data) = {
         info!(
             channel_id = %channel_id,
             has_jwt_key_pair = manager.jwt_key_pair.is_some(),
             has_db_manager = manager.db_manager.is_some(),
             has_context = manager.context.is_some(),
-            "Handling transaction:attach - creating receipt JWT"
+            "Handling attachment - creating receipt JWT"
         );
 
         match (&manager.jwt_key_pair, &manager.db_manager, &manager.context) {
@@ -569,31 +575,44 @@ pub async fn publish_attachment_handler(
                             }
                             Err(e) => {
                                 error!("Failed to sign JWT for channel {}: {}", channel_id, e);
-                                (request.ty.clone(), request.data.clone())
+                                // Fall back to transaction:attach with raw data
+                                (
+                                    event_types::TRANSACTION_ATTACH.to_string(),
+                                    request.data.clone(),
+                                )
                             }
                         }
                     }
                     Ok(None) => {
                         warn!(channel_id = %channel_id, "No transaction found for channel");
-                        (request.ty.clone(), request.data.clone())
+                        // Fall back to transaction:attach with raw data
+                        (
+                            event_types::TRANSACTION_ATTACH.to_string(),
+                            request.data.clone(),
+                        )
                     }
                     Err(e) => {
                         error!(
                             "Failed to look up transaction for channel {}: {}",
                             channel_id, e
                         );
-                        (request.ty.clone(), request.data.clone())
+                        // Fall back to transaction:attach with raw data
+                        (
+                            event_types::TRANSACTION_ATTACH.to_string(),
+                            request.data.clone(),
+                        )
                     }
                 }
             }
             _ => {
                 warn!("Cannot create receipt JWT: missing key_pair, db_manager, or context");
-                (request.ty.clone(), request.data.clone())
+                // Fall back to transaction:attach with raw data
+                (
+                    event_types::TRANSACTION_ATTACH.to_string(),
+                    request.data.clone(),
+                )
             }
         }
-    } else {
-        // For other event types, pass through as-is
-        (request.ty.clone(), request.data.clone())
     };
 
     // Create and publish event

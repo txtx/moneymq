@@ -36,8 +36,8 @@ use crate::{
 /// // Connect
 /// actor.connect().await?;
 ///
-/// // Publish an event
-/// actor.send("order:completed", serde_json::json!({
+/// // Attach data - server creates JWT and emits transaction:completed
+/// actor.attach(serde_json::json!({
 ///     "order_id": "order-123",
 ///     "status": "shipped"
 /// })).await?;
@@ -187,35 +187,29 @@ impl EventActor {
         info!(channel_id = %self.channel_id, "Actor disconnected from channel");
     }
 
-    /// Publish an event to the channel
+    /// Attach data to the transaction channel
+    ///
+    /// This sends data to the server which creates a signed JWT receipt
+    /// and emits a `transaction:completed` event to all listeners.
     ///
     /// Returns the created event with its ID and timestamp.
-    pub async fn send<T: Serialize>(
+    pub async fn attach<T: Serialize>(
         &self,
-        event_type: impl Into<String>,
         data: T,
     ) -> Result<ChannelEvent<serde_json::Value>> {
         let secret = self.config.secret.as_ref().ok_or_else(|| {
-            ProcessorError::Authentication("Secret key required to publish events".to_string())
+            ProcessorError::Authentication("Secret key required to attach data".to_string())
         })?;
 
-        let event_type = event_type.into();
-        let data_value = serde_json::to_value(&data)?;
-
-        let payload = serde_json::json!({
-            "type": event_type,
-            "data": data_value
-        });
-
         let url = self.build_attachments_url();
-        debug!(channel_id = %self.channel_id, event_type = %event_type, url = %url, "Publishing attachment");
+        debug!(channel_id = %self.channel_id, url = %url, "Attaching data to transaction");
 
         let response = self
             .http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", secret))
             .header("Content-Type", "application/json")
-            .json(&payload)
+            .json(&data)
             .send()
             .await?;
 
@@ -232,7 +226,7 @@ impl EventActor {
             channel_id = %self.channel_id,
             event_id = %event.id,
             event_type = %event.event_type,
-            "Event published successfully"
+            "Data attached successfully"
         );
 
         Ok(event)
