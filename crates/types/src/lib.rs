@@ -633,7 +633,301 @@ fn is_features_empty(v: &serde_json::Value) -> bool {
     }
 }
 
-/// Known event types for payment channels
+/// Payment verification event data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentVerifiedData {
+    /// Payer address
+    pub payer: String,
+    /// Payment amount as string
+    pub amount: String,
+    /// Network name
+    pub network: String,
+    /// Product ID (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_id: Option<String>,
+}
+
+/// Payment settlement event data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentSettledData {
+    /// Payer address
+    pub payer: String,
+    /// Payment amount as string
+    pub amount: String,
+    /// Currency code
+    pub currency: String,
+    /// Network name
+    pub network: String,
+    /// Transaction signature (for blockchain payments)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_signature: Option<String>,
+    /// Product ID (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_id: Option<String>,
+}
+
+/// Payment failure event data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentFailedData {
+    /// Payer address (if known)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payer: Option<String>,
+    /// Payment amount as string
+    pub amount: String,
+    /// Network name
+    pub network: String,
+    /// Failure reason
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// Product ID (if applicable)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_id: Option<String>,
+}
+
+/// Transaction completed event data (includes receipt JWT)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransactionCompletedData {
+    /// Signed JWT receipt
+    pub receipt: String,
+}
+
+/// Strongly-typed channel event enum
+///
+/// Each variant contains its own typed payload. Serializes to a CloudEvents-like format:
+/// ```json
+/// {"id": "...", "type": "payment:settled", "data": {...}, "time": "..."}
+/// ```
+#[derive(Debug, Clone)]
+pub enum ChannelEvent {
+    /// Payment has been verified
+    PaymentVerified {
+        id: String,
+        time: chrono::DateTime<chrono::Utc>,
+        data: PaymentVerifiedData,
+    },
+    /// Payment has been settled
+    PaymentSettled {
+        id: String,
+        time: chrono::DateTime<chrono::Utc>,
+        data: PaymentSettledData,
+    },
+    /// Payment failed (generic)
+    PaymentFailed {
+        id: String,
+        time: chrono::DateTime<chrono::Utc>,
+        data: PaymentFailedData,
+    },
+    /// Transaction completed with receipt
+    TransactionCompleted {
+        id: String,
+        time: chrono::DateTime<chrono::Utc>,
+        data: TransactionCompletedData,
+    },
+    /// Custom event type (for arbitrary events like transaction:attach)
+    Custom {
+        id: String,
+        time: chrono::DateTime<chrono::Utc>,
+        event_type: String,
+        data: serde_json::Value,
+    },
+}
+
+impl ChannelEvent {
+    /// Create a payment:verified event
+    pub fn payment_verified(data: PaymentVerifiedData) -> Self {
+        Self::PaymentVerified {
+            id: uuid::Uuid::new_v4().to_string(),
+            time: chrono::Utc::now(),
+            data,
+        }
+    }
+
+    /// Create a payment:settled event
+    pub fn payment_settled(data: PaymentSettledData) -> Self {
+        Self::PaymentSettled {
+            id: uuid::Uuid::new_v4().to_string(),
+            time: chrono::Utc::now(),
+            data,
+        }
+    }
+
+    /// Create a payment:failed event
+    pub fn payment_failed(data: PaymentFailedData) -> Self {
+        Self::PaymentFailed {
+            id: uuid::Uuid::new_v4().to_string(),
+            time: chrono::Utc::now(),
+            data,
+        }
+    }
+
+    /// Create a transaction:completed event
+    pub fn transaction_completed(data: TransactionCompletedData) -> Self {
+        Self::TransactionCompleted {
+            id: uuid::Uuid::new_v4().to_string(),
+            time: chrono::Utc::now(),
+            data,
+        }
+    }
+
+    /// Create a custom event with arbitrary type and data
+    pub fn custom(event_type: impl Into<String>, data: serde_json::Value) -> Self {
+        Self::Custom {
+            id: uuid::Uuid::new_v4().to_string(),
+            time: chrono::Utc::now(),
+            event_type: event_type.into(),
+            data,
+        }
+    }
+
+    /// Get the event ID
+    pub fn id(&self) -> &str {
+        match self {
+            Self::PaymentVerified { id, .. } => id,
+            Self::PaymentSettled { id, .. } => id,
+            Self::PaymentFailed { id, .. } => id,
+            Self::TransactionCompleted { id, .. } => id,
+            Self::Custom { id, .. } => id,
+        }
+    }
+
+    /// Get the event type string
+    pub fn event_type(&self) -> &str {
+        match self {
+            Self::PaymentVerified { .. } => "payment:verified",
+            Self::PaymentSettled { .. } => "payment:settled",
+            Self::PaymentFailed { .. } => "payment:failed",
+            Self::TransactionCompleted { .. } => "transaction:completed",
+            Self::Custom { event_type, .. } => event_type,
+        }
+    }
+
+    /// Get the event timestamp
+    pub fn time(&self) -> chrono::DateTime<chrono::Utc> {
+        match self {
+            Self::PaymentVerified { time, .. } => *time,
+            Self::PaymentSettled { time, .. } => *time,
+            Self::PaymentFailed { time, .. } => *time,
+            Self::TransactionCompleted { time, .. } => *time,
+            Self::Custom { time, .. } => *time,
+        }
+    }
+
+    /// Get the event data as a JSON value
+    pub fn data(&self) -> serde_json::Value {
+        match self {
+            Self::PaymentVerified { data, .. } => serde_json::to_value(data).unwrap_or_default(),
+            Self::PaymentSettled { data, .. } => serde_json::to_value(data).unwrap_or_default(),
+            Self::PaymentFailed { data, .. } => serde_json::to_value(data).unwrap_or_default(),
+            Self::TransactionCompleted { data, .. } => {
+                serde_json::to_value(data).unwrap_or_default()
+            }
+            Self::Custom { data, .. } => data.clone(),
+        }
+    }
+}
+
+impl Serialize for ChannelEvent {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeStruct;
+
+        let mut state = serializer.serialize_struct("ChannelEvent", 4)?;
+        state.serialize_field("id", self.id())?;
+        state.serialize_field("type", self.event_type())?;
+        state.serialize_field("time", &self.time())?;
+
+        match self {
+            Self::PaymentVerified { data, .. } => {
+                state.serialize_field("data", data)?;
+            }
+            Self::PaymentSettled { data, .. } => {
+                state.serialize_field("data", data)?;
+            }
+            Self::PaymentFailed { data, .. } => {
+                state.serialize_field("data", data)?;
+            }
+            Self::TransactionCompleted { data, .. } => {
+                state.serialize_field("data", data)?;
+            }
+            Self::Custom { data, .. } => {
+                state.serialize_field("data", data)?;
+            }
+        }
+
+        state.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for ChannelEvent {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawEvent {
+            id: String,
+            #[serde(rename = "type")]
+            event_type: String,
+            time: chrono::DateTime<chrono::Utc>,
+            data: serde_json::Value,
+        }
+
+        let raw = RawEvent::deserialize(deserializer)?;
+
+        match raw.event_type.as_str() {
+            "payment:verified" => {
+                let data: PaymentVerifiedData =
+                    serde_json::from_value(raw.data).map_err(serde::de::Error::custom)?;
+                Ok(Self::PaymentVerified {
+                    id: raw.id,
+                    time: raw.time,
+                    data,
+                })
+            }
+            "payment:settled" => {
+                let data: PaymentSettledData =
+                    serde_json::from_value(raw.data).map_err(serde::de::Error::custom)?;
+                Ok(Self::PaymentSettled {
+                    id: raw.id,
+                    time: raw.time,
+                    data,
+                })
+            }
+            "payment:failed" => {
+                let data: PaymentFailedData =
+                    serde_json::from_value(raw.data).map_err(serde::de::Error::custom)?;
+                Ok(Self::PaymentFailed {
+                    id: raw.id,
+                    time: raw.time,
+                    data,
+                })
+            }
+            "transaction:completed" => {
+                let data: TransactionCompletedData =
+                    serde_json::from_value(raw.data).map_err(serde::de::Error::custom)?;
+                Ok(Self::TransactionCompleted {
+                    id: raw.id,
+                    time: raw.time,
+                    data,
+                })
+            }
+            _ => Ok(Self::Custom {
+                id: raw.id,
+                time: raw.time,
+                event_type: raw.event_type,
+                data: raw.data,
+            }),
+        }
+    }
+}
+
+/// Event type constants for backward compatibility and pattern matching
 pub mod event_types {
     /// Payment has been verified
     pub const PAYMENT_VERIFIED: &str = "payment:verified";

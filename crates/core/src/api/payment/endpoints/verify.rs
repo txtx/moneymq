@@ -15,7 +15,8 @@ use crate::{
         PaymentApiConfig,
         endpoints::{
             channels::{
-                BasketItem, ChannelEvent, PaymentDetails, TransactionNotification, event_types,
+                BasketItem, ChannelEvent, PaymentDetails, PaymentFailedData, PaymentVerifiedData,
+                TransactionNotification,
             },
             serialize_to_base64,
         },
@@ -266,24 +267,22 @@ pub async fn handler(
                 channel_manager.notify_transaction(notification);
 
                 // Then publish payment:verified to the transaction's channel
-                let event_data = serde_json::json!({
-                    "payer": payer.to_string(),
-                    "amount": amount_str,
-                    "network": network,
-                    "productId": product_id,
+                let channel_event = ChannelEvent::payment_verified(PaymentVerifiedData {
+                    payer: payer.to_string(),
+                    amount: amount_str.clone(),
+                    network: network.clone(),
+                    product_id: product_id.clone(),
                 });
-                let channel_event = ChannelEvent::new(event_types::PAYMENT_VERIFIED, event_data);
                 channel_manager.publish(tx_id, channel_event);
             }
             VerifyResponse::Invalid { reason, payer } => {
-                let event_data = serde_json::json!({
-                    "payer": payer.as_ref().map(|p| p.to_string()),
-                    "amount": amount_str,
-                    "network": network,
-                    "reason": format!("{:?}", reason),
-                    "productId": product_id,
+                let channel_event = ChannelEvent::payment_failed(PaymentFailedData {
+                    payer: payer.as_ref().map(|p| p.to_string()),
+                    amount: amount_str.clone(),
+                    network: network.clone(),
+                    reason: Some(format!("{:?}", reason)),
+                    product_id: product_id.clone(),
                 });
-                let channel_event = ChannelEvent::new(event_types::PAYMENT_FAILED, event_data);
                 channel_manager.publish(tx_id, channel_event);
             }
         }

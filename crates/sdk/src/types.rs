@@ -1,51 +1,11 @@
 use std::collections::HashMap;
 
-use chrono::Utc;
 // Re-export shared types from moneymq-types
-pub use moneymq_types::{BasketItem, ProductFeature, defaults};
+pub use moneymq_types::{
+    BasketItem, ChannelEvent, PaymentFailedData, PaymentSettledData, PaymentVerifiedData,
+    ProductFeature, TransactionCompletedData, defaults, event_types,
+};
 use serde::{Deserialize, Serialize};
-
-/// Event envelope following CloudEvents-like format
-/// This matches the format used in the JavaScript SDK
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChannelEvent<T = serde_json::Value> {
-    /// Unique event ID (UUID)
-    pub id: String,
-
-    /// Event type (e.g., "payment:settled", "order:completed")
-    #[serde(rename = "type")]
-    pub event_type: String,
-
-    /// Event payload
-    pub data: T,
-
-    /// ISO 8601 timestamp
-    pub time: String,
-}
-
-impl<T> ChannelEvent<T> {
-    /// Create a new channel event
-    pub fn new(event_type: impl Into<String>, data: T) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            event_type: event_type.into(),
-            data,
-            time: Utc::now().to_rfc3339(),
-        }
-    }
-
-    /// Get the event type
-    pub fn event_type(&self) -> &str {
-        &self.event_type
-    }
-}
-
-impl ChannelEvent<serde_json::Value> {
-    /// Try to deserialize the data into a specific type
-    pub fn data_as<T: for<'de> Deserialize<'de>>(&self) -> Result<T, serde_json::Error> {
-        serde_json::from_value(self.data.clone())
-    }
-}
 
 /// Payment details from the x402 payment
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,63 +50,10 @@ pub struct Transaction {
     pub metadata: HashMap<String, serde_json::Value>,
 }
 
-/// Payment verification data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaymentVerified {
-    /// Payer address
-    pub payer: String,
-
-    /// Payment amount as string
-    pub amount: String,
-
-    /// Network name
-    pub network: String,
-
-    /// Product ID (if applicable)
-    #[serde(rename = "productId")]
-    pub product_id: Option<String>,
-}
-
-/// Payment settlement data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaymentSettled {
-    /// Payer address
-    pub payer: String,
-
-    /// Payment amount as string
-    pub amount: String,
-
-    /// Network name
-    pub network: String,
-
-    /// Transaction signature (for blockchain payments)
-    #[serde(rename = "transactionSignature")]
-    pub transaction_signature: Option<String>,
-
-    /// Product ID (if applicable)
-    #[serde(rename = "productId")]
-    pub product_id: Option<String>,
-}
-
-/// Payment failure data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PaymentFailed {
-    /// Payer address (if known)
-    pub payer: Option<String>,
-
-    /// Payment amount as string
-    pub amount: String,
-
-    /// Network name
-    pub network: String,
-
-    /// Failure reason
-    pub reason: String,
-
-    /// Product ID (if applicable)
-    #[serde(rename = "productId")]
-    pub product_id: Option<String>,
-}
+// Type aliases for backwards compatibility
+pub type PaymentVerified = PaymentVerifiedData;
+pub type PaymentSettled = PaymentSettledData;
+pub type PaymentFailed = PaymentFailedData;
 
 /// Connection state for channels
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,6 +166,3 @@ impl ChannelConfig {
         self
     }
 }
-
-// Re-export event types from moneymq-types
-pub use moneymq_types::event_types;

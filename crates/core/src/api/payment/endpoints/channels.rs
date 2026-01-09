@@ -21,10 +21,12 @@ use axum::{
         sse::{Event as SseEvent, KeepAlive, Sse},
     },
 };
-use chrono::{DateTime, Utc};
 use futures::stream::Stream;
 // Re-export types from moneymq-types
-pub use moneymq_types::{BasketItem, ProductFeature, defaults, event_types};
+pub use moneymq_types::{
+    BasketItem, ChannelEvent, PaymentFailedData, PaymentSettledData, PaymentVerifiedData,
+    ProductFeature, TransactionCompletedData, defaults, event_types,
+};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
@@ -37,40 +39,6 @@ const CHANNEL_BUFFER_SIZE: usize = 100;
 const TRANSACTIONS_BUFFER_SIZE: usize = 100;
 
 // ==================== Types ====================
-
-/// Event envelope for channel events
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChannelEvent {
-    /// Unique event ID
-    pub id: String,
-    /// Event type (e.g., "payment:settled", "order:completed")
-    #[serde(rename = "type")]
-    pub ty: String,
-    /// Event payload
-    pub data: serde_json::Value,
-    /// Event timestamp
-    pub time: DateTime<Utc>,
-}
-
-impl ChannelEvent {
-    /// Create a new channel event
-    pub fn new(ty: impl Into<String>, data: serde_json::Value) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            ty: ty.into(),
-            data,
-            time: Utc::now(),
-        }
-    }
-
-    /// Create from a type and serializable data
-    pub fn from_data<T: Serialize>(
-        ty: impl Into<String>,
-        data: &T,
-    ) -> Result<Self, serde_json::Error> {
-        Ok(Self::new(ty, serde_json::to_value(data)?))
-    }
-}
 
 /// Payment details from x402 payment
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -347,7 +315,7 @@ impl ChannelManager {
 
         let events = broadcaster.recent_events.read();
         // Find cursor position and return all events after it
-        if let Some(pos) = events.iter().position(|e| e.id == cursor) {
+        if let Some(pos) = events.iter().position(|e| e.id() == cursor) {
             events[pos + 1..].to_vec()
         } else {
             // Cursor not found, return all events
@@ -360,8 +328,8 @@ impl ChannelManager {
         let broadcaster = self.get_or_create_channel(channel_id);
         info!(
             channel_id = %channel_id,
-            event_id = %event.id,
-            event_type = %event.ty,
+            event_id = %event.id(),
+            event_type = %event.event_type(),
             subscribers = %broadcaster.subscriber_count(),
             "Publishing event to channel"
         );
@@ -479,7 +447,7 @@ pub async fn publish_attachment_handler(
     }
 
     // Attachments always create a JWT receipt and emit transaction:completed
-    let (event_type, event_data) = {
+    let event = {
         info!(
             channel_id = %channel_id,
             has_jwt_key_pair = manager.jwt_key_pair.is_some(),
@@ -568,16 +536,15 @@ pub async fn publish_attachment_handler(
                                     "Created payment receipt JWT, emitting transaction:completed"
                                 );
                                 // Emit transaction:completed with only the receipt
-                                (
-                                    event_types::TRANSACTION_COMPLETED.to_string(),
-                                    serde_json::json!({ "receipt": jwt }),
-                                )
+                                ChannelEvent::transaction_completed(TransactionCompletedData {
+                                    receipt: jwt,
+                                })
                             }
                             Err(e) => {
                                 error!("Failed to sign JWT for channel {}: {}", channel_id, e);
                                 // Fall back to transaction:attach with raw data
-                                (
-                                    event_types::TRANSACTION_ATTACH.to_string(),
+                                ChannelEvent::custom(
+                                    event_types::TRANSACTION_ATTACH,
                                     request.data.clone(),
                                 )
                             }
@@ -586,10 +553,7 @@ pub async fn publish_attachment_handler(
                     Ok(None) => {
                         warn!(channel_id = %channel_id, "No transaction found for channel");
                         // Fall back to transaction:attach with raw data
-                        (
-                            event_types::TRANSACTION_ATTACH.to_string(),
-                            request.data.clone(),
-                        )
+                        ChannelEvent::custom(event_types::TRANSACTION_ATTACH, request.data.clone())
                     }
                     Err(e) => {
                         error!(
@@ -597,32 +561,25 @@ pub async fn publish_attachment_handler(
                             channel_id, e
                         );
                         // Fall back to transaction:attach with raw data
-                        (
-                            event_types::TRANSACTION_ATTACH.to_string(),
-                            request.data.clone(),
-                        )
+                        ChannelEvent::custom(event_types::TRANSACTION_ATTACH, request.data.clone())
                     }
                 }
             }
             _ => {
                 warn!("Cannot create receipt JWT: missing key_pair, db_manager, or context");
                 // Fall back to transaction:attach with raw data
-                (
-                    event_types::TRANSACTION_ATTACH.to_string(),
-                    request.data.clone(),
-                )
+                ChannelEvent::custom(event_types::TRANSACTION_ATTACH, request.data.clone())
             }
         }
     };
 
-    // Create and publish event
-    let event = ChannelEvent::new(event_type, event_data);
+    // Clone for response
     let event_response = event.clone();
 
     info!(
         channel_id = %channel_id,
-        event_id = %event.id,
-        event_type = %event.ty,
+        event_id = %event.id(),
+        event_type = %event.event_type(),
         "Publishing event via HTTP"
     );
 
@@ -662,7 +619,7 @@ fn create_channel_sse_stream(
     let stream = async_stream::stream! {
         // First, replay historical events
         for event in replay_events {
-            let event_id = event.id.clone();
+            let event_id = event.id().to_string();
             let json = serde_json::to_string(&event).unwrap_or_default();
             yield Ok(SseEvent::default()
                 .id(event_id.clone())
@@ -680,7 +637,7 @@ fn create_channel_sse_stream(
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    let event_id = event.id.clone();
+                    let event_id = event.id().to_string();
                     let json = serde_json::to_string(&event).unwrap_or_default();
                     yield Ok(SseEvent::default()
                         .id(event_id.clone())
@@ -776,10 +733,21 @@ mod tests {
 
     #[test]
     fn test_channel_event_creation() {
-        let event = ChannelEvent::new("payment:settled", serde_json::json!({"amount": 1000}));
-        assert!(!event.id.is_empty());
-        assert_eq!(event.ty, "payment:settled");
-        assert_eq!(event.data["amount"], 1000);
+        // Test typed event
+        let event = ChannelEvent::payment_settled(PaymentSettledData {
+            payer: "wallet123".to_string(),
+            amount: "1000".to_string(),
+            currency: "USDC".to_string(),
+            network: "solana".to_string(),
+            transaction_signature: None,
+            product_id: None,
+        });
+        assert!(!event.id().is_empty());
+        assert_eq!(event.event_type(), "payment:settled");
+
+        // Test custom event
+        let custom = ChannelEvent::custom("test:custom", serde_json::json!({"amount": 1000}));
+        assert_eq!(custom.event_type(), "test:custom");
     }
 
     #[test]
@@ -791,13 +759,13 @@ mod tests {
         let (mut rx, _, _) = manager.subscribe(channel_id);
 
         // Publish event
-        let event = ChannelEvent::new("test", serde_json::json!({"hello": "world"}));
-        let event_id = event.id.clone();
+        let event = ChannelEvent::custom("test", serde_json::json!({"hello": "world"}));
+        let event_id = event.id().to_string();
         manager.publish(channel_id, event);
 
         // Should receive event
         let received = rx.try_recv().expect("Should receive event");
-        assert_eq!(received.id, event_id);
+        assert_eq!(received.id(), event_id);
     }
 
     #[test]
@@ -807,15 +775,19 @@ mod tests {
 
         // Publish events before subscribing
         for i in 0..5 {
-            let event = ChannelEvent::new("test", serde_json::json!({"index": i}));
+            let event = ChannelEvent::custom("test", serde_json::json!({"index": i}));
             manager.publish(channel_id, event);
         }
 
         // Get replay (last 3)
         let replay = manager.get_replay_events(channel_id, 3);
         assert_eq!(replay.len(), 3);
-        assert_eq!(replay[0].data["index"], 2);
-        assert_eq!(replay[2].data["index"], 4);
+
+        // Verify using JSON serialization since we can't directly access data
+        let json0 = serde_json::to_value(&replay[0]).unwrap();
+        let json2 = serde_json::to_value(&replay[2]).unwrap();
+        assert_eq!(json0["data"]["index"], 2);
+        assert_eq!(json2["data"]["index"], 4);
     }
 
     #[test]

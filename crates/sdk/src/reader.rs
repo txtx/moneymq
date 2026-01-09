@@ -212,8 +212,8 @@ impl EventReader {
                                     Ok(channel_event) => {
                                         debug!(
                                             channel_id = %channel_id,
-                                            event_id = %channel_event.id,
-                                            event_type = %channel_event.event_type,
+                                            event_id = %channel_event.id(),
+                                            event_type = %channel_event.event_type(),
                                             "Received event"
                                         );
                                         // Broadcast to subscribers

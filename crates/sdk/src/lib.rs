@@ -99,6 +99,7 @@ pub use error::{ProcessorError, Result};
 pub use processor::{Processor, ProcessorConfig, TransactionContext};
 pub use reader::EventReader;
 pub use types::{
-    ChannelConfig, ChannelEvent, ConnectionState, PaymentFailed, PaymentSettled, PaymentVerified,
-    Transaction, event_types,
+    ChannelConfig, ChannelEvent, ConnectionState, PaymentFailed, PaymentFailedData, PaymentSettled,
+    PaymentSettledData, PaymentVerified, PaymentVerifiedData, Transaction,
+    TransactionCompletedData, event_types,
 };

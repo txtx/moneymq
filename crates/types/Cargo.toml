@@ -24,6 +24,7 @@ solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true }
 spl-token-interface = { workspace = true }
 thiserror = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
 
 [features]
 default = []

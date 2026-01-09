@@ -14,7 +14,7 @@ use crate::{
     api::payment::{
         PaymentApiConfig,
         endpoints::{
-            channels::{ChannelEvent, event_types},
+            channels::{ChannelEvent, PaymentFailedData, PaymentSettledData},
             serialize_to_base64,
         },
         networks,
@@ -232,25 +232,23 @@ pub async fn handler(
 
             // Emit payment:settled first - this notifies processors
             // The processor will send transaction:attach, which triggers transaction:completed with attachments
-            let settled_event_data = serde_json::json!({
-                "payer": response.payer.to_string(),
-                "amount": request.payment_requirements.max_amount_required.0,
-                "currency": currency,
-                "network": format!("{:?}", request.payment_requirements.network),
-                "transactionSignature": signature,
-                "productId": product_id,
+            let settled_event = ChannelEvent::payment_settled(PaymentSettledData {
+                payer: response.payer.to_string(),
+                amount: request.payment_requirements.max_amount_required.0.clone(),
+                currency: currency.clone(),
+                network: format!("{:?}", request.payment_requirements.network),
+                transaction_signature: signature.clone(),
+                product_id: product_id.clone(),
             });
-            let settled_event = ChannelEvent::new(event_types::PAYMENT_SETTLED, settled_event_data);
             channel_manager.publish(tx_id, settled_event);
         } else {
-            let event_data = serde_json::json!({
-                "payer": response.payer.to_string(),
-                "amount": request.payment_requirements.max_amount_required.0,
-                "network": format!("{:?}", request.payment_requirements.network),
-                "reason": response.error_reason.as_ref().map(|r| format!("{:?}", r)),
-                "productId": product_id,
+            let channel_event = ChannelEvent::payment_failed(PaymentFailedData {
+                payer: Some(response.payer.to_string()),
+                amount: request.payment_requirements.max_amount_required.0.clone(),
+                network: format!("{:?}", request.payment_requirements.network),
+                reason: response.error_reason.as_ref().map(|r| format!("{:?}", r)),
+                product_id: product_id.clone(),
             });
-            let channel_event = ChannelEvent::new(event_types::PAYMENT_FAILED, event_data);
             channel_manager.publish(tx_id, channel_event);
         }
     }

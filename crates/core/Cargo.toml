@@ -21,7 +21,8 @@ hiro-system-kit = { version = "0.3.4", default-features = false, features = [
     "tokio_helpers",
 ] }
 indexmap = { version = "2.12.0", features = ["serde"] }
-kora-lib = { git = "https://github.com/solana-foundation/kora.git", branch = "main" }
+# Pin to specific commit for API stability
+kora-lib = { git = "https://github.com/solana-foundation/kora.git", rev = "2632c24b8a4bccf449410c3e2b04f9263cd2b3be" }
 moneymq-types = { path = "../types" }
 reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 serde = { workspace = true, features = ["derive"] }

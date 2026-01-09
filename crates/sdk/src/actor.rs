@@ -193,10 +193,7 @@ impl EventActor {
     /// and emits a `transaction:completed` event to all listeners.
     ///
     /// Returns the created event with its ID and timestamp.
-    pub async fn attach<T: Serialize>(
-        &self,
-        data: T,
-    ) -> Result<ChannelEvent<serde_json::Value>> {
+    pub async fn attach<T: Serialize>(&self, data: T) -> Result<ChannelEvent> {
         let secret = self.config.secret.as_ref().ok_or_else(|| {
             ProcessorError::Authentication("Secret key required to attach data".to_string())
         })?;
@@ -220,12 +217,12 @@ impl EventActor {
         }
 
         // Parse the response as ChannelEvent
-        let event: ChannelEvent<serde_json::Value> = response.json().await?;
+        let event: ChannelEvent = response.json().await?;
 
         info!(
             channel_id = %self.channel_id,
-            event_id = %event.id,
-            event_type = %event.event_type,
+            event_id = %event.id(),
+            event_type = %event.event_type(),
             "Data attached successfully"
         );
 
@@ -286,8 +283,8 @@ impl EventActor {
                                     Ok(channel_event) => {
                                         debug!(
                                             channel_id = %channel_id,
-                                            event_id = %channel_event.id,
-                                            event_type = %channel_event.event_type,
+                                            event_id = %channel_event.id(),
+                                            event_type = %channel_event.event_type(),
                                             "Actor received event"
                                         );
                                         // Broadcast to subscribers

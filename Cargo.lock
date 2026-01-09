@@ -4209,7 +4209,7 @@ dependencies = [
 [[package]]
 name = "kora-lib"
 version = "2.0.1"
-source = "git+https://github.com/solana-foundation/kora.git?branch=main#2632c24b8a4bccf449410c3e2b04f9263cd2b3be"
+source = "git+https://github.com/solana-foundation/kora.git?rev=2632c24b8a4bccf449410c3e2b04f9263cd2b3be#2632c24b8a4bccf449410c3e2b04f9263cd2b3be"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -5063,6 +5063,7 @@ dependencies = [
  "spl-token-interface",
  "thiserror 2.0.17",
  "url 2.5.7",
+ "uuid",
 ]
 
 [[package]]
