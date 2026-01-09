@@ -187,6 +187,7 @@ pub fn create_routes() -> Router {
             "/admin/transactions",
             get(endpoints::admin::list_transactions),
         )
+        .route("/events", get(endpoints::events::handler))
 }
 
 /// Create the facilitator router with state and optional channel manager.

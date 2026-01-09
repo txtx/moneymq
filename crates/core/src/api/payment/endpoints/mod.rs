@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub mod admin;
 pub mod channels;
 pub mod config;
+pub mod events;
 pub mod health;
 pub mod jwt;
 pub mod settle;
