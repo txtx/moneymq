@@ -178,6 +178,7 @@ async fn jwks_handler(
 pub fn create_routes() -> Router {
     Router::new()
         .route("/health", get(endpoints::health::handler))
+        .route("/config", get(endpoints::config::handler))
         .route("/verify", post(endpoints::verify::handler))
         .route("/settle", post(endpoints::settle::handler))
         .route("/supported", get(endpoints::supported::handler))
