@@ -89,7 +89,7 @@ impl PaymentReceiptClaims {
             vec![BasketItem {
                 product_id: pid,
                 experiment_id: None,
-                features: features.unwrap_or(serde_json::Value::default()),
+                features: features.unwrap_or_default(),
                 quantity: 1,
             }]
         } else {
@@ -274,7 +274,7 @@ impl JwtKeyPair {
 
         // Convert signature to JWS format (r || s, each 32 bytes)
         let sig_bytes = signature.to_bytes();
-        let signature_b64 = URL_SAFE_NO_PAD.encode(&sig_bytes);
+        let signature_b64 = URL_SAFE_NO_PAD.encode(sig_bytes);
 
         Ok(format!("{}.{}", signing_input, signature_b64))
     }

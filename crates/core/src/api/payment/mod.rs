@@ -162,12 +162,21 @@ async fn jwks_handler(
     axum::response::Json(jwks)
 }
 
-/// Create the facilitator router
-pub fn create_router(state: PaymentApiConfig) -> Router {
-    let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any);
-    let channel_manager = state.channel_manager.clone();
-
-    let mut router = Router::new()
+/// Create payment routes without state layer.
+///
+/// This is useful when state is injected by middleware per-request (e.g., multi-tenant setups).
+/// The routes expect `Extension<PaymentApiConfig>` to be present in the request.
+///
+/// # Example
+/// ```ignore
+/// let routes = payment::create_routes();
+/// let app = Router::new()
+///     .nest("/payment/v1", routes.clone())
+///     .nest("/payment/v1/sandbox", routes)
+///     .layer(middleware_that_injects_state);
+/// ```
+pub fn create_routes() -> Router {
+    Router::new()
         .route("/health", get(endpoints::health::handler))
         .route("/verify", post(endpoints::verify::handler))
         .route("/settle", post(endpoints::settle::handler))
@@ -177,7 +186,17 @@ pub fn create_router(state: PaymentApiConfig) -> Router {
             "/admin/transactions",
             get(endpoints::admin::list_transactions),
         )
-        .layer(Extension(state));
+}
+
+/// Create the facilitator router with state and optional channel manager.
+///
+/// This version applies the state as an Extension layer and is suitable for
+/// single-tenant or standalone deployments.
+pub fn create_router(state: PaymentApiConfig) -> Router {
+    let cors_layer = CorsLayer::new().allow_origin(Any).allow_methods(Any);
+    let channel_manager = state.channel_manager.clone();
+
+    let mut router = create_routes().layer(Extension(state));
 
     // Add channel routes if manager is configured
     if let Some(manager) = channel_manager {

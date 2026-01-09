@@ -127,7 +127,7 @@ pub async fn list_products(
                 };
                 external_id.map(|id| id == &p.id).unwrap_or(false) || prod.id == p.id
             })
-            .map(|prod| get_min_price(prod))
+            .map(get_min_price)
             .unwrap_or(i64::MAX)
     });
 

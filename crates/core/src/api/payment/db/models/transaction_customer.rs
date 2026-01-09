@@ -5,17 +5,6 @@ use tracing::debug;
 
 use crate::api::payment::db::{PooledConnection, schema::*};
 
-pub fn find_customer_by_address(
-    conn: &mut PooledConnection,
-    address: &str,
-) -> QueryResult<Option<i32>> {
-    transaction_customers::table
-        .filter(transaction_customers::address.eq(address))
-        .select(transaction_customers::id)
-        .first::<i32>(conn)
-        .optional()
-}
-
 #[derive(Debug, Queryable, Identifiable, Serialize, Deserialize)]
 #[diesel(table_name = transaction_customers)]
 pub struct TransactionCustomerModel {

@@ -77,21 +77,33 @@ impl CatalogState {
     }
 }
 
-/// Create the catalog router with all catalog-related routes
-pub fn create_router(state: CatalogState) -> Router<()> {
+/// Create catalog routes without state layer.
+///
+/// This is useful when state is injected by middleware per-request (e.g., multi-tenant setups).
+/// The routes expect `Extension<CatalogState>` to be present in the request.
+///
+/// # Example
+/// ```ignore
+/// let routes = catalog::create_routes();
+/// let app = Router::new()
+///     .nest("/catalog/v1", routes.clone())
+///     .nest("/catalog/v1/sandbox", routes)
+///     .layer(middleware_that_injects_state);
+/// ```
+pub fn create_routes() -> Router<()> {
     Router::new()
         // Product endpoints
         .route("/products", get(stripe::list_products))
         .route(
             "/products/{id}/access",
-            x402_get(stripe::get_product_access, Some(state.clone())),
+            x402_get(stripe::get_product_access, None),
         )
         .route("/prices", get(stripe::list_prices))
         // Billing endpoints
         .route("/billing/meters", get(stripe::list_meters))
         .route(
             "/billing/meter_events",
-            x402_post(stripe::create_meter_event, Some(state.clone())),
+            x402_post(stripe::create_meter_event, None),
         )
         // Customer endpoints
         .route("/customers", post(stripe::create_customer))
@@ -110,7 +122,7 @@ pub fn create_router(state: CatalogState) -> Router<()> {
         )
         .route(
             "/payment_intents/{id}/confirm",
-            x402_post(stripe::confirm_payment_intent, Some(state.clone())),
+            x402_post(stripe::confirm_payment_intent, None),
         )
         .route(
             "/payment_intents/{id}/cancel",
@@ -119,7 +131,7 @@ pub fn create_router(state: CatalogState) -> Router<()> {
         // Subscription endpoints
         .route(
             "/subscriptions",
-            x402_post(stripe::create_subscription, Some(state.clone())),
+            x402_post(stripe::create_subscription, None),
         )
         // Checkout session endpoints (Stripe Checkout API)
         .route("/checkout/sessions", post(stripe::create_checkout_session))
@@ -135,7 +147,14 @@ pub fn create_router(state: CatalogState) -> Router<()> {
             "/checkout/sessions/{id}/expire",
             post(stripe::expire_checkout_session),
         )
-        .layer(Extension(state))
+}
+
+/// Create the catalog router with all catalog-related routes and state.
+///
+/// This version applies the state as an Extension layer and is suitable for
+/// single-tenant or standalone deployments.
+pub fn create_router(state: CatalogState) -> Router<()> {
+    create_routes().layer(Extension(state))
 }
 
 /// Health check endpoint

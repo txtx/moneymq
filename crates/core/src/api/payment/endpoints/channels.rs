@@ -370,12 +370,11 @@ impl ChannelManager {
     /// Extract token from Authorization header or query param
     pub fn extract_token(headers: &HeaderMap, query_token: Option<&str>) -> Option<String> {
         // Try Authorization header first
-        if let Some(auth) = headers.get("authorization") {
-            if let Ok(auth_str) = auth.to_str() {
-                if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                    return Some(token.to_string());
-                }
-            }
+        if let Some(auth) = headers.get("authorization")
+            && let Ok(auth_str) = auth.to_str()
+            && let Some(token) = auth_str.strip_prefix("Bearer ")
+        {
+            return Some(token.to_string());
         }
         // Fall back to query param
         query_token.map(|t| t.to_string())
