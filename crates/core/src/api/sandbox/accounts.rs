@@ -1,8 +1,8 @@
-//! Sandbox accounts endpoint
+//! Sandbox actors endpoint
 
 use axum::{Extension, Json};
 use moneymq_types::{
-    AccountRole, Keychain,
+    ActorRole, Keychain,
     x402::{
         LocalManagedRecipient, MixedAddress, MoneyMqManagedRecipient, Recipient,
         RemoteManagedRecipient,
@@ -14,20 +14,20 @@ use solana_pubkey::Pubkey;
 
 use crate::api::{payment::PaymentApiConfig, sandbox::NetworksConfig};
 
-/// GET /sandbox/accounts - List local network accounts and operators
+/// GET /accounts - List local network actors and operators
 pub async fn list_accounts(
     Extension(payment_config): Extension<PaymentApiConfig>,
     Extension(networks_config): Extension<NetworksConfig>,
 ) -> Result<Json<Value>, Json<Value>> {
-    let accounts_config = &payment_config.accounts;
+    let actors_config = &payment_config.actors;
 
     let mut res = json!({});
 
-    // Add operator accounts from AccountsConfig
-    let operators: Vec<Value> = accounts_config
+    // Add operator actors from ActorsConfig
+    let operators: Vec<Value> = actors_config
         .iter()
-        .filter_map(|(id, account)| {
-            if let AccountRole::Operator(op) = &account.role {
+        .filter_map(|(id, actor)| {
+            if let ActorRole::Operator(op) = &actor.role {
                 let secret = match &op.keychain {
                     Keychain::Base58(base58) => Some(base58.secret.clone()),
                     Keychain::Turnkey(_) => None,
@@ -41,7 +41,7 @@ pub async fn list_accounts(
 
                 Some(json!({
                     "id": id,
-                    "name": account.name,
+                    "name": actor.name,
                     "address": address,
                     "secretKey": secret,
                     "role": "operator",

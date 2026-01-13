@@ -28,8 +28,6 @@ use axum::{
     Extension, Router,
     routing::{get, post},
 };
-use cloudevents::Event;
-use crossbeam_channel::Sender;
 use kora_lib::{
     Config,
     config::{FeePayerPolicy, KoraConfig, MetricsConfig, Token2022Config, ValidationConfig},
@@ -66,7 +64,6 @@ pub struct PaymentApiConfig {
     pub signer_pool: Arc<SignerPool>,
     pub payment_stack_id: String,
     pub is_sandbox: bool,
-    pub event_sender: Option<Sender<Event>>,
     /// Channel manager for pub/sub event streaming
     pub channel_manager: Option<Arc<endpoints::channels::ChannelManager>>,
     /// JWT key pair for signing payment receipts (ES256)
@@ -80,7 +77,7 @@ pub struct PaymentApiConfig {
     /// Stack/merchant image URL for branding
     pub stack_image_url: Option<String>,
     /// Sandbox operator accounts
-    pub accounts: Arc<moneymq_types::AccountsConfig>,
+    pub actors: Arc<moneymq_types::ActorsConfig>,
 }
 
 impl PaymentApiConfig {
@@ -107,14 +104,13 @@ impl PaymentApiConfig {
             signer_pool: Arc::new(signer_pool),
             payment_stack_id,
             is_sandbox: true, // Local mode defaults to sandbox
-            event_sender: None,
             channel_manager: None,
             jwt_key_pair: None,
             payout_recipient_address: None,
             facilitator_address: None,
             stack_name: None,
             stack_image_url: None,
-            accounts: Arc::new(indexmap::IndexMap::new()),
+            actors: Arc::new(indexmap::IndexMap::new()),
         }
     }
 
@@ -135,21 +131,14 @@ impl PaymentApiConfig {
             signer_pool: Arc::new(signer_pool),
             payment_stack_id,
             is_sandbox,
-            event_sender: None,
             channel_manager: None,
             jwt_key_pair: None,
             payout_recipient_address: None,
             facilitator_address: None,
             stack_name: None,
             stack_image_url: None,
-            accounts: Arc::new(indexmap::IndexMap::new()),
+            actors: Arc::new(indexmap::IndexMap::new()),
         }
-    }
-
-    /// Set the event sender for CloudEvents
-    pub fn with_event_sender(mut self, sender: Sender<Event>) -> Self {
-        self.event_sender = Some(sender);
-        self
     }
 
     /// Set the channel manager for pub/sub event streaming
@@ -187,9 +176,16 @@ impl PaymentApiConfig {
         self
     }
 
-    /// Set the sandbox accounts
-    pub fn with_accounts(mut self, accounts: moneymq_types::AccountsConfig) -> Self {
-        self.accounts = Arc::new(accounts);
+    /// Set the sandbox actors
+    pub fn with_actors(mut self, actors: moneymq_types::ActorsConfig) -> Self {
+        self.actors = Arc::new(actors);
+        self
+    }
+
+    /// Backwards compatibility alias
+    #[deprecated(since = "0.2.0", note = "Use with_actors instead")]
+    pub fn with_accounts(mut self, accounts: moneymq_types::ActorsConfig) -> Self {
+        self.actors = Arc::new(accounts);
         self
     }
 }

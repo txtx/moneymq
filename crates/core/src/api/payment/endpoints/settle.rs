@@ -5,7 +5,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use moneymq_types::x402::{FacilitatorErrorReason, Network, SettleRequest, SettleResponse};
+use cloudevents::AttributesReader;
+use moneymq_types::{
+    defaults,
+    x402::{FacilitatorErrorReason, Network, SettleRequest, SettleResponse},
+};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{error, info};
@@ -14,14 +18,20 @@ use crate::{
     api::payment::{
         PaymentApiConfig,
         endpoints::{
-            channels::{ChannelEvent, PaymentFailedData, PaymentSettledData},
+            channels::{
+                ChannelEvent, PaymentFailedData, PaymentSettledData,
+                TransactionCompletedData as ChannelTransactionCompletedData,
+            },
+            jwt::PaymentReceiptClaims,
             serialize_to_base64,
         },
         networks,
     },
     events::{
-        PaymentFlow, PaymentSettlementFailedData, PaymentSettlementSucceededData,
+        CloudEventEnvelope, PaymentFlow, PaymentSettlementFailedData,
+        PaymentSettlementSucceededData, TransactionCompletedData,
         create_payment_settlement_failed_event, create_payment_settlement_succeeded_event,
+        create_transaction_completed_event,
     },
 };
 
@@ -185,35 +195,59 @@ pub async fn handler(
         .map(|s| s.to_string());
 
     // Emit CloudEvent for settlement result (legacy event stream)
-    if let Some(ref sender) = state.event_sender {
-        let event = if response.success {
-            let event_data = PaymentSettlementSucceededData {
-                payer: response.payer.to_string(),
-                amount: request.payment_requirements.max_amount_required.0.clone(),
-                network: format!("{:?}", request.payment_requirements.network),
-                transaction_signature: signature.clone(),
-                product_id: product_id.clone(),
-                payment_flow: PaymentFlow::X402,
-                transaction_id: transaction_id.clone(),
-            };
-            create_payment_settlement_succeeded_event(event_data)
-        } else {
-            let event_data = PaymentSettlementFailedData {
-                payer: Some(response.payer.to_string()),
-                amount: request.payment_requirements.max_amount_required.0.clone(),
-                network: format!("{:?}", request.payment_requirements.network),
-                reason: response
-                    .error_reason
-                    .as_ref()
-                    .map(|r| format!("{:?}", r))
-                    .unwrap_or_else(|| "Unknown error".to_string()),
-                product_id: product_id.clone(),
-                payment_flow: PaymentFlow::X402,
-            };
-            create_payment_settlement_failed_event(event_data)
+    // Create the event regardless of sender availability - we'll also persist to DB
+    let event = if response.success {
+        let event_data = PaymentSettlementSucceededData {
+            payer: response.payer.to_string(),
+            amount: request.payment_requirements.max_amount_required.0.clone(),
+            network: format!("{:?}", request.payment_requirements.network),
+            transaction_signature: signature.clone(),
+            product_id: product_id.clone(),
+            payment_flow: PaymentFlow::X402,
+            transaction_id: transaction_id.clone(),
         };
-        if let Err(e) = sender.send(event) {
-            error!("Failed to send settlement event: {}", e);
+        create_payment_settlement_succeeded_event(event_data)
+    } else {
+        let event_data = PaymentSettlementFailedData {
+            payer: Some(response.payer.to_string()),
+            amount: request.payment_requirements.max_amount_required.0.clone(),
+            network: format!("{:?}", request.payment_requirements.network),
+            reason: response
+                .error_reason
+                .as_ref()
+                .map(|r| format!("{:?}", r))
+                .unwrap_or_else(|| "Unknown error".to_string()),
+            product_id: product_id.clone(),
+            payment_flow: PaymentFlow::X402,
+        };
+        create_payment_settlement_failed_event(event_data)
+    };
+
+    // Persist CloudEvent directly to DB for SSE replay
+    // We no longer use in-memory broadcast - events are delivered via DB polling
+    if let Some(envelope) = CloudEventEnvelope::from_sdk_event(&event) {
+        if let Ok(json_str) = serde_json::to_string(&envelope) {
+            let event_time = event
+                .time()
+                .map(|t| t.timestamp_millis())
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+            if let Err(e) = state.db_manager.insert_cloud_event(
+                envelope.id.clone(),
+                envelope.ty.clone(),
+                envelope.source.clone(),
+                event_time,
+                json_str,
+                &state.payment_stack_id,
+                state.is_sandbox,
+            ) {
+                error!("Failed to persist settlement CloudEvent to DB: {}", e);
+            } else {
+                info!(
+                    event_id = %envelope.id,
+                    event_type = %envelope.ty,
+                    "Settlement CloudEvent persisted to DB"
+                );
+            }
         }
     }
 
@@ -245,6 +279,92 @@ pub async fn handler(
             // Also publish to the recipient's channel so payout dashboards can track balance updates
             if let Some(recipient_address) = &state.payout_recipient_address {
                 channel_manager.publish(recipient_address, settled_event);
+            }
+
+            // If no hooks are subscribed, automatically send transaction:completed
+            // This allows checkout flows to complete without requiring a backend processor
+            if !channel_manager.has_hook_subscribers() {
+                info!(
+                    tx_id = %tx_id,
+                    "No hook subscribers, auto-completing transaction"
+                );
+
+                // Create a basic receipt JWT without processor attachments
+                if let Some(ref jwt_key_pair) = state.jwt_key_pair {
+                    let claims = PaymentReceiptClaims::new(
+                        tx_id.clone(),
+                        response.payer.to_string(),
+                        request.payment_requirements.max_amount_required.0.clone(),
+                        currency.clone(),
+                        format!("{:?}", request.payment_requirements.network),
+                        Some(product_id.clone().unwrap_or_default()),
+                        None, // features
+                        Some(signature.clone().unwrap_or_default()),
+                        state.payment_stack_id.clone(),
+                        defaults::JWT_EXPIRATION_HOURS,
+                    );
+
+                    match jwt_key_pair.sign(&claims) {
+                        Ok(jwt) => {
+                            // Emit transaction:completed CloudEvent to DB for SSE polling
+                            let completed_event_data = TransactionCompletedData {
+                                transaction_id: tx_id.clone(),
+                                receipt: jwt.clone(),
+                                payer: response.payer.to_string(),
+                                amount: request.payment_requirements.max_amount_required.0.clone(),
+                                currency: currency.clone(),
+                                network: format!("{:?}", request.payment_requirements.network),
+                                transaction_signature: signature.clone(),
+                                product_id: product_id.clone(),
+                            };
+                            let completed_cloud_event =
+                                create_transaction_completed_event(completed_event_data);
+
+                            // Persist to DB for SSE replay
+                            if let Some(envelope) =
+                                CloudEventEnvelope::from_sdk_event(&completed_cloud_event)
+                            {
+                                if let Ok(json_str) = serde_json::to_string(&envelope) {
+                                    let event_time = completed_cloud_event
+                                        .time()
+                                        .map(|t| t.timestamp_millis())
+                                        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+                                    if let Err(e) = state.db_manager.insert_cloud_event(
+                                        envelope.id.clone(),
+                                        envelope.ty.clone(),
+                                        envelope.source.clone(),
+                                        event_time,
+                                        json_str,
+                                        &state.payment_stack_id,
+                                        state.is_sandbox,
+                                    ) {
+                                        error!(
+                                            "Failed to persist transaction:completed CloudEvent to DB: {}",
+                                            e
+                                        );
+                                    } else {
+                                        info!(
+                                            event_id = %envelope.id,
+                                            tx_id = %tx_id,
+                                            "Transaction completed CloudEvent persisted to DB"
+                                        );
+                                    }
+                                }
+                            }
+
+                            // Also publish via channel for backwards compatibility
+                            let channel_completed_event = ChannelEvent::transaction_completed(
+                                ChannelTransactionCompletedData { receipt: jwt },
+                            );
+                            channel_manager.publish(tx_id, channel_completed_event);
+                        }
+                        Err(e) => {
+                            error!("Failed to sign auto-complete receipt JWT: {}", e);
+                        }
+                    }
+                } else {
+                    info!("No JWT key pair configured, skipping auto-complete receipt");
+                }
             }
         } else {
             let channel_event = ChannelEvent::payment_failed(PaymentFailedData {

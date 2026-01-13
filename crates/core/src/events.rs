@@ -79,6 +79,30 @@ pub struct PaymentSettlementFailedData {
     pub payment_flow: PaymentFlow,
 }
 
+/// Data payload for transaction completed event
+/// This is emitted when a transaction is fully complete (settled and all attachments received)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransactionCompletedData {
+    /// Transaction ID (payment_hash)
+    pub transaction_id: String,
+    /// JWT receipt token containing payment claims
+    pub receipt: String,
+    /// Payer address/wallet
+    pub payer: String,
+    /// Payment amount as string
+    pub amount: String,
+    /// Currency code
+    pub currency: String,
+    /// Network name
+    pub network: String,
+    /// Transaction signature on-chain
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_signature: Option<String>,
+    /// Product ID if applicable
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub product_id: Option<String>,
+}
+
 /// Enum of all possible CloudEvent types emitted by MoneyMQ
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
@@ -91,6 +115,8 @@ pub enum CloudEvent {
     PaymentSettlementSucceeded(PaymentSettlementSucceededData),
     #[serde(rename = "mq.money.payment.settlement.failed")]
     PaymentSettlementFailed(PaymentSettlementFailedData),
+    #[serde(rename = "mq.money.transaction.completed")]
+    TransactionCompleted(TransactionCompletedData),
 }
 
 impl CloudEvent {
@@ -103,6 +129,7 @@ impl CloudEvent {
             CloudEvent::PaymentVerificationFailed(_) => "mq.money.payment.verification.failed",
             CloudEvent::PaymentSettlementSucceeded(_) => "mq.money.payment.settlement.succeeded",
             CloudEvent::PaymentSettlementFailed(_) => "mq.money.payment.settlement.failed",
+            CloudEvent::TransactionCompleted(_) => "mq.money.transaction.completed",
         }
     }
 
@@ -113,6 +140,7 @@ impl CloudEvent {
             CloudEvent::PaymentVerificationFailed(_) => "moneymq/payment/verify",
             CloudEvent::PaymentSettlementSucceeded(_) => "moneymq/payment/settle",
             CloudEvent::PaymentSettlementFailed(_) => "moneymq/payment/settle",
+            CloudEvent::TransactionCompleted(_) => "moneymq/transaction/complete",
         }
     }
 
@@ -123,6 +151,7 @@ impl CloudEvent {
             CloudEvent::PaymentVerificationFailed(_) => "payment.verification.failed",
             CloudEvent::PaymentSettlementSucceeded(_) => "payment.settlement.succeeded",
             CloudEvent::PaymentSettlementFailed(_) => "payment.settlement.failed",
+            CloudEvent::TransactionCompleted(_) => "transaction.completed",
         }
     }
 }
@@ -269,6 +298,9 @@ pub fn create_event(data: CloudEvent) -> Event {
         CloudEvent::PaymentSettlementFailed(d) => {
             serde_json::to_value(d).expect("Failed to serialize event data")
         }
+        CloudEvent::TransactionCompleted(d) => {
+            serde_json::to_value(d).expect("Failed to serialize event data")
+        }
     };
 
     EventBuilderV10::new()
@@ -301,6 +333,11 @@ pub fn create_payment_settlement_succeeded_event(data: PaymentSettlementSucceede
 /// Convenience function to create a payment settlement failed event
 pub fn create_payment_settlement_failed_event(data: PaymentSettlementFailedData) -> Event {
     create_event(CloudEvent::PaymentSettlementFailed(data))
+}
+
+/// Convenience function to create a transaction completed event
+pub fn create_transaction_completed_event(data: TransactionCompletedData) -> Event {
+    create_event(CloudEvent::TransactionCompleted(data))
 }
 
 /// Creates a new channel pair for CloudEvents (used by sync code to send events)

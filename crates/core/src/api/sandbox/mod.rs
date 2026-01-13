@@ -7,7 +7,7 @@
 
 use indexmap::IndexMap;
 use moneymq_types::{
-    AccountConfig, AccountRole, AccountsConfig, Base58Keychain, Keychain, OperatorRole,
+    ActorConfig, ActorRole, ActorsConfig, Base58Keychain, Keychain, OperatorRole,
     x402::{
         Currency, LocalManagedRecipient, MoneyMqManagedRecipient, MoneyMqNetwork, Network,
         Recipient,
@@ -36,10 +36,10 @@ pub use accounts::list_accounts;
 /// - Up to 5 operator accounts from the first 5 user accounts in the networks config
 ///
 /// Each operator account uses the user account's keypair for signing transactions.
-pub fn generate_sandbox_accounts(networks_config: &NetworksConfig) -> AccountsConfig {
-    let mut accounts = IndexMap::new();
+pub fn generate_sandbox_actors(networks_config: &NetworksConfig) -> ActorsConfig {
+    let mut actors = IndexMap::new();
 
-    // Generate the facilitator account using deterministic seed
+    // Generate the facilitator actor using deterministic seed
     let mut hasher = Sha256::new();
     hasher.update(SANDBOX_FACILITATOR_SEED.as_bytes());
     let seed = hasher.finalize();
@@ -47,23 +47,23 @@ pub fn generate_sandbox_accounts(networks_config: &NetworksConfig) -> AccountsCo
     let facilitator_keypair = Keypair::new_from_array(seed_array);
     let facilitator_secret = facilitator_keypair.to_base58_string();
 
-    let facilitator_account = AccountConfig {
+    let facilitator_actor = ActorConfig {
         id: "facilitator".to_string(),
         name: "Facilitator (fee payer)".to_string(),
-        role: AccountRole::Operator(OperatorRole {
+        role: ActorRole::Operator(OperatorRole {
             keychain: Keychain::Base58(Base58Keychain {
                 secret: facilitator_secret,
             }),
         }),
         currency_mapping: IndexMap::new(),
     };
-    accounts.insert("facilitator".to_string(), facilitator_account);
+    actors.insert("facilitator".to_string(), facilitator_actor);
 
     // Get user accounts from the first network config (typically solana surfnet)
     for (_, config) in &networks_config.configs {
         let user_accounts = config.user_accounts();
 
-        // Create operator accounts from the first 5 user accounts
+        // Create operator actors from the first 5 user accounts
         for (i, recipient) in user_accounts.iter().take(5).enumerate() {
             if let Recipient::MoneyMqManaged(MoneyMqManagedRecipient::Local(
                 LocalManagedRecipient {
@@ -82,16 +82,16 @@ pub fn generate_sandbox_accounts(networks_config: &NetworksConfig) -> AccountsCo
                 // Encode the keypair bytes as base58
                 let secret = bs58::encode(keypair_bytes).into_string();
 
-                let account = AccountConfig {
+                let actor = ActorConfig {
                     id: id.clone(),
                     name,
-                    role: AccountRole::Operator(OperatorRole {
+                    role: ActorRole::Operator(OperatorRole {
                         keychain: Keychain::Base58(Base58Keychain { secret }),
                     }),
                     currency_mapping: IndexMap::new(),
                 };
 
-                accounts.insert(id, account);
+                actors.insert(id, actor);
             }
         }
 
@@ -99,7 +99,13 @@ pub fn generate_sandbox_accounts(networks_config: &NetworksConfig) -> AccountsCo
         break;
     }
 
-    accounts
+    actors
+}
+
+/// Backwards compatibility alias
+#[deprecated(since = "0.2.0", note = "Use generate_sandbox_actors instead")]
+pub fn generate_sandbox_accounts(networks_config: &NetworksConfig) -> ActorsConfig {
+    generate_sandbox_actors(networks_config)
 }
 
 /// Initial USDC token amount for user accounts in local surfnet (2000 USDC with 6 decimals)

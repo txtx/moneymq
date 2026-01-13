@@ -5,7 +5,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Json},
 };
-use moneymq_types::x402::{FacilitatorErrorReason, Network, VerifyRequest, VerifyResponse};
+use cloudevents::AttributesReader;
+use moneymq_types::{
+    ActorsConfigExt,
+    x402::{FacilitatorErrorReason, Network, VerifyRequest, VerifyResponse},
+};
 use solana_client::nonblocking::rpc_client::RpcClient;
 use solana_commitment_config::CommitmentConfig;
 use tracing::{debug, error, info, warn};
@@ -23,8 +27,9 @@ use crate::{
         networks,
     },
     events::{
-        PaymentFlow, PaymentVerificationFailedData, PaymentVerificationSucceededData,
-        create_payment_verification_failed_event, create_payment_verification_succeeded_event,
+        CloudEventEnvelope, PaymentFlow, PaymentVerificationFailedData,
+        PaymentVerificationSucceededData, create_payment_verification_failed_event,
+        create_payment_verification_succeeded_event,
     },
 };
 
@@ -116,6 +121,40 @@ pub async fn handler(
         }
     };
 
+    // Ping hook actors on successful verification (fire-and-forget)
+    if matches!(&response, VerifyResponse::Valid { .. }) {
+        let hooks = state.actors.hooks();
+        for hook_actor in hooks {
+            if let Some(hook_role) = hook_actor.hook_role() {
+                if let Some(ping_url) = &hook_role.ping {
+                    let ping_url = ping_url.clone();
+                    let actor_id = hook_actor.id.clone();
+                    tokio::spawn(async move {
+                        let client = reqwest::Client::new();
+                        match client.get(&ping_url).send().await {
+                            Ok(resp) => {
+                                info!(
+                                    actor_id = %actor_id,
+                                    ping_url = %ping_url,
+                                    status = %resp.status(),
+                                    "Hook actor pinged successfully"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    actor_id = %actor_id,
+                                    ping_url = %ping_url,
+                                    error = %e,
+                                    "Failed to ping hook actor"
+                                );
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    }
+
     let verify_request_base64 = serialize_to_base64(&request);
     let verify_response_base64 = serialize_to_base64(&response);
     let payment_requirement_base64 = serialize_to_base64(&request.payment_requirements);
@@ -166,33 +205,55 @@ pub async fn handler(
         warn!("Verify: No extra context in payment requirements");
     }
 
-    // Emit CloudEvent for verification result (legacy event stream)
-    if let Some(ref sender) = state.event_sender {
-        let event = match &response {
-            VerifyResponse::Valid { payer } => {
-                let event_data = PaymentVerificationSucceededData {
-                    payer: payer.to_string(),
-                    amount: request.payment_requirements.max_amount_required.0.clone(),
-                    network: format!("{:?}", request.payment_requirements.network),
-                    product_id: product_id.clone(),
-                    payment_flow: PaymentFlow::X402,
-                };
-                create_payment_verification_succeeded_event(event_data)
+    // Persist CloudEvent directly to DB for SSE replay
+    // We no longer use in-memory broadcast - events are delivered via DB polling
+    let event = match &response {
+        VerifyResponse::Valid { payer } => {
+            let event_data = PaymentVerificationSucceededData {
+                payer: payer.to_string(),
+                amount: request.payment_requirements.max_amount_required.0.clone(),
+                network: format!("{:?}", request.payment_requirements.network),
+                product_id: product_id.clone(),
+                payment_flow: PaymentFlow::X402,
+            };
+            create_payment_verification_succeeded_event(event_data)
+        }
+        VerifyResponse::Invalid { reason, payer } => {
+            let event_data = PaymentVerificationFailedData {
+                payer: payer.as_ref().map(|p| p.to_string()),
+                amount: request.payment_requirements.max_amount_required.0.clone(),
+                network: format!("{:?}", request.payment_requirements.network),
+                reason: format!("{:?}", reason),
+                product_id: product_id.clone(),
+                payment_flow: PaymentFlow::X402,
+            };
+            create_payment_verification_failed_event(event_data)
+        }
+    };
+
+    if let Some(envelope) = CloudEventEnvelope::from_sdk_event(&event) {
+        if let Ok(json_str) = serde_json::to_string(&envelope) {
+            let event_time = event
+                .time()
+                .map(|t| t.timestamp_millis())
+                .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+            if let Err(e) = state.db_manager.insert_cloud_event(
+                envelope.id.clone(),
+                envelope.ty.clone(),
+                envelope.source.clone(),
+                event_time,
+                json_str,
+                &state.payment_stack_id,
+                state.is_sandbox,
+            ) {
+                error!("Failed to persist verification CloudEvent to DB: {}", e);
+            } else {
+                info!(
+                    event_id = %envelope.id,
+                    event_type = %envelope.ty,
+                    "Verification CloudEvent persisted to DB"
+                );
             }
-            VerifyResponse::Invalid { reason, payer } => {
-                let event_data = PaymentVerificationFailedData {
-                    payer: payer.as_ref().map(|p| p.to_string()),
-                    amount: request.payment_requirements.max_amount_required.0.clone(),
-                    network: format!("{:?}", request.payment_requirements.network),
-                    reason: format!("{:?}", reason),
-                    product_id: product_id.clone(),
-                    payment_flow: PaymentFlow::X402,
-                };
-                create_payment_verification_failed_event(event_data)
-            }
-        };
-        if let Err(e) = sender.send(event) {
-            error!("Failed to send verification event: {}", e);
         }
     }
 

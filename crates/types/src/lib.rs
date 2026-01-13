@@ -3,16 +3,22 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
-pub mod accounts;
+pub mod actors;
 pub mod iac;
 pub mod stripe;
 pub mod x402;
 
-// Re-export account types
-pub use accounts::{
-    AccountConfig, AccountRole, AccountsConfig, AccountsConfigExt, Base58Keychain, FanoutRecipient,
-    FanoutRole, Keychain, OperatedRole, OperatorRole, PayoutRole, TurnkeyKeychain,
-    load_accounts_from_dir, to_snake_case,
+// Re-export actor types (new names)
+// Backwards compatibility re-exports (deprecated)
+#[allow(deprecated)]
+pub use actors::{
+    AccountConfig, AccountRole, AccountsConfig, AccountsConfigExt, load_accounts_from_dir,
+};
+pub use actors::{
+    ActorConfig, ActorRole, ActorsConfig, ActorsConfigExt, Base58Keychain, FanoutRecipient,
+    FanoutRole, HookAttachment, HookEventConfig, HookEventHandler, HookInstruction, HookRole,
+    Keychain, OperatedRole, OperatorRole, PayoutRole, TurnkeyKeychain, load_actors_from_dir,
+    to_snake_case,
 };
 // Re-export commonly used IAC types at crate root for convenience
 pub use iac::{

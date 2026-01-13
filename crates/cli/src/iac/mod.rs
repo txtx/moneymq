@@ -605,14 +605,16 @@ pub async fn get_iac(State(state): State<IacState>) -> impl IntoResponse {
         for (_catalog_name, catalog_value) in catalogs_obj.iter_mut() {
             if let Some(catalog_obj) = catalog_value.as_object_mut() {
                 // Get catalog_path (default to "billing/v1")
+                // Clone to release borrow so we can mutate catalog_obj later
                 let catalog_path = catalog_obj
                     .get("catalog_path")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("billing/v1");
+                    .unwrap_or("billing/v1")
+                    .to_string();
 
                 // Load products from {catalog_path}/products/
                 // Supports both legacy flat files (*.yaml) and variant-based directories
-                let products_dir = manifest_dir.join(catalog_path).join("products");
+                let products_dir = manifest_dir.join(&catalog_path).join("products");
                 if products_dir.exists()
                     && let Ok(entries) = std::fs::read_dir(&products_dir)
                 {
@@ -716,6 +718,25 @@ pub async fn get_iac(State(state): State<IacState>) -> impl IntoResponse {
                     if !products.is_empty() {
                         catalog_obj
                             .insert("products".to_string(), serde_json::Value::Array(products));
+                    }
+
+                    // Load actors from {catalog_path}/actors/
+                    let actors_dir = manifest_dir.join(catalog_path).join("actors");
+                    if actors_dir.exists() {
+                        match moneymq_types::load_actors_from_dir(&actors_dir) {
+                            Ok(actors_config) => {
+                                // Convert ActorsConfig (IndexMap) to JSON object
+                                if let Ok(actors_json) = serde_json::to_value(&actors_config) {
+                                    catalog_obj.insert("actors".to_string(), actors_json);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Warning: Failed to load actors from {:?}: {}",
+                                    actors_dir, e
+                                );
+                            }
+                        }
                     }
                 }
             }

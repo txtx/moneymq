@@ -106,8 +106,11 @@ pub struct PublishEventRequest {
 /// Request body for attaching data to a transaction
 #[derive(Debug, Clone, Deserialize)]
 pub struct AttachDataRequest {
+    /// Attachment key (identifies which hook attachment this fulfills)
+    /// e.g., "surfnet" matches the hook config's `attachments: [{key: surfnet}]`
+    pub key: String,
+
     /// Data payload to attach
-    #[serde(flatten)]
     pub data: serde_json::Value,
 }
 
@@ -174,6 +177,16 @@ pub struct ChannelContext {
     pub is_sandbox: bool,
 }
 
+/// Pending attachments for a transaction (keyed by attachment key)
+pub type PendingAttachments = HashMap<String, serde_json::Value>;
+
+/// Required attachment configuration from hook actors
+#[derive(Debug, Clone, Default)]
+pub struct RequiredAttachments {
+    /// List of required attachment keys
+    pub keys: Vec<String>,
+}
+
 /// Manages all channels and transaction notifications
 pub struct ChannelManager {
     /// Per-channel broadcasters
@@ -188,6 +201,10 @@ pub struct ChannelManager {
     context: Option<ChannelContext>,
     /// JWT key pair for signing payment receipts
     jwt_key_pair: Option<Arc<super::jwt::JwtKeyPair>>,
+    /// Pending attachments per transaction (channel_id -> attachments)
+    pending_attachments: RwLock<HashMap<String, PendingAttachments>>,
+    /// Required attachments configuration (from hook actors)
+    required_attachments: RequiredAttachments,
 }
 
 impl ChannelManager {
@@ -201,6 +218,8 @@ impl ChannelManager {
             db_manager: None,
             context: None,
             jwt_key_pair: None,
+            pending_attachments: RwLock::new(HashMap::new()),
+            required_attachments: RequiredAttachments::default(),
         }
     }
 
@@ -218,6 +237,8 @@ impl ChannelManager {
             db_manager: Some(db_manager),
             context: Some(context),
             jwt_key_pair: None,
+            pending_attachments: RwLock::new(HashMap::new()),
+            required_attachments: RequiredAttachments::default(),
         }
     }
 
@@ -225,6 +246,51 @@ impl ChannelManager {
     pub fn with_jwt_key_pair(mut self, key_pair: Arc<super::jwt::JwtKeyPair>) -> Self {
         self.jwt_key_pair = Some(key_pair);
         self
+    }
+
+    /// Set the required attachments configuration (from hook actors)
+    pub fn with_required_attachments(mut self, keys: Vec<String>) -> Self {
+        self.required_attachments = RequiredAttachments { keys };
+        self
+    }
+
+    /// Check if all required attachments are present for a transaction
+    pub fn has_all_required_attachments(&self, channel_id: &str) -> bool {
+        if self.required_attachments.keys.is_empty() {
+            // No required attachments configured - always ready
+            return true;
+        }
+
+        let pending = self.pending_attachments.read();
+        if let Some(attachments) = pending.get(channel_id) {
+            self.required_attachments
+                .keys
+                .iter()
+                .all(|key| attachments.contains_key(key))
+        } else {
+            false
+        }
+    }
+
+    /// Store an attachment for a transaction
+    pub fn store_attachment(&self, channel_id: &str, key: String, data: serde_json::Value) {
+        let mut pending = self.pending_attachments.write();
+        pending
+            .entry(channel_id.to_string())
+            .or_insert_with(HashMap::new)
+            .insert(key, data);
+    }
+
+    /// Get all attachments for a transaction (consumes them)
+    pub fn take_attachments(&self, channel_id: &str) -> Option<PendingAttachments> {
+        let mut pending = self.pending_attachments.write();
+        pending.remove(channel_id)
+    }
+
+    /// Get attachments without consuming them
+    pub fn get_attachments(&self, channel_id: &str) -> Option<PendingAttachments> {
+        let pending = self.pending_attachments.read();
+        pending.get(channel_id).cloned()
     }
 
     /// Get cursor for a stream ID from DB
@@ -358,6 +424,11 @@ impl ChannelManager {
         self.transactions_tx.subscribe()
     }
 
+    /// Check if there are any hook subscribers listening for transactions
+    pub fn has_hook_subscribers(&self) -> bool {
+        self.transactions_tx.receiver_count() > 0
+    }
+
     /// Validate authentication token
     pub fn validate_token(&self, token: Option<&str>) -> bool {
         match (&self.secret, token) {
@@ -426,6 +497,10 @@ pub async fn channel_sse_handler(
 }
 
 /// POST /payment/v1/channels/{channelId}/attachments - Attach processor data to transaction
+///
+/// Attachments are stored by key. Once all required attachments (configured via hooks)
+/// are present, a `transaction:completed` event is emitted with a signed JWT receipt.
+/// Until then, `transaction:attach` events are emitted to acknowledge each attachment.
 pub async fn publish_attachment_handler(
     Extension(manager): Extension<Arc<ChannelManager>>,
     headers: HeaderMap,
@@ -445,131 +520,49 @@ pub async fn publish_attachment_handler(
             .into_response();
     }
 
-    // Attachments always create a JWT receipt and emit transaction:completed
-    let event = {
+    info!(
+        channel_id = %channel_id,
+        attachment_key = %request.key,
+        required_keys = ?manager.required_attachments.keys,
+        "Received attachment"
+    );
+
+    // Store the attachment by key
+    manager.store_attachment(&channel_id, request.key.clone(), request.data.clone());
+
+    // Check if all required attachments are now present
+    let all_attachments_present = manager.has_all_required_attachments(&channel_id);
+
+    info!(
+        channel_id = %channel_id,
+        all_attachments_present = %all_attachments_present,
+        "Checking attachment requirements"
+    );
+
+    let event = if all_attachments_present {
+        // All required attachments are present - create JWT receipt and emit transaction:completed
+        create_completion_event(&manager, &channel_id)
+    } else {
+        // Not all attachments present yet - emit transaction:attach to acknowledge
         info!(
             channel_id = %channel_id,
-            has_jwt_key_pair = manager.jwt_key_pair.is_some(),
-            has_db_manager = manager.db_manager.is_some(),
-            has_context = manager.context.is_some(),
-            "Handling attachment - creating receipt JWT"
+            attachment_key = %request.key,
+            "Attachment stored, waiting for remaining required attachments"
         );
-
-        match (&manager.jwt_key_pair, &manager.db_manager, &manager.context) {
-            (Some(key_pair), Some(db_manager), Some(ctx)) => {
-                // Look up transaction by channel_id (which is the payment_hash)
-                info!(channel_id = %channel_id, "Looking up transaction by payment_hash");
-                match db_manager.find_transaction_by_payment_hash(&channel_id) {
-                    Ok(Some(tx)) => {
-                        // Create JWT with payment claims + processor data
-                        let payer = tx
-                            .customer
-                            .as_ref()
-                            .map(|c| c.address.clone())
-                            .unwrap_or_default();
-
-                        let network = defaults::NETWORK.to_string();
-
-                        // Extract features from x402_payment_requirement (base64-encoded)
-                        let features_from_req = tx
-                            .x402_payment_requirement
-                            .as_ref()
-                            .and_then(|b64| {
-                                use base64::{Engine as _, engine::general_purpose::STANDARD};
-                                let decoded = STANDARD.decode(b64).ok()?;
-                                let payment_req: moneymq_types::x402::PaymentRequirements =
-                                    serde_json::from_slice(&decoded).ok()?;
-                                payment_req
-                                    .extra
-                                    .and_then(|extra| extra.get("features").cloned())
-                            })
-                            .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-
-                        // Parse basket from tx.product JSON array: [{"productId", "experimentId", "quantity"}]
-                        let basket: Vec<super::jwt::BasketItem> = tx
-                            .product
-                            .as_ref()
-                            .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
-                            .map(|items| {
-                                items
-                                    .iter()
-                                    .filter_map(|item| {
-                                        let product_id =
-                                            item.get("productId")?.as_str()?.to_string();
-                                        let quantity = item
-                                            .get("quantity")
-                                            .and_then(|v| v.as_i64())
-                                            .unwrap_or(1)
-                                            as u32;
-                                        Some(super::jwt::BasketItem {
-                                            product_id,
-                                            experiment_id: None,
-                                            features: features_from_req.clone(),
-                                            quantity,
-                                        })
-                                    })
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-
-                        let claims = super::jwt::PaymentReceiptClaims::new_with_basket(
-                            channel_id.clone(), // transaction_id = channel_id = payment_hash
-                            payer,
-                            tx.amount.clone(),
-                            tx.currency
-                                .clone()
-                                .unwrap_or_else(|| defaults::CURRENCY.to_string()),
-                            network,
-                            basket,
-                            tx.signature.clone(),
-                            ctx.payment_stack_id.clone(),
-                            defaults::JWT_EXPIRATION_HOURS,
-                        )
-                        .with_processor_data(request.data.clone());
-
-                        // Sign the JWT
-                        match key_pair.sign(&claims) {
-                            Ok(jwt) => {
-                                info!(
-                                    channel_id = %channel_id,
-                                    "Created payment receipt JWT, emitting transaction:completed"
-                                );
-                                // Emit transaction:completed with only the receipt
-                                ChannelEvent::transaction_completed(TransactionCompletedData {
-                                    receipt: jwt,
-                                })
-                            }
-                            Err(e) => {
-                                error!("Failed to sign JWT for channel {}: {}", channel_id, e);
-                                // Fall back to transaction:attach with raw data
-                                ChannelEvent::custom(
-                                    event_types::TRANSACTION_ATTACH,
-                                    request.data.clone(),
-                                )
-                            }
-                        }
-                    }
-                    Ok(None) => {
-                        warn!(channel_id = %channel_id, "No transaction found for channel");
-                        // Fall back to transaction:attach with raw data
-                        ChannelEvent::custom(event_types::TRANSACTION_ATTACH, request.data.clone())
-                    }
-                    Err(e) => {
-                        error!(
-                            "Failed to look up transaction for channel {}: {}",
-                            channel_id, e
-                        );
-                        // Fall back to transaction:attach with raw data
-                        ChannelEvent::custom(event_types::TRANSACTION_ATTACH, request.data.clone())
-                    }
-                }
-            }
-            _ => {
-                warn!("Cannot create receipt JWT: missing key_pair, db_manager, or context");
-                // Fall back to transaction:attach with raw data
-                ChannelEvent::custom(event_types::TRANSACTION_ATTACH, request.data.clone())
-            }
-        }
+        ChannelEvent::custom(
+            event_types::TRANSACTION_ATTACH,
+            serde_json::json!({
+                "key": request.key,
+                "acknowledged": true,
+                "pending": manager.required_attachments.keys.iter()
+                    .filter(|k| {
+                        manager.get_attachments(&channel_id)
+                            .map(|a| !a.contains_key(*k))
+                            .unwrap_or(true)
+                    })
+                    .collect::<Vec<_>>()
+            }),
+        )
     };
 
     // Clone for response
@@ -585,6 +578,145 @@ pub async fn publish_attachment_handler(
     manager.publish(&channel_id, event);
 
     (StatusCode::CREATED, Json(event_response)).into_response()
+}
+
+/// Create the transaction:completed event with JWT receipt containing all attachments
+fn create_completion_event(manager: &Arc<ChannelManager>, channel_id: &str) -> ChannelEvent {
+    info!(
+        channel_id = %channel_id,
+        has_jwt_key_pair = manager.jwt_key_pair.is_some(),
+        has_db_manager = manager.db_manager.is_some(),
+        has_context = manager.context.is_some(),
+        "All attachments present - creating receipt JWT"
+    );
+
+    // Take all attachments for inclusion in the JWT
+    let all_attachments = manager.take_attachments(channel_id).unwrap_or_default();
+
+    match (&manager.jwt_key_pair, &manager.db_manager, &manager.context) {
+        (Some(key_pair), Some(db_manager), Some(ctx)) => {
+            // Look up transaction by channel_id (which is the payment_hash)
+            info!(channel_id = %channel_id, "Looking up transaction by payment_hash");
+            match db_manager.find_transaction_by_payment_hash(channel_id) {
+                Ok(Some(tx)) => {
+                    // Create JWT with payment claims + all processor attachments
+                    let payer = tx
+                        .customer
+                        .as_ref()
+                        .map(|c| c.address.clone())
+                        .unwrap_or_default();
+
+                    let network = defaults::NETWORK.to_string();
+
+                    // Extract features from x402_payment_requirement (base64-encoded)
+                    let features_from_req = tx
+                        .x402_payment_requirement
+                        .as_ref()
+                        .and_then(|b64| {
+                            use base64::{Engine as _, engine::general_purpose::STANDARD};
+                            let decoded = STANDARD.decode(b64).ok()?;
+                            let payment_req: moneymq_types::x402::PaymentRequirements =
+                                serde_json::from_slice(&decoded).ok()?;
+                            payment_req
+                                .extra
+                                .and_then(|extra| extra.get("features").cloned())
+                        })
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+                    // Parse basket from tx.product JSON array: [{"productId", "experimentId", "quantity"}]
+                    let basket: Vec<super::jwt::BasketItem> = tx
+                        .product
+                        .as_ref()
+                        .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(s).ok())
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(|item| {
+                                    let product_id = item.get("productId")?.as_str()?.to_string();
+                                    let quantity =
+                                        item.get("quantity").and_then(|v| v.as_i64()).unwrap_or(1)
+                                            as u32;
+                                    Some(super::jwt::BasketItem {
+                                        product_id,
+                                        experiment_id: None,
+                                        features: features_from_req.clone(),
+                                        quantity,
+                                    })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    // Merge all attachments into a single processor_data object
+                    let processor_data = serde_json::Value::Object(
+                        all_attachments
+                            .into_iter()
+                            .collect::<serde_json::Map<String, serde_json::Value>>(),
+                    );
+
+                    let claims = super::jwt::PaymentReceiptClaims::new_with_basket(
+                        channel_id.to_string(), // transaction_id = channel_id = payment_hash
+                        payer,
+                        tx.amount.clone(),
+                        tx.currency
+                            .clone()
+                            .unwrap_or_else(|| defaults::CURRENCY.to_string()),
+                        network,
+                        basket,
+                        tx.signature.clone(),
+                        ctx.payment_stack_id.clone(),
+                        defaults::JWT_EXPIRATION_HOURS,
+                    )
+                    .with_processor_data(processor_data);
+
+                    // Sign the JWT
+                    match key_pair.sign(&claims) {
+                        Ok(jwt) => {
+                            info!(
+                                channel_id = %channel_id,
+                                "Created payment receipt JWT, emitting transaction:completed"
+                            );
+                            // Emit transaction:completed with the receipt
+                            ChannelEvent::transaction_completed(TransactionCompletedData {
+                                receipt: jwt,
+                            })
+                        }
+                        Err(e) => {
+                            error!("Failed to sign JWT for channel {}: {}", channel_id, e);
+                            ChannelEvent::custom(
+                                event_types::TRANSACTION_ATTACH,
+                                serde_json::json!({"error": "Failed to create receipt"}),
+                            )
+                        }
+                    }
+                }
+                Ok(None) => {
+                    warn!(channel_id = %channel_id, "No transaction found for channel");
+                    ChannelEvent::custom(
+                        event_types::TRANSACTION_ATTACH,
+                        serde_json::json!({"error": "Transaction not found"}),
+                    )
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to look up transaction for channel {}: {}",
+                        channel_id, e
+                    );
+                    ChannelEvent::custom(
+                        event_types::TRANSACTION_ATTACH,
+                        serde_json::json!({"error": "Database error"}),
+                    )
+                }
+            }
+        }
+        _ => {
+            warn!("Cannot create receipt JWT: missing key_pair, db_manager, or context");
+            ChannelEvent::custom(
+                event_types::TRANSACTION_ATTACH,
+                serde_json::json!({"error": "Server configuration error"}),
+            )
+        }
+    }
 }
 
 /// GET /payment/v1/channels/transactions - SSE stream for new transactions
@@ -836,5 +968,95 @@ mod tests {
         assert_eq!(received.basket.len(), 1);
         assert_eq!(received.basket[0].product_id, "prod_abc");
         assert!(received.payment.is_some());
+    }
+
+    #[test]
+    fn test_attachment_tracking_no_requirements() {
+        // Without required attachments, has_all_required_attachments should return true
+        let manager = ChannelManager::new(None);
+        let channel_id = "test-channel";
+
+        assert!(manager.has_all_required_attachments(channel_id));
+
+        // Even with an attachment, it should still return true (no requirements)
+        manager.store_attachment(
+            channel_id,
+            "surfnet".to_string(),
+            serde_json::json!({"rpc": "http://localhost:8899"}),
+        );
+        assert!(manager.has_all_required_attachments(channel_id));
+    }
+
+    #[test]
+    fn test_attachment_tracking_with_requirements() {
+        // With required attachments, should only be complete when all are present
+        let manager = ChannelManager::new(None)
+            .with_required_attachments(vec!["surfnet".to_string(), "billing".to_string()]);
+        let channel_id = "test-channel";
+
+        // Not complete initially
+        assert!(!manager.has_all_required_attachments(channel_id));
+
+        // Add one attachment - still not complete
+        manager.store_attachment(
+            channel_id,
+            "surfnet".to_string(),
+            serde_json::json!({"rpc": "http://localhost:8899"}),
+        );
+        assert!(!manager.has_all_required_attachments(channel_id));
+
+        // Verify attachment is stored
+        let attachments = manager.get_attachments(channel_id);
+        assert!(attachments.is_some());
+        assert!(attachments.as_ref().unwrap().contains_key("surfnet"));
+
+        // Add the second required attachment - now complete
+        manager.store_attachment(
+            channel_id,
+            "billing".to_string(),
+            serde_json::json!({"customer_id": "cust_123"}),
+        );
+        assert!(manager.has_all_required_attachments(channel_id));
+
+        // Take all attachments
+        let taken = manager.take_attachments(channel_id);
+        assert!(taken.is_some());
+        let taken = taken.unwrap();
+        assert_eq!(taken.len(), 2);
+        assert!(taken.contains_key("surfnet"));
+        assert!(taken.contains_key("billing"));
+
+        // After taking, attachments are gone
+        assert!(manager.get_attachments(channel_id).is_none());
+        assert!(!manager.has_all_required_attachments(channel_id));
+    }
+
+    #[test]
+    fn test_attachment_tracking_extra_attachments() {
+        // Extra attachments beyond requirements should not prevent completion
+        let manager =
+            ChannelManager::new(None).with_required_attachments(vec!["surfnet".to_string()]);
+        let channel_id = "test-channel";
+
+        // Add required attachment
+        manager.store_attachment(
+            channel_id,
+            "surfnet".to_string(),
+            serde_json::json!({"rpc": "http://localhost:8899"}),
+        );
+        assert!(manager.has_all_required_attachments(channel_id));
+
+        // Add extra attachment - should still be complete
+        manager.store_attachment(
+            channel_id,
+            "extra".to_string(),
+            serde_json::json!({"foo": "bar"}),
+        );
+        assert!(manager.has_all_required_attachments(channel_id));
+
+        // Both attachments should be present
+        let attachments = manager.get_attachments(channel_id);
+        assert!(attachments.is_some());
+        assert_eq!(attachments.as_ref().unwrap().len(), 2);
     }
 }

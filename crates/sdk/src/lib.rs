@@ -9,29 +9,29 @@
 //! The SDK provides three main abstractions:
 //!
 //! - [`EventReader`] - Read-only channel subscriber (for receiving events)
-//! - [`EventActor`] - Bidirectional channel participant (receive + publish)
-//! - [`Processor`] - Transaction processor that spawns handlers for each payment
+//! - [`PaymentHook`] - Bidirectional channel participant (receive + attach data)
+//! - [`PaymentStream`] - Transaction stream that spawns handlers for each payment
 //!
 //! # Quick Start
 //!
 //! ## Processing Payments
 //!
 //! ```ignore
-//! use moneymq_sdk::{Processor, ProcessorConfig};
+//! use moneymq_sdk::{PaymentStream, PaymentStreamConfig};
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
-//!     // Configure the processor
-//!     let config = ProcessorConfig::new(
+//!     // Configure the payment stream
+//!     let config = PaymentStreamConfig::new(
 //!         "https://api.money.mq",
 //!         "your-secret-key"
 //!     )
-//!     .with_stream_id("my-payment-processor");
+//!     .with_stream_id("my-payment-stream");
 //!
-//!     // Create and connect the processor
-//!     let mut processor = Processor::new(config);
-//!     let mut rx = processor.subscribe().expect("Already subscribed");
-//!     processor.connect().await?;
+//!     // Create and connect the payment stream
+//!     let mut stream = PaymentStream::new(config);
+//!     let mut rx = stream.subscribe().expect("Already subscribed");
+//!     stream.connect().await?;
 //!
 //!     // Handle incoming transactions
 //!     while let Some(tx_ctx) = rx.recv().await {
@@ -41,15 +41,16 @@
 //!             tx_ctx.payer()
 //!         );
 //!
-//!         // Create an actor to respond on this transaction's channel
-//!         let mut actor = tx_ctx.actor();
-//!         actor.connect().await?;
+//!         // Create a hook to respond on this transaction's channel
+//!         let mut hook = tx_ctx.hook();
+//!         hook.connect().await?;
 //!
 //!         // Do your business logic here...
 //!         // e.g., fulfill an order, grant access, etc.
 //!
-//!         // Attach completion data - server creates JWT receipt and emits transaction:completed
-//!         actor.attach(serde_json::json!({
+//!         // Attach completion data with a key - server creates JWT receipt and emits transaction:completed
+//!         // The key identifies which hook attachment this fulfills (e.g., "surfnet", "billing")
+//!         hook.attach("fulfillment", serde_json::json!({
 //!             "order_id": tx_ctx.id(),
 //!             "status": "fulfilled"
 //!         })).await?;
@@ -94,9 +95,9 @@ pub mod reader;
 pub mod types;
 
 // Re-export main types at crate root
-pub use actor::EventActor;
-pub use error::{ProcessorError, Result};
-pub use processor::{Processor, ProcessorConfig, TransactionContext};
+pub use actor::PaymentHook;
+pub use error::{PaymentStreamError, Result};
+pub use processor::{PaymentStream, PaymentStreamConfig, TransactionContext};
 pub use reader::EventReader;
 pub use types::{
     ChannelConfig, ChannelEvent, ConnectionState, PaymentFailed, PaymentFailedData, PaymentSettled,

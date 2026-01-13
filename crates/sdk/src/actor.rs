@@ -8,41 +8,43 @@ use tokio::sync::{broadcast, mpsc};
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    error::{ProcessorError, Result},
+    error::{PaymentStreamError, Result},
     types::{ChannelConfig, ChannelEvent, ConnectionState},
 };
 
-/// Event actor - bidirectional channel participant
+/// Payment hook - bidirectional channel participant for fulfilling payments
 ///
-/// This is the Rust equivalent of the JavaScript SDK's EventActor.
-/// It can both receive events via SSE and publish events via HTTP POST.
+/// A PaymentHook connects to a transaction's channel to receive events
+/// and attach fulfillment data. It can both receive events via SSE and
+/// publish attachments via HTTP POST.
 ///
-/// Actors require authentication (secret key) to publish events.
+/// Hooks require authentication (secret key) to attach data.
 ///
 /// # Example
 ///
 /// ```ignore
-/// use moneymq_processor::{EventActor, ChannelConfig};
+/// use moneymq_sdk::{PaymentHook, ChannelConfig};
 ///
 /// let config = ChannelConfig::new("https://api.example.com")
 ///     .with_secret("your-secret-key")
 ///     .with_replay(10);
 ///
-/// let mut actor = EventActor::new("order-123", config);
+/// let mut hook = PaymentHook::new("order-123", config);
 ///
 /// // Subscribe to events
-/// let mut rx = actor.subscribe();
+/// let mut rx = hook.subscribe();
 ///
 /// // Connect
-/// actor.connect().await?;
+/// hook.connect().await?;
 ///
-/// // Attach data - server creates JWT and emits transaction:completed
-/// actor.attach(serde_json::json!({
+/// // Attach data with a key - server creates JWT and emits transaction:completed
+/// // The key identifies which hook attachment this fulfills
+/// hook.attach("fulfillment", serde_json::json!({
 ///     "order_id": "order-123",
 ///     "status": "shipped"
 /// })).await?;
 /// ```
-pub struct EventActor {
+pub struct PaymentHook {
     /// Channel ID
     channel_id: String,
 
@@ -65,7 +67,7 @@ pub struct EventActor {
     http_client: reqwest::Client,
 }
 
-impl EventActor {
+impl PaymentHook {
     /// Create a new event actor for the given channel
     pub fn new(channel_id: impl Into<String>, config: ChannelConfig) -> Self {
         let (event_tx, _) = broadcast::channel(256);
@@ -148,7 +150,7 @@ impl EventActor {
         self.set_state(ConnectionState::Connecting);
 
         let url = self.build_sse_url();
-        info!(channel_id = %self.channel_id, url = %url, "Connecting actor to channel");
+        info!(channel_id = %self.channel_id, url = %url, "Connecting hook to channel");
 
         // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
@@ -184,36 +186,58 @@ impl EventActor {
             let _ = tx.send(()).await;
         }
         self.set_state(ConnectionState::Disconnected);
-        info!(channel_id = %self.channel_id, "Actor disconnected from channel");
+        info!(channel_id = %self.channel_id, "Hook disconnected from channel");
     }
 
     /// Attach data to the transaction channel
     ///
-    /// This sends data to the server which creates a signed JWT receipt
-    /// and emits a `transaction:completed` event to all listeners.
+    /// This sends keyed data to the server. The key identifies which hook attachment
+    /// this fulfills (e.g., "surfnet" matches a hook's `attachments: [{key: surfnet}]`).
+    ///
+    /// Once all required attachments are present, the server creates a signed JWT receipt
+    /// and emits a `transaction:completed` event to all listeners. Until then, it emits
+    /// `transaction:attach` to acknowledge each attachment.
+    ///
+    /// # Arguments
+    /// * `key` - The attachment key (e.g., "surfnet", "billing")
+    /// * `data` - The data payload to attach
     ///
     /// Returns the created event with its ID and timestamp.
-    pub async fn attach<T: Serialize>(&self, data: T) -> Result<ChannelEvent> {
+    pub async fn attach<T: Serialize>(
+        &self,
+        key: impl Into<String>,
+        data: T,
+    ) -> Result<ChannelEvent> {
         let secret = self.config.secret.as_ref().ok_or_else(|| {
-            ProcessorError::Authentication("Secret key required to attach data".to_string())
+            PaymentStreamError::Authentication("Secret key required to attach data".to_string())
         })?;
 
         let url = self.build_attachments_url();
-        debug!(channel_id = %self.channel_id, url = %url, "Attaching data to transaction");
+        let key = key.into();
+        debug!(channel_id = %self.channel_id, url = %url, key = %key, "Attaching data to transaction");
+
+        // Construct the request body with key and data
+        let request_body = serde_json::json!({
+            "key": key,
+            "data": serde_json::to_value(&data).unwrap_or(serde_json::Value::Null)
+        });
 
         let response = self
             .http_client
             .post(&url)
             .header("Authorization", format!("Bearer {}", secret))
             .header("Content-Type", "application/json")
-            .json(&data)
+            .json(&request_body)
             .send()
             .await?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            return Err(ProcessorError::Send(format!("HTTP {}: {}", status, body)));
+            return Err(PaymentStreamError::Send(format!(
+                "HTTP {}: {}",
+                status, body
+            )));
         }
 
         // Parse the response as ChannelEvent
@@ -223,6 +247,7 @@ impl EventActor {
             channel_id = %self.channel_id,
             event_id = %event.id(),
             event_type = %event.event_type(),
+            key = %key,
             "Data attached successfully"
         );
 
@@ -262,20 +287,20 @@ impl EventActor {
                 let mut attempts = reconnect_attempts.write();
                 *attempts = 0;
             }
-            info!(channel_id = %channel_id, "Actor connected to channel");
+            info!(channel_id = %channel_id, "Hook connected to channel");
 
             // Process events
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
-                        info!(channel_id = %channel_id, "Actor shutdown signal received");
+                        info!(channel_id = %channel_id, "Hook shutdown signal received");
                         es.close();
                         return;
                     }
                     event = es.next() => {
                         match event {
                             Some(Ok(SseEvent::Open)) => {
-                                debug!(channel_id = %channel_id, "Actor SSE connection opened");
+                                debug!(channel_id = %channel_id, "Hook SSE connection opened");
                             }
                             Some(Ok(SseEvent::Message(msg))) => {
                                 // Parse the event
@@ -285,7 +310,7 @@ impl EventActor {
                                             channel_id = %channel_id,
                                             event_id = %channel_event.id(),
                                             event_type = %channel_event.event_type(),
-                                            "Actor received event"
+                                            "Hook received event"
                                         );
                                         // Broadcast to subscribers
                                         let _ = event_tx.send(channel_event);
@@ -295,17 +320,17 @@ impl EventActor {
                                             channel_id = %channel_id,
                                             error = %e,
                                             data = %msg.data,
-                                            "Actor failed to parse event"
+                                            "Hook failed to parse event"
                                         );
                                     }
                                 }
                             }
                             Some(Err(e)) => {
-                                error!(channel_id = %channel_id, error = %e, "Actor SSE error");
+                                error!(channel_id = %channel_id, error = %e, "Hook SSE error");
                                 break;
                             }
                             None => {
-                                info!(channel_id = %channel_id, "Actor SSE stream ended");
+                                info!(channel_id = %channel_id, "Hook SSE stream ended");
                                 break;
                             }
                         }
@@ -332,7 +357,7 @@ impl EventActor {
                     error!(
                         channel_id = %channel_id,
                         attempts = *attempts,
-                        "Actor max reconnection attempts reached"
+                        "Hook max reconnection attempts reached"
                     );
                     let mut s = state.write();
                     *s = ConnectionState::Disconnected;
@@ -348,7 +373,7 @@ impl EventActor {
             info!(
                 channel_id = %channel_id,
                 delay_ms = config.reconnect_delay_ms,
-                "Actor scheduling reconnection"
+                "Hook scheduling reconnection"
             );
 
             tokio::time::sleep(tokio::time::Duration::from_millis(
@@ -359,7 +384,7 @@ impl EventActor {
     }
 }
 
-impl Drop for EventActor {
+impl Drop for PaymentHook {
     fn drop(&mut self) {
         // Signal shutdown synchronously
         if let Some(tx) = self.shutdown_tx.take() {
@@ -375,9 +400,9 @@ mod tests {
     #[test]
     fn test_build_sse_url_with_token() {
         let config = ChannelConfig::new("https://api.example.com").with_secret("my-secret");
-        let actor = EventActor::new("test-channel", config);
+        let hook = PaymentHook::new("test-channel", config);
         assert_eq!(
-            actor.build_sse_url(),
+            hook.build_sse_url(),
             "https://api.example.com/payment/v1/channels/test-channel?token=my-secret"
         );
     }
@@ -388,9 +413,9 @@ mod tests {
             .with_secret("my-secret")
             .with_replay(5)
             .with_stream_id("my-stream");
-        let actor = EventActor::new("test-channel", config);
+        let hook = PaymentHook::new("test-channel", config);
         assert_eq!(
-            actor.build_sse_url(),
+            hook.build_sse_url(),
             "https://api.example.com/payment/v1/channels/test-channel?token=my-secret&replay=5&stream_id=my-stream"
         );
     }
@@ -398,9 +423,9 @@ mod tests {
     #[test]
     fn test_build_attachments_url() {
         let config = ChannelConfig::new("https://api.example.com").with_secret("my-secret");
-        let actor = EventActor::new("test-channel", config);
+        let hook = PaymentHook::new("test-channel", config);
         assert_eq!(
-            actor.build_attachments_url(),
+            hook.build_attachments_url(),
             "https://api.example.com/payment/v1/channels/test-channel/attachments"
         );
     }

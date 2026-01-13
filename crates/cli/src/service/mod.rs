@@ -254,21 +254,6 @@ pub trait ServiceCommand {
             .setup_payment_api(&ctx.manifest.payments, &environment, &networks_config, port)
             .await?;
 
-        // Setup event channel and stateful broadcaster for SSE
-        let (event_sender, event_receiver) = moneymq_core::events::create_event_channel();
-
-        // Create stateful event broadcaster with DB persistence
-        let event_stream_context = moneymq_core::events::EventStreamContext {
-            payment_stack_id: payment_api_state.payment_stack_id.clone(),
-            is_sandbox: payment_api_state.is_sandbox,
-        };
-        let event_broadcaster =
-            std::sync::Arc::new(moneymq_core::events::StatefulEventBroadcaster::new(
-                256,
-                payment_api_state.db_manager.clone(),
-                event_stream_context.clone(),
-            ));
-
         // Get JWT secret from environment config or env var
         let jwt_secret = std::env::var("MONEYMQ_JWT_SECRET")
             .ok()
@@ -303,8 +288,8 @@ pub trait ServiceCommand {
 
         // Create channel manager for pub/sub event streaming
         let channel_context = moneymq_core::api::payment::endpoints::channels::ChannelContext {
-            payment_stack_id: event_stream_context.payment_stack_id,
-            is_sandbox: event_stream_context.is_sandbox,
+            payment_stack_id: payment_api_state.payment_stack_id.clone(),
+            is_sandbox: payment_api_state.is_sandbox,
         };
         let mut channel_manager =
             moneymq_core::api::payment::endpoints::channels::ChannelManager::with_db(
@@ -320,18 +305,39 @@ pub trait ServiceCommand {
 
         let channel_manager = std::sync::Arc::new(channel_manager);
 
-        let mut payment_api_state = payment_api_state
-            .with_event_sender(event_sender)
-            .with_channel_manager(channel_manager);
+        let mut payment_api_state = payment_api_state.with_channel_manager(channel_manager);
 
         if let Some(secret) = jwt_secret {
             payment_api_state = payment_api_state.with_jwt_secret(secret);
         }
 
-        // Spawn the stateful event consumer thread
-        let broadcaster_clone = event_broadcaster.clone();
-        let _event_consumer_handle =
-            moneymq_core::events::spawn_stateful_event_consumer(event_receiver, broadcaster_clone);
+        // Load actors from the actors directory
+        let catalog_base_path = ctx
+            .manifest
+            .catalogs
+            .values()
+            .next()
+            .map(|c| c.catalog_path.as_str())
+            .unwrap_or("billing/v1");
+        let actors_dir = ctx.manifest_path.join(catalog_base_path).join("actors");
+        let actors = moneymq_types::load_actors_from_dir(&actors_dir).unwrap_or_default();
+        if !actors.is_empty() {
+            println!(
+                "  {} Loaded {} actors",
+                style("✓").green(),
+                style(actors.len()).green()
+            );
+            // Count hook actors
+            let hook_count = actors.values().filter(|a| a.is_hook()).count();
+            if hook_count > 0 {
+                println!(
+                    "    {} {} hook actor(s) configured",
+                    style("→").dim(),
+                    hook_count
+                );
+            }
+        }
+        payment_api_state = payment_api_state.with_actors(actors);
 
         println!();
         println!(
@@ -381,15 +387,9 @@ pub trait ServiceCommand {
         let iac_router = crate::iac::create_router(iac_state);
 
         // Start the combined server with both catalog and payment APIs
-        moneymq_core::api::start_server(
-            catalog_state,
-            payment_api_state,
-            Some(event_broadcaster),
-            Some(iac_router),
-            port,
-        )
-        .await
-        .map_err(RunCommandError::ProviderStartError)?;
+        moneymq_core::api::start_server(catalog_state, payment_api_state, Some(iac_router), port)
+            .await
+            .map_err(RunCommandError::ProviderStartError)?;
 
         Ok(())
     }

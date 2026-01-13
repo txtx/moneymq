@@ -1,8 +1,8 @@
 use thiserror::Error;
 
-/// Errors that can occur in the processor SDK
+/// Errors that can occur in the payment stream SDK
 #[derive(Error, Debug)]
-pub enum ProcessorError {
+pub enum PaymentStreamError {
     /// Connection error (failed to connect to SSE endpoint)
     #[error("Connection error: {0}")]
     Connection(String),
@@ -40,5 +40,5 @@ pub enum ProcessorError {
     Timeout,
 }
 
-/// Result type alias for processor operations
-pub type Result<T> = std::result::Result<T, ProcessorError>;
+/// Result type alias for payment stream operations
+pub type Result<T> = std::result::Result<T, PaymentStreamError>;

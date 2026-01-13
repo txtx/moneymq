@@ -7,25 +7,25 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
 use crate::{
-    actor::EventActor,
-    error::{ProcessorError, Result},
+    actor::PaymentHook,
+    error::{PaymentStreamError, Result},
     types::{BasketItem, ChannelConfig, ConnectionState, PaymentDetails, Transaction, defaults},
 };
 
-/// Transaction context - wraps a transaction with its scoped actor
+/// Transaction context - wraps a transaction with its scoped hook
 ///
 /// When a transaction is received, the processor creates a TransactionContext
 /// that contains the transaction data and provides a factory method to create
-/// an actor scoped to that transaction's channel.
+/// a PaymentHook scoped to that transaction's channel.
 pub struct TransactionContext {
     /// The transaction data
     pub transaction: Transaction,
 
-    /// Configuration for creating actors
+    /// Configuration for creating hooks
     config: ChannelConfig,
 
-    /// Pre-connected actor (optional, depending on auto_connect setting)
-    actor: Option<EventActor>,
+    /// Pre-connected hook (optional, depending on auto_connect setting)
+    hook: Option<PaymentHook>,
 }
 
 impl TransactionContext {
@@ -34,7 +34,7 @@ impl TransactionContext {
         Self {
             transaction,
             config,
-            actor: None,
+            hook: None,
         }
     }
 
@@ -102,46 +102,46 @@ impl TransactionContext {
         self.transaction.basket.first().map(|b| &b.features)
     }
 
-    /// Create an actor scoped to this transaction's channel
+    /// Create a payment hook scoped to this transaction's channel
     ///
-    /// The actor can be used to both receive events on this transaction's
-    /// channel and publish custom events back.
-    pub fn actor(&self) -> EventActor {
+    /// The hook can be used to both receive events on this transaction's
+    /// channel and attach fulfillment data.
+    pub fn hook(&self) -> PaymentHook {
         let mut config = self.config.clone();
         // Use transaction-specific stream ID for cursor tracking
         config.stream_id = Some(format!("tx-{}", self.transaction.id));
 
-        EventActor::new(&self.transaction.channel_id, config)
+        PaymentHook::new(&self.transaction.channel_id, config)
     }
 
-    /// Get access to a pre-connected actor (if processor was configured with auto_connect)
-    pub fn connected_actor(&mut self) -> Option<&mut EventActor> {
-        self.actor.as_mut()
+    /// Get access to a pre-connected hook (if processor was configured with auto_connect)
+    pub fn connected_hook(&mut self) -> Option<&mut PaymentHook> {
+        self.hook.as_mut()
     }
 }
 
-/// Processor configuration
+/// Payment stream configuration
 #[derive(Debug, Clone)]
-pub struct ProcessorConfig {
+pub struct PaymentStreamConfig {
     /// Base configuration
     pub base: ChannelConfig,
 
-    /// Whether to automatically connect actors for each transaction
-    pub auto_connect_actors: bool,
+    /// Whether to automatically connect hooks for each transaction
+    pub auto_connect_hooks: bool,
 }
 
-impl ProcessorConfig {
+impl PaymentStreamConfig {
     /// Create a new processor configuration
     pub fn new(endpoint: impl Into<String>, secret: impl Into<String>) -> Self {
         Self {
             base: ChannelConfig::new(endpoint).with_secret(secret),
-            auto_connect_actors: false,
+            auto_connect_hooks: false,
         }
     }
 
-    /// Enable automatic actor connection for each transaction
-    pub fn with_auto_connect_actors(mut self) -> Self {
-        self.auto_connect_actors = true;
+    /// Enable automatic hook connection for each transaction
+    pub fn with_auto_connect_hooks(mut self) -> Self {
+        self.auto_connect_hooks = true;
         self
     }
 
@@ -151,14 +151,14 @@ impl ProcessorConfig {
         self
     }
 
-    /// Set stream ID for the processor (for cursor tracking)
+    /// Set stream ID for cursor tracking
     pub fn with_stream_id(mut self, stream_id: impl Into<String>) -> Self {
         self.base.stream_id = Some(stream_id.into());
         self
     }
 }
 
-/// Payment processor - listens for incoming transactions and spawns handlers
+/// Payment stream - listens for incoming transactions and spawns handlers
 ///
 /// This is the Rust equivalent of the JavaScript SDK's EventReceiver.
 /// It connects to the transaction stream and creates a TransactionContext
@@ -167,38 +167,38 @@ impl ProcessorConfig {
 /// # Example
 ///
 /// ```ignore
-/// use moneymq_processor::{Processor, ProcessorConfig};
+/// use moneymq_sdk::{PaymentStream, PaymentStreamConfig};
 ///
-/// let config = ProcessorConfig::new("https://api.example.com", "your-secret-key")
-///     .with_stream_id("my-processor");
+/// let config = PaymentStreamConfig::new("https://api.example.com", "your-secret-key")
+///     .with_stream_id("my-payment-stream");
 ///
-/// let mut processor = Processor::new(config);
+/// let mut stream = PaymentStream::new(config);
 ///
 /// // Subscribe to transactions
-/// let mut rx = processor.subscribe();
+/// let mut rx = stream.subscribe();
 ///
 /// // Connect
-/// processor.connect().await?;
+/// stream.connect().await?;
 ///
 /// while let Some(tx_ctx) = rx.recv().await {
 ///     println!("New transaction: {}", tx_ctx.id());
 ///
-///     // Create an actor for this transaction
-///     let mut actor = tx_ctx.actor();
-///     actor.connect().await?;
+///     // Create a hook for this transaction
+///     let mut hook = tx_ctx.hook();
+///     hook.connect().await?;
 ///
 ///     // Process the payment...
 ///
-///     // Publish completion event
-///     actor.send("order:completed", serde_json::json!({
+///     // Attach fulfillment data
+///     hook.attach("fulfillment", serde_json::json!({
 ///         "order_id": tx_ctx.id(),
 ///         "status": "fulfilled"
 ///     })).await?;
 /// }
 /// ```
-pub struct Processor {
+pub struct PaymentStream {
     /// Configuration
-    config: ProcessorConfig,
+    config: PaymentStreamConfig,
 
     /// Connection state
     state: Arc<RwLock<ConnectionState>>,
@@ -216,9 +216,9 @@ pub struct Processor {
     reconnect_attempts: Arc<RwLock<u32>>,
 }
 
-impl Processor {
+impl PaymentStream {
     /// Create a new processor with the given configuration
-    pub fn new(config: ProcessorConfig) -> Self {
+    pub fn new(config: PaymentStreamConfig) -> Self {
         let (tx_sender, tx_receiver) = mpsc::channel(256);
 
         Self {
@@ -282,13 +282,13 @@ impl Processor {
         }
 
         let _secret = self.config.base.secret.as_ref().ok_or_else(|| {
-            ProcessorError::Authentication("Secret key required for processor".to_string())
+            PaymentStreamError::Authentication("Secret key required for processor".to_string())
         })?;
 
         self.set_state(ConnectionState::Connecting);
 
         let url = self.build_url();
-        info!(url = %url, "Processor connecting to transaction stream");
+        info!(url = %url, "PaymentStream connecting to transaction stream");
 
         // Create shutdown channel
         let (shutdown_tx, shutdown_rx) = mpsc::channel::<()>(1);
@@ -322,7 +322,7 @@ impl Processor {
             let _ = tx.send(()).await;
         }
         self.set_state(ConnectionState::Disconnected);
-        info!("Processor disconnected");
+        info!("PaymentStream disconnected");
     }
 
     /// Set the connection state
@@ -337,7 +337,7 @@ impl Processor {
         tx_sender: mpsc::Sender<TransactionContext>,
         state: Arc<RwLock<ConnectionState>>,
         reconnect_attempts: Arc<RwLock<u32>>,
-        config: ProcessorConfig,
+        config: PaymentStreamConfig,
         mut shutdown_rx: mpsc::Receiver<()>,
     ) {
         loop {
@@ -357,20 +357,20 @@ impl Processor {
                 let mut attempts = reconnect_attempts.write();
                 *attempts = 0;
             }
-            info!("Processor connected to transaction stream");
+            info!("PaymentStream connected to transaction stream");
 
             // Process events
             loop {
                 tokio::select! {
                     _ = shutdown_rx.recv() => {
-                        info!("Processor shutdown signal received");
+                        info!("PaymentStream shutdown signal received");
                         es.close();
                         return;
                     }
                     event = es.next() => {
                         match event {
                             Some(Ok(SseEvent::Open)) => {
-                                debug!("Processor SSE connection opened");
+                                debug!("PaymentStream SSE connection opened");
                             }
                             Some(Ok(SseEvent::Message(msg))) => {
                                 // Check if this is a transaction event
@@ -394,16 +394,16 @@ impl Processor {
                                                 config.base.clone(),
                                             );
 
-                                            // Auto-connect actor if configured
-                                            if config.auto_connect_actors {
-                                                let mut actor = ctx.actor();
-                                                if let Err(e) = actor.connect().await {
+                                            // Auto-connect hook if configured
+                                            if config.auto_connect_hooks {
+                                                let mut hook = ctx.hook();
+                                                if let Err(e) = hook.connect().await {
                                                     warn!(
                                                         error = %e,
-                                                        "Failed to auto-connect actor"
+                                                        "Failed to auto-connect hook"
                                                     );
                                                 } else {
-                                                    ctx.actor = Some(actor);
+                                                    ctx.hook = Some(hook);
                                                 }
                                             }
 
@@ -431,11 +431,11 @@ impl Processor {
                                 }
                             }
                             Some(Err(e)) => {
-                                error!(error = %e, "Processor SSE error");
+                                error!(error = %e, "PaymentStream SSE error");
                                 break;
                             }
                             None => {
-                                info!("Processor SSE stream ended");
+                                info!("PaymentStream SSE stream ended");
                                 break;
                             }
                         }
@@ -463,7 +463,7 @@ impl Processor {
                 {
                     error!(
                         attempts = *attempts,
-                        "Processor max reconnection attempts reached"
+                        "PaymentStream max reconnection attempts reached"
                     );
                     let mut s = state.write();
                     *s = ConnectionState::Disconnected;
@@ -478,7 +478,7 @@ impl Processor {
 
             info!(
                 delay_ms = config.base.reconnect_delay_ms,
-                "Processor scheduling reconnection"
+                "PaymentStream scheduling reconnection"
             );
 
             tokio::time::sleep(tokio::time::Duration::from_millis(
@@ -489,7 +489,7 @@ impl Processor {
     }
 }
 
-impl Drop for Processor {
+impl Drop for PaymentStream {
     fn drop(&mut self) {
         // Signal shutdown synchronously
         if let Some(tx) = self.shutdown_tx.take() {
@@ -504,27 +504,28 @@ mod tests {
 
     #[test]
     fn test_build_url() {
-        let config = ProcessorConfig::new("https://api.example.com", "my-secret")
-            .with_stream_id("my-processor");
-        let processor = Processor::new(config);
+        let config = PaymentStreamConfig::new("https://api.example.com", "my-secret")
+            .with_stream_id("my-stream");
+        let stream = PaymentStream::new(config);
         assert_eq!(
-            processor.build_url(),
-            "https://api.example.com/payment/v1/channels/transactions?token=my-secret&stream_id=my-processor"
+            stream.build_url(),
+            "https://api.example.com/payment/v1/channels/transactions?token=my-secret&stream_id=my-stream"
         );
     }
 
     #[test]
     fn test_build_url_with_replay() {
-        let config = ProcessorConfig::new("https://api.example.com", "my-secret").with_replay(10);
-        let processor = Processor::new(config);
+        let config =
+            PaymentStreamConfig::new("https://api.example.com", "my-secret").with_replay(10);
+        let stream = PaymentStream::new(config);
         assert_eq!(
-            processor.build_url(),
+            stream.build_url(),
             "https://api.example.com/payment/v1/channels/transactions?token=my-secret&replay=10"
         );
     }
 
     #[test]
-    fn test_transaction_context_actor() {
+    fn test_transaction_context_hook() {
         let tx = Transaction {
             id: "tx-123".to_string(),
             channel_id: "channel-456".to_string(),
@@ -555,7 +556,7 @@ mod tests {
         assert_eq!(ctx.payer(), Some("payer-address"));
         assert_eq!(ctx.network(), Some(defaults::NETWORK));
 
-        let actor = ctx.actor();
-        assert_eq!(actor.channel_id(), "channel-456");
+        let hook = ctx.hook();
+        assert_eq!(hook.channel_id(), "channel-456");
     }
 }
