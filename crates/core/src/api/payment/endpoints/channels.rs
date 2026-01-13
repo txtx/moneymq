@@ -21,6 +21,7 @@ use axum::{
         sse::{Event as SseEvent, KeepAlive, Sse},
     },
 };
+use cloudevents::AttributesReader;
 use futures::stream::Stream;
 // Re-export types from moneymq-types
 pub use moneymq_types::{
@@ -31,6 +32,11 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
+
+use crate::events::{
+    CloudEventEnvelope, TransactionCompletedData as CloudTransactionCompletedData,
+    create_transaction_completed_event,
+};
 
 /// Maximum number of events to buffer per channel
 const CHANNEL_BUFFER_SIZE: usize = 100;
@@ -106,6 +112,10 @@ pub struct PublishEventRequest {
 /// Request body for attaching data to a transaction
 #[derive(Debug, Clone, Deserialize)]
 pub struct AttachDataRequest {
+    /// Actor ID (identifies the hook/processor attaching data)
+    /// This becomes the outer key in the attachments structure
+    pub actor_id: String,
+
     /// Attachment key (identifies which hook attachment this fulfills)
     /// e.g., "surfnet" matches the hook config's `attachments: [{key: surfnet}]`
     pub key: String,
@@ -177,8 +187,12 @@ pub struct ChannelContext {
     pub is_sandbox: bool,
 }
 
-/// Pending attachments for a transaction (keyed by attachment key)
-pub type PendingAttachments = HashMap<String, serde_json::Value>;
+/// Inner attachments for a single actor (keyed by attachment key)
+pub type ActorAttachments = HashMap<String, serde_json::Value>;
+
+/// Pending attachments for a transaction (keyed by actor_id, then by key)
+/// Structure: { actor_id: { key: data } }
+pub type PendingAttachments = HashMap<String, ActorAttachments>;
 
 /// Required attachment configuration from hook actors
 #[derive(Debug, Clone, Default)]
@@ -255,6 +269,7 @@ impl ChannelManager {
     }
 
     /// Check if all required attachments are present for a transaction
+    /// Searches across all actors for the required keys
     pub fn has_all_required_attachments(&self, channel_id: &str) -> bool {
         if self.required_attachments.keys.is_empty() {
             // No required attachments configured - always ready
@@ -262,21 +277,32 @@ impl ChannelManager {
         }
 
         let pending = self.pending_attachments.read();
-        if let Some(attachments) = pending.get(channel_id) {
-            self.required_attachments
-                .keys
-                .iter()
-                .all(|key| attachments.contains_key(key))
+        if let Some(actor_attachments) = pending.get(channel_id) {
+            // Check if each required key exists in any actor's attachments
+            self.required_attachments.keys.iter().all(|key| {
+                actor_attachments
+                    .values()
+                    .any(|actor_data| actor_data.contains_key(key))
+            })
         } else {
             false
         }
     }
 
     /// Store an attachment for a transaction
-    pub fn store_attachment(&self, channel_id: &str, key: String, data: serde_json::Value) {
+    /// Attachments are stored as: channel_id -> actor_id -> key -> data
+    pub fn store_attachment(
+        &self,
+        channel_id: &str,
+        actor_id: String,
+        key: String,
+        data: serde_json::Value,
+    ) {
         let mut pending = self.pending_attachments.write();
         pending
             .entry(channel_id.to_string())
+            .or_insert_with(HashMap::new)
+            .entry(actor_id)
             .or_insert_with(HashMap::new)
             .insert(key, data);
     }
@@ -429,6 +455,11 @@ impl ChannelManager {
         self.transactions_tx.receiver_count() > 0
     }
 
+    /// Get the number of hook subscribers
+    pub fn hook_subscriber_count(&self) -> usize {
+        self.transactions_tx.receiver_count()
+    }
+
     /// Validate authentication token
     pub fn validate_token(&self, token: Option<&str>) -> bool {
         match (&self.secret, token) {
@@ -522,13 +553,19 @@ pub async fn publish_attachment_handler(
 
     info!(
         channel_id = %channel_id,
+        actor_id = %request.actor_id,
         attachment_key = %request.key,
         required_keys = ?manager.required_attachments.keys,
         "Received attachment"
     );
 
-    // Store the attachment by key
-    manager.store_attachment(&channel_id, request.key.clone(), request.data.clone());
+    // Store the attachment by actor_id and key
+    manager.store_attachment(
+        &channel_id,
+        request.actor_id.clone(),
+        request.key.clone(),
+        request.data.clone(),
+    );
 
     // Check if all required attachments are now present
     let all_attachments_present = manager.has_all_required_attachments(&channel_id);
@@ -546,18 +583,21 @@ pub async fn publish_attachment_handler(
         // Not all attachments present yet - emit transaction:attach to acknowledge
         info!(
             channel_id = %channel_id,
+            actor_id = %request.actor_id,
             attachment_key = %request.key,
             "Attachment stored, waiting for remaining required attachments"
         );
         ChannelEvent::custom(
             event_types::TRANSACTION_ATTACH,
             serde_json::json!({
+                "actor_id": request.actor_id,
                 "key": request.key,
                 "acknowledged": true,
                 "pending": manager.required_attachments.keys.iter()
                     .filter(|k| {
+                        // Check if key exists in any actor's attachments
                         manager.get_attachments(&channel_id)
-                            .map(|a| !a.contains_key(*k))
+                            .map(|actors| !actors.values().any(|actor_data| actor_data.contains_key(*k)))
                             .unwrap_or(true)
                     })
                     .collect::<Vec<_>>()
@@ -647,11 +687,21 @@ fn create_completion_event(manager: &Arc<ChannelManager>, channel_id: &str) -> C
                         })
                         .unwrap_or_default();
 
-                    // Merge all attachments into a single processor_data object
-                    let processor_data = serde_json::Value::Object(
+                    // Convert nested attachments to JSON: { actor_id: { key: data } }
+                    let attachments_map: serde_json::Map<String, serde_json::Value> =
                         all_attachments
                             .into_iter()
-                            .collect::<serde_json::Map<String, serde_json::Value>>(),
+                            .map(|(actor_id, actor_data)| {
+                                let inner_map: serde_json::Map<String, serde_json::Value> =
+                                    actor_data.into_iter().collect();
+                                (actor_id, serde_json::Value::Object(inner_map))
+                            })
+                            .collect();
+
+                    info!(
+                        channel_id = %channel_id,
+                        attachments = ?attachments_map.keys().collect::<Vec<_>>(),
+                        "Adding attachments to JWT claims"
                     );
 
                     let claims = super::jwt::PaymentReceiptClaims::new_with_basket(
@@ -667,15 +717,78 @@ fn create_completion_event(manager: &Arc<ChannelManager>, channel_id: &str) -> C
                         ctx.payment_stack_id.clone(),
                         defaults::JWT_EXPIRATION_HOURS,
                     )
-                    .with_processor_data(processor_data);
+                    .with_attachments(attachments_map);
 
                     // Sign the JWT
+                    let currency = tx
+                        .currency
+                        .clone()
+                        .unwrap_or_else(|| defaults::CURRENCY.to_string());
+                    let payer_for_event = tx
+                        .customer
+                        .as_ref()
+                        .map(|c| c.address.clone())
+                        .unwrap_or_default();
+                    let product_id = tx.product.as_ref().and_then(|s| {
+                        serde_json::from_str::<Vec<serde_json::Value>>(s)
+                            .ok()
+                            .and_then(|items| {
+                                items.first().and_then(|item| {
+                                    item.get("productId")?.as_str().map(String::from)
+                                })
+                            })
+                    });
+
                     match key_pair.sign(&claims) {
                         Ok(jwt) => {
                             info!(
                                 channel_id = %channel_id,
                                 "Created payment receipt JWT, emitting transaction:completed"
                             );
+
+                            // Also persist as CloudEvent to DB for clients using /payment/v1/events
+                            let cloud_event_data = CloudTransactionCompletedData {
+                                transaction_id: channel_id.to_string(),
+                                receipt: jwt.clone(),
+                                payer: payer_for_event,
+                                amount: tx.amount.clone(),
+                                currency,
+                                network: defaults::NETWORK.to_string(),
+                                transaction_signature: tx.signature.clone(),
+                                product_id,
+                            };
+                            let cloud_event = create_transaction_completed_event(cloud_event_data);
+
+                            if let Some(envelope) = CloudEventEnvelope::from_sdk_event(&cloud_event)
+                            {
+                                if let Ok(json_str) = serde_json::to_string(&envelope) {
+                                    let event_time = cloud_event
+                                        .time()
+                                        .map(|t| t.timestamp_millis())
+                                        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+                                    if let Err(e) = db_manager.insert_cloud_event(
+                                        envelope.id.clone(),
+                                        envelope.ty.clone(),
+                                        envelope.source.clone(),
+                                        event_time,
+                                        json_str,
+                                        &ctx.payment_stack_id,
+                                        ctx.is_sandbox,
+                                    ) {
+                                        error!(
+                                            "Failed to persist transaction:completed CloudEvent to DB: {}",
+                                            e
+                                        );
+                                    } else {
+                                        info!(
+                                            event_id = %envelope.id,
+                                            channel_id = %channel_id,
+                                            "Transaction completed CloudEvent persisted to DB (with attachments)"
+                                        );
+                                    }
+                                }
+                            }
+
                             // Emit transaction:completed with the receipt
                             ChannelEvent::transaction_completed(TransactionCompletedData {
                                 receipt: jwt,
@@ -981,6 +1094,7 @@ mod tests {
         // Even with an attachment, it should still return true (no requirements)
         manager.store_attachment(
             channel_id,
+            "processor-1".to_string(),
             "surfnet".to_string(),
             serde_json::json!({"rpc": "http://localhost:8899"}),
         );
@@ -1000,19 +1114,23 @@ mod tests {
         // Add one attachment - still not complete
         manager.store_attachment(
             channel_id,
+            "processor-1".to_string(),
             "surfnet".to_string(),
             serde_json::json!({"rpc": "http://localhost:8899"}),
         );
         assert!(!manager.has_all_required_attachments(channel_id));
 
-        // Verify attachment is stored
+        // Verify attachment is stored (now nested under actor_id)
         let attachments = manager.get_attachments(channel_id);
         assert!(attachments.is_some());
-        assert!(attachments.as_ref().unwrap().contains_key("surfnet"));
+        let actors = attachments.as_ref().unwrap();
+        assert!(actors.contains_key("processor-1"));
+        assert!(actors.get("processor-1").unwrap().contains_key("surfnet"));
 
-        // Add the second required attachment - now complete
+        // Add the second required attachment from a different actor - now complete
         manager.store_attachment(
             channel_id,
+            "processor-2".to_string(),
             "billing".to_string(),
             serde_json::json!({"customer_id": "cust_123"}),
         );
@@ -1022,9 +1140,12 @@ mod tests {
         let taken = manager.take_attachments(channel_id);
         assert!(taken.is_some());
         let taken = taken.unwrap();
+        // Now we have 2 actors, not 2 keys at the top level
         assert_eq!(taken.len(), 2);
-        assert!(taken.contains_key("surfnet"));
-        assert!(taken.contains_key("billing"));
+        assert!(taken.contains_key("processor-1"));
+        assert!(taken.contains_key("processor-2"));
+        assert!(taken.get("processor-1").unwrap().contains_key("surfnet"));
+        assert!(taken.get("processor-2").unwrap().contains_key("billing"));
 
         // After taking, attachments are gone
         assert!(manager.get_attachments(channel_id).is_none());
@@ -1041,22 +1162,26 @@ mod tests {
         // Add required attachment
         manager.store_attachment(
             channel_id,
+            "processor-1".to_string(),
             "surfnet".to_string(),
             serde_json::json!({"rpc": "http://localhost:8899"}),
         );
         assert!(manager.has_all_required_attachments(channel_id));
 
-        // Add extra attachment - should still be complete
+        // Add extra attachment from same actor - should still be complete
         manager.store_attachment(
             channel_id,
+            "processor-1".to_string(),
             "extra".to_string(),
             serde_json::json!({"foo": "bar"}),
         );
         assert!(manager.has_all_required_attachments(channel_id));
 
-        // Both attachments should be present
+        // One actor with two attachments
         let attachments = manager.get_attachments(channel_id);
         assert!(attachments.is_some());
-        assert_eq!(attachments.as_ref().unwrap().len(), 2);
+        let actors = attachments.as_ref().unwrap();
+        assert_eq!(actors.len(), 1); // One actor
+        assert_eq!(actors.get("processor-1").unwrap().len(), 2); // Two attachments for that actor
     }
 }

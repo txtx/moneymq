@@ -36,12 +36,9 @@ pub struct PaymentDetails {
 }
 
 /// Attachments containing processor-provided data
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct Attachments {
-    /// Processor-provided data (e.g., S3 credentials, fulfillment info)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub processor: Option<serde_json::Value>,
-}
+/// Nested map: actor_id -> (key -> data)
+/// e.g., { "my-processor": { "surfnet": {...} } }
+pub type Attachments = serde_json::Map<String, serde_json::Value>;
 
 /// JWT claims for a payment receipt
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,7 +61,7 @@ pub struct PaymentReceiptClaims {
 }
 
 fn is_attachments_empty(attachments: &Attachments) -> bool {
-    attachments.processor.is_none()
+    attachments.is_empty()
 }
 
 impl PaymentReceiptClaims {
@@ -108,7 +105,7 @@ impl PaymentReceiptClaims {
         Self {
             basket,
             payment,
-            attachments: Attachments::default(),
+            attachments: Attachments::new(),
             iat: now,
             exp,
             iss: issuer,
@@ -143,7 +140,7 @@ impl PaymentReceiptClaims {
         Self {
             basket,
             payment,
-            attachments: Attachments::default(),
+            attachments: Attachments::new(),
             iat: now,
             exp,
             iss: issuer,
@@ -151,9 +148,9 @@ impl PaymentReceiptClaims {
         }
     }
 
-    /// Add processor data to the attachments
-    pub fn with_processor_data(mut self, data: serde_json::Value) -> Self {
-        self.attachments.processor = Some(data);
+    /// Add attachments data (map of key -> data from AttachDataRequest)
+    pub fn with_attachments(mut self, data: Attachments) -> Self {
+        self.attachments = data;
         self
     }
 
@@ -487,7 +484,22 @@ mod tests {
     }
 
     #[test]
-    fn test_payment_receipt_with_processor_data() {
+    fn test_payment_receipt_with_attachments() {
+        // Create nested attachments: { "my-processor": { "surfnet": {...} } }
+        let mut inner_map = serde_json::Map::new();
+        inner_map.insert(
+            "surfnet".to_string(),
+            serde_json::json!({
+                "bucket": "uploads",
+                "key_prefix": "user/123"
+            }),
+        );
+        let mut attachments = Attachments::new();
+        attachments.insert(
+            "my-processor".to_string(),
+            serde_json::Value::Object(inner_map),
+        );
+
         let claims = PaymentReceiptClaims::new(
             "tx_456".to_string(),
             "payer".to_string(),
@@ -500,13 +512,11 @@ mod tests {
             "issuer".to_string(),
             defaults::JWT_EXPIRATION_HOURS,
         )
-        .with_processor_data(serde_json::json!({
-            "bucket": "uploads",
-            "key_prefix": "user/123"
-        }));
+        .with_attachments(attachments);
 
-        assert!(claims.attachments.processor.is_some());
-        let processor = claims.attachments.processor.unwrap();
-        assert_eq!(processor["bucket"], "uploads");
+        assert!(claims.attachments.contains_key("my-processor"));
+        let processor = claims.attachments.get("my-processor").unwrap();
+        assert!(processor.get("surfnet").is_some());
+        assert_eq!(processor["surfnet"]["bucket"], "uploads");
     }
 }

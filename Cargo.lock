@@ -928,7 +928,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115e54d64eb62cdebad391c19efc9dce4981c690c85a33a12199d99bb9546fee"
 dependencies = [
  "borsh-derive 0.10.4",
- "hashbrown 0.13.2",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -5273,7 +5273,7 @@ version = "0.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ff32365de1b6743cb203b710788263c44a03de03802daf96092f2da4fe6ba4d7"
 dependencies = [
- "proc-macro-crate 3.4.0",
+ "proc-macro-crate 1.3.1",
  "proc-macro2",
  "quote",
  "syn 2.0.108",
@@ -11416,7 +11416,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 [[package]]
 name = "surfpool-core"
 version = "1.0.0-rc1"
-source = "git+https://github.com/txtx/surfpool.git?branch=feat%2Fsnapshot-events#409652dde51d057dc3bc0460b4ddead4f1656d1d"
+source = "git+https://github.com/txtx/surfpool.git?branch=main#e0e756eeaacc4ed36f49f13fea0a453567711200"
 dependencies = [
  "agave-feature-set",
  "agave-geyser-plugin-interface",
@@ -11500,7 +11500,7 @@ dependencies = [
 [[package]]
 name = "surfpool-types"
 version = "1.0.0-rc1"
-source = "git+https://github.com/txtx/surfpool.git?branch=feat%2Fsnapshot-events#409652dde51d057dc3bc0460b4ddead4f1656d1d"
+source = "git+https://github.com/txtx/surfpool.git?branch=main#e0e756eeaacc4ed36f49f13fea0a453567711200"
 dependencies = [
  "anchor-lang-idl",
  "blake3",

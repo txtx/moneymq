@@ -283,7 +283,13 @@ pub async fn handler(
 
             // If no hooks are subscribed, automatically send transaction:completed
             // This allows checkout flows to complete without requiring a backend processor
-            if !channel_manager.has_hook_subscribers() {
+            let hook_subscriber_count = channel_manager.hook_subscriber_count();
+            info!(
+                tx_id = %tx_id,
+                hook_subscriber_count = %hook_subscriber_count,
+                "Checking for hook subscribers"
+            );
+            if hook_subscriber_count == 0 {
                 info!(
                     tx_id = %tx_id,
                     "No hook subscribers, auto-completing transaction"

@@ -27,6 +27,7 @@ use crate::{
 ///
 /// let config = ChannelConfig::new("https://api.example.com")
 ///     .with_secret("your-secret-key")
+///     .with_actor_id("my-processor")
 ///     .with_replay(10);
 ///
 /// let mut hook = PaymentHook::new("order-123", config);
@@ -39,6 +40,7 @@ use crate::{
 ///
 /// // Attach data with a key - server creates JWT and emits transaction:completed
 /// // The key identifies which hook attachment this fulfills
+/// // Attachments are stored as: attachments[actor_id][key] = data
 /// hook.attach("fulfillment", serde_json::json!({
 ///     "order_id": "order-123",
 ///     "status": "shipped"
@@ -198,6 +200,8 @@ impl PaymentHook {
     /// and emits a `transaction:completed` event to all listeners. Until then, it emits
     /// `transaction:attach` to acknowledge each attachment.
     ///
+    /// Attachments are stored as: attachments[actor_id][key] = data
+    ///
     /// # Arguments
     /// * `key` - The attachment key (e.g., "surfnet", "billing")
     /// * `data` - The data payload to attach
@@ -212,12 +216,17 @@ impl PaymentHook {
             PaymentStreamError::Authentication("Secret key required to attach data".to_string())
         })?;
 
+        let actor_id = self.config.actor_id.as_ref().ok_or_else(|| {
+            PaymentStreamError::Authentication("Actor ID required to attach data".to_string())
+        })?;
+
         let url = self.build_attachments_url();
         let key = key.into();
-        debug!(channel_id = %self.channel_id, url = %url, key = %key, "Attaching data to transaction");
+        debug!(channel_id = %self.channel_id, url = %url, actor_id = %actor_id, key = %key, "Attaching data to transaction");
 
-        // Construct the request body with key and data
+        // Construct the request body with actor_id, key and data
         let request_body = serde_json::json!({
+            "actor_id": actor_id,
             "key": key,
             "data": serde_json::to_value(&data).unwrap_or(serde_json::Value::Null)
         });
@@ -247,6 +256,7 @@ impl PaymentHook {
             channel_id = %self.channel_id,
             event_id = %event.id(),
             event_type = %event.event_type(),
+            actor_id = %actor_id,
             key = %key,
             "Data attached successfully"
         );

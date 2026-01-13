@@ -34,8 +34,8 @@ schemars = { version = "1.1", features = ["indexmap2"] }
 serde = "1.0"
 serde_json = "1.0"
 serde_yml = "0.0.12"
-surfpool-core = { git = "https://github.com/txtx/surfpool.git", branch = "feat/snapshot-events", default-features = false }
-surfpool-types = { git = "https://github.com/txtx/surfpool.git", branch = "feat/snapshot-events", default-features = false }
+surfpool-core = { git = "https://github.com/txtx/surfpool.git", branch = "main", default-features = false }
+surfpool-types = { git = "https://github.com/txtx/surfpool.git", branch = "main", default-features = false }
 thiserror = "2.0"
 tokio = "1"
 url = { version = "2.5", features = ["serde"] }

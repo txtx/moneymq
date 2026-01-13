@@ -156,6 +156,13 @@ impl PaymentStreamConfig {
         self.base.stream_id = Some(stream_id.into());
         self
     }
+
+    /// Set the actor ID for attachments
+    /// This becomes the outer key in attachments: attachments[actor_id][key] = data
+    pub fn with_actor_id(mut self, actor_id: impl Into<String>) -> Self {
+        self.base.actor_id = Some(actor_id.into());
+        self
+    }
 }
 
 /// Payment stream - listens for incoming transactions and spawns handlers

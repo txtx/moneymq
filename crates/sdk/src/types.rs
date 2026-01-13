@@ -91,6 +91,10 @@ pub struct ChannelConfig {
     /// Secret key for authentication (required for actors and processors)
     pub secret: Option<String>,
 
+    /// Actor ID (identifies this hook/processor in attachments)
+    /// Used as the outer key in attachments: attachments[actor_id][key] = data
+    pub actor_id: Option<String>,
+
     /// Whether to automatically reconnect on connection loss
     pub auto_reconnect: bool,
 
@@ -112,6 +116,7 @@ impl Default for ChannelConfig {
         Self {
             endpoint: "http://localhost:3000".to_string(),
             secret: None,
+            actor_id: None,
             auto_reconnect: true,
             reconnect_delay_ms: 1000,
             max_reconnect_attempts: 0, // infinite
@@ -133,6 +138,13 @@ impl ChannelConfig {
     /// Set the secret key for authentication
     pub fn with_secret(mut self, secret: impl Into<String>) -> Self {
         self.secret = Some(secret.into());
+        self
+    }
+
+    /// Set the actor ID for attachments
+    /// This becomes the outer key in attachments: attachments[actor_id][key] = data
+    pub fn with_actor_id(mut self, actor_id: impl Into<String>) -> Self {
+        self.actor_id = Some(actor_id.into());
         self
     }
 
