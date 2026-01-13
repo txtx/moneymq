@@ -173,10 +173,16 @@ impl RunCommand {
                 .map_err(RunCommandError::StartPaymentApi)?;
 
         // Setup local validator and create payment API state
-        let (payment_api_url, facilitator_pubkey, payment_api_state) =
+        let (payment_api_url, facilitator_pubkey, mut payment_api_state) =
             setup_payment_api_networks(facilitator_config, &validators_config, networks_config)
                 .await
                 .map_err(RunCommandError::StartPaymentApi)?;
+
+        // Set the payout recipient from networks config (first network's payment recipient)
+        if let Some((_, network_config)) = networks_config.configs.first() {
+            let recipient_address = network_config.recipient().address().to_string();
+            payment_api_state = payment_api_state.with_payout_recipient(recipient_address);
+        }
 
         println!();
         println!(
@@ -243,13 +249,13 @@ async fn setup_payment_api_networks(
                 // If the payer pubkey is set, we can assume it came from the env file
                 // If not set, generate a deterministic one for sandbox
                 if surfnet_config.payer_pubkey.is_none() {
+                    use moneymq_core::api::SANDBOX_FACILITATOR_SEED;
                     use sha2::{Digest, Sha256};
                     use solana_keypair::Keypair;
 
-                    // Generate deterministic keypair from a fixed seed for sandbox
-                    let seed_phrase = "moneymq-sandbox-payment-api-fee-payer-v1";
+                    // Generate deterministic keypair from the sandbox facilitator seed
                     let mut hasher = Sha256::new();
-                    hasher.update(seed_phrase.as_bytes());
+                    hasher.update(SANDBOX_FACILITATOR_SEED.as_bytes());
                     let seed = hasher.finalize();
 
                     let seed_array: [u8; 32] = seed[..32].try_into().unwrap();
@@ -302,7 +308,8 @@ async fn setup_payment_api_networks(
         true,
     )
     .await
-    .map_err(|e| format!("Failed to create payment API state: {e}"))?;
+    .map_err(|e| format!("Failed to create payment API state: {e}"))?
+    .with_facilitator_address(facilitator_pubkey.clone());
 
     Ok((url, facilitator_pubkey, payment_api_state))
 }

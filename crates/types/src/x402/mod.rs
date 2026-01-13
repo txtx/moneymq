@@ -12,7 +12,7 @@ mod currency;
 mod recipient;
 pub mod transactions;
 
-pub use currency::{Currency, SolanaCurrency};
+pub use currency::{Currency, SPL_TOKEN_PROGRAM_ID, SolanaCurrency, USDC_MINT};
 pub use recipient::{
     LocalManagedRecipient, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
 };

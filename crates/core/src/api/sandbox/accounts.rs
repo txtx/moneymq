@@ -1,21 +1,60 @@
 //! Sandbox accounts endpoint
 
 use axum::{Extension, Json};
-use moneymq_types::x402::{
-    LocalManagedRecipient, MixedAddress, MoneyMqManagedRecipient, Recipient, RemoteManagedRecipient,
+use moneymq_types::{
+    AccountRole, Keychain,
+    x402::{
+        LocalManagedRecipient, MixedAddress, MoneyMqManagedRecipient, Recipient,
+        RemoteManagedRecipient,
+    },
 };
 use serde_json::{Value, json};
+use solana_keypair::Signer;
 use solana_pubkey::Pubkey;
 
-use crate::api::catalog::CatalogState;
+use crate::api::{payment::PaymentApiConfig, sandbox::NetworksConfig};
 
-/// GET /sandbox/accounts - List local network accounts
+/// GET /sandbox/accounts - List local network accounts and operators
 pub async fn list_accounts(
-    Extension(state): Extension<CatalogState>,
+    Extension(payment_config): Extension<PaymentApiConfig>,
+    Extension(networks_config): Extension<NetworksConfig>,
 ) -> Result<Json<Value>, Json<Value>> {
-    let networks_config = &state.networks_config;
+    let accounts_config = &payment_config.accounts;
 
     let mut res = json!({});
+
+    // Add operator accounts from AccountsConfig
+    let operators: Vec<Value> = accounts_config
+        .iter()
+        .filter_map(|(id, account)| {
+            if let AccountRole::Operator(op) = &account.role {
+                let secret = match &op.keychain {
+                    Keychain::Base58(base58) => Some(base58.secret.clone()),
+                    Keychain::Turnkey(_) => None,
+                };
+
+                // Derive address from secret key if available
+                let address = secret.as_ref().map(|s| {
+                    let keypair = solana_keypair::Keypair::from_base58_string(s);
+                    keypair.pubkey().to_string()
+                });
+
+                Some(json!({
+                    "id": id,
+                    "name": account.name,
+                    "address": address,
+                    "secretKey": secret,
+                    "role": "operator",
+                }))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    res["operators"] = json!(operators);
+
+    // Add network-specific user accounts (legacy format for backwards compatibility)
     for (network_name, config) in &networks_config.configs {
         let network = networks_config
             .get_network_for_name(network_name)

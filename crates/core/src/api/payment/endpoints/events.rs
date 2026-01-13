@@ -10,9 +10,11 @@ use std::sync::Arc;
 
 use axum::{Extension, extract::Query, response::IntoResponse};
 
-use crate::api::payment::PaymentApiConfig;
-use crate::events::{
-    EventStreamContext, EventStreamQuery, StatefulEventBroadcaster, create_stateful_sse_stream,
+use crate::{
+    api::payment::PaymentApiConfig,
+    events::{
+        EventStreamContext, EventStreamQuery, StatefulEventBroadcaster, create_stateful_sse_stream,
+    },
 };
 
 /// GET /events - SSE endpoint for live payment events

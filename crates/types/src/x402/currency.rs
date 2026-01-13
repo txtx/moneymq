@@ -2,6 +2,14 @@ use solana_pubkey::Pubkey;
 
 use crate::x402::{MixedAddress, Network};
 
+/// USDC mint address on Solana mainnet (also used by Surfnet for consistency)
+pub const USDC_MINT: Pubkey =
+    Pubkey::from_str_const("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+
+/// SPL Token program ID
+pub const SPL_TOKEN_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+
 /// Represents a currency used for billing across different blockchains
 #[derive(Debug, Clone)]
 pub enum Currency {
@@ -56,8 +64,8 @@ impl SolanaCurrency {
         // TODO Placeholder implementation - in real code, this would look up the mint and token program
         Ok(SolanaCurrency {
             symbol: symbol.to_string(),
-            mint: Pubkey::from_str_const("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"),
-            token_program: spl_token_interface::id(),
+            mint: USDC_MINT,
+            token_program: SPL_TOKEN_PROGRAM_ID,
             decimals: 6,
         })
     }

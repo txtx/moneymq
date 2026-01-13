@@ -6,24 +6,173 @@
 //! - Sandbox-specific API endpoints
 
 use indexmap::IndexMap;
-use moneymq_types::x402::{
-    Currency, MoneyMqNetwork, Network, Recipient,
-    config::facilitator::{ValidatorNetworkConfig, ValidatorsConfig},
+use moneymq_types::{
+    AccountConfig, AccountRole, AccountsConfig, Base58Keychain, Keychain, OperatorRole,
+    x402::{
+        Currency, LocalManagedRecipient, MoneyMqManagedRecipient, MoneyMqNetwork, Network,
+        Recipient,
+        config::facilitator::{ValidatorNetworkConfig, ValidatorsConfig},
+    },
 };
+use sha2::{Digest, Sha256};
 use solana_client::rpc_client::RpcClient;
+use solana_keypair::Keypair;
+use solana_pubkey::Pubkey;
 use tracing::{debug, info};
 use url::Url;
 
-use crate::validator::surfnet_utils::{
-    SetAccountRequest, SetTokenAccountRequest, surfnet_set_account, surfnet_set_token_account,
-};
+/// Seed phrase for generating the sandbox facilitator keypair
+pub const SANDBOX_FACILITATOR_SEED: &str = "moneymq-sandbox-payment-api-fee-payer-v1";
+
+use crate::validator::surfnet_utils::{SetTokenAccountRequest, surfnet_set_token_account};
 
 mod accounts;
-pub mod config;
 pub use accounts::list_accounts;
 
+/// Generate sandbox operator accounts from the user accounts in networks config
+///
+/// Creates:
+/// - 1 facilitator account using a deterministic keypair from SANDBOX_FACILITATOR_SEED
+/// - Up to 5 operator accounts from the first 5 user accounts in the networks config
+///
+/// Each operator account uses the user account's keypair for signing transactions.
+pub fn generate_sandbox_accounts(networks_config: &NetworksConfig) -> AccountsConfig {
+    let mut accounts = IndexMap::new();
+
+    // Generate the facilitator account using deterministic seed
+    let mut hasher = Sha256::new();
+    hasher.update(SANDBOX_FACILITATOR_SEED.as_bytes());
+    let seed = hasher.finalize();
+    let seed_array: [u8; 32] = seed[..32].try_into().unwrap();
+    let facilitator_keypair = Keypair::new_from_array(seed_array);
+    let facilitator_secret = facilitator_keypair.to_base58_string();
+
+    let facilitator_account = AccountConfig {
+        id: "facilitator".to_string(),
+        name: "Facilitator (fee payer)".to_string(),
+        role: AccountRole::Operator(OperatorRole {
+            keychain: Keychain::Base58(Base58Keychain {
+                secret: facilitator_secret,
+            }),
+        }),
+        currency_mapping: IndexMap::new(),
+    };
+    accounts.insert("facilitator".to_string(), facilitator_account);
+
+    // Get user accounts from the first network config (typically solana surfnet)
+    for (_, config) in &networks_config.configs {
+        let user_accounts = config.user_accounts();
+
+        // Create operator accounts from the first 5 user accounts
+        for (i, recipient) in user_accounts.iter().take(5).enumerate() {
+            if let Recipient::MoneyMqManaged(MoneyMqManagedRecipient::Local(
+                LocalManagedRecipient {
+                    address: _,
+                    keypair_bytes,
+                    label,
+                },
+            )) = recipient
+            {
+                let id = label.clone().unwrap_or_else(|| format!("operator_{}", i));
+                let name = label
+                    .as_ref()
+                    .map(|l| format!("{} (operator)", l))
+                    .unwrap_or_else(|| format!("Operator {}", i));
+
+                // Encode the keypair bytes as base58
+                let secret = bs58::encode(keypair_bytes).into_string();
+
+                let account = AccountConfig {
+                    id: id.clone(),
+                    name,
+                    role: AccountRole::Operator(OperatorRole {
+                        keychain: Keychain::Base58(Base58Keychain { secret }),
+                    }),
+                    currency_mapping: IndexMap::new(),
+                };
+
+                accounts.insert(id, account);
+            }
+        }
+
+        // Only process the first network config
+        break;
+    }
+
+    accounts
+}
+
 /// Initial USDC token amount for user accounts in local surfnet (2000 USDC with 6 decimals)
-const INITIAL_USER_USDC_AMOUNT: u64 = 2_000_000_000;
+pub const INITIAL_USER_USDC_AMOUNT: u64 = 2_000_000_000;
+
+/// Token configuration for funding sandbox accounts
+#[derive(Debug, Clone)]
+pub struct SandboxTokenConfig {
+    pub mint: Pubkey,
+    pub token_program: Pubkey,
+}
+
+/// Fund a single sandbox account with tokens
+///
+/// Creates/updates token accounts for each token config with the specified amount.
+/// Note: SOL is not funded as sandbox accounts use fee payers for gas.
+///
+/// # Arguments
+/// * `rpc_client` - RPC client connected to the Surfnet validator
+/// * `address` - The account address to fund
+/// * `tokens` - Token configurations (mint + program)
+/// * `token_amount` - Amount of tokens to fund (use 0 for payment recipient accounts)
+pub fn fund_sandbox_account(
+    rpc_client: &RpcClient,
+    address: Pubkey,
+    tokens: &[SandboxTokenConfig],
+    token_amount: u64,
+) -> Result<(), String> {
+    for token in tokens {
+        debug!(
+            "Setting up token account for address {} with mint {}",
+            address, token.mint
+        );
+        surfnet_set_token_account(
+            rpc_client,
+            SetTokenAccountRequest::new(address, token.mint, token.token_program)
+                .amount(token_amount),
+        )?;
+    }
+
+    Ok(())
+}
+
+/// Fund multiple sandbox accounts with tokens
+///
+/// This is a convenience function that calls `fund_sandbox_account` for each address.
+/// All accounts receive the same token amount (use `INITIAL_USER_USDC_AMOUNT` for user accounts).
+///
+/// # Arguments
+/// * `rpc_url` - URL of the Surfnet validator RPC
+/// * `addresses` - List of account addresses to fund
+/// * `tokens` - Token configurations (mint + program)
+/// * `token_amount` - Amount of tokens to fund each account
+pub fn fund_sandbox_accounts(
+    rpc_url: &str,
+    addresses: &[Pubkey],
+    tokens: &[SandboxTokenConfig],
+    token_amount: u64,
+) -> Result<(), String> {
+    let rpc_client = RpcClient::new(rpc_url);
+
+    info!(
+        "Funding {} sandbox accounts with {} tokens each",
+        addresses.len(),
+        token_amount
+    );
+
+    for address in addresses {
+        fund_sandbox_account(&rpc_client, *address, tokens, token_amount)?;
+    }
+
+    Ok(())
+}
 
 /// Manages network configurations across multiple networks
 #[derive(Debug, Clone)]
@@ -151,7 +300,24 @@ impl NetworksConfig {
                         surfnet_cfg.user_accounts.len()
                     );
 
-                    let user_addresses = surfnet_cfg
+                    // Build token configs from currencies
+                    let tokens: Vec<SandboxTokenConfig> = network_config
+                        .currencies()
+                        .iter()
+                        .map(|currency| {
+                            let Currency::Solana(solana_currency) = currency;
+                            SandboxTokenConfig {
+                                mint: solana_currency.mint,
+                                token_program: solana_currency.token_program,
+                            }
+                        })
+                        .collect();
+
+                    // Fund payment recipient account (with 0 tokens - it just receives)
+                    fund_sandbox_account(&rpc_client, *pubkey, &tokens, 0)?;
+
+                    // Fund user accounts with INITIAL_USER_USDC_AMOUNT
+                    let user_addresses: Vec<Pubkey> = surfnet_cfg
                         .user_accounts
                         .iter()
                         .map(|recipient| {
@@ -160,40 +326,15 @@ impl NetworksConfig {
                                 .pubkey()
                                 .expect("Expected Solana address")
                         })
-                        .collect::<Vec<_>>();
+                        .collect();
 
-                    let all_addresses = std::iter::once(pubkey).chain(user_addresses.iter());
-
-                    for address in all_addresses {
-                        let is_pay_to = address.eq(pubkey);
-                        let token_amount = if is_pay_to {
-                            0
-                        } else {
-                            INITIAL_USER_USDC_AMOUNT
-                        };
-
-                        surfnet_set_account(
+                    for address in &user_addresses {
+                        fund_sandbox_account(
                             &rpc_client,
-                            SetAccountRequest::new(*address).lamports(1_000_000_000),
+                            *address,
+                            &tokens,
+                            INITIAL_USER_USDC_AMOUNT,
                         )?;
-                        for currency in network_config.currencies() {
-                            #[allow(irrefutable_let_patterns)]
-                            if let Currency::Solana(solana_currency) = currency {
-                                debug!(
-                                    "Setting up token account for address {} with mint {}",
-                                    address, solana_currency.mint
-                                );
-                                surfnet_set_token_account(
-                                    &rpc_client,
-                                    SetTokenAccountRequest::new(
-                                        *address,
-                                        solana_currency.mint,
-                                        solana_currency.token_program,
-                                    )
-                                    .amount(token_amount),
-                                )?;
-                            }
-                        }
                     }
                 }
                 NetworkConfig::SolanaMainnet(_) => {

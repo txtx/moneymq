@@ -8,7 +8,9 @@ use axum::{Extension, Router, extract::Query, routing::get};
 use catalog::CatalogState;
 use payment::PaymentApiConfig;
 // Re-export commonly used types
-pub use sandbox::{NetworksConfig, NetworksConfigError};
+pub use sandbox::{
+    NetworksConfig, NetworksConfigError, SANDBOX_FACILITATOR_SEED, generate_sandbox_accounts,
+};
 use tower_http::cors::{Any, CorsLayer};
 
 use crate::events::{EventStreamQuery, StatefulEventBroadcaster, create_stateful_sse_stream};
@@ -54,11 +56,11 @@ pub fn create_combined_router(
     // Create the catalog router (uses Extension layer internally)
     let catalog_router = catalog::create_router(catalog_state.clone());
 
-    // Create root-level routes that need both CatalogState and PaymentApiConfig
+    // Create root-level routes that need PaymentApiConfig and NetworksConfig
+    let networks_config = catalog_state.networks_config.clone();
     let root_routes: Router<()> = Router::new()
-        .route("/config", get(sandbox::config::get_config))
         .route("/sandbox/accounts", get(sandbox::list_accounts))
-        .layer(Extension(catalog_state))
+        .layer(Extension(networks_config))
         .layer(Extension(payment_api_config.clone()));
 
     // Start with root-level routes (health, fallback) and merge stateful routes

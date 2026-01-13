@@ -3,10 +3,17 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value as JsonValue;
 
+pub mod accounts;
 pub mod iac;
 pub mod stripe;
 pub mod x402;
 
+// Re-export account types
+pub use accounts::{
+    AccountConfig, AccountRole, AccountsConfig, AccountsConfigExt, Base58Keychain, FanoutRecipient,
+    FanoutRole, Keychain, OperatedRole, OperatorRole, PayoutRole, TurnkeyKeychain,
+    load_accounts_from_dir, to_snake_case,
+};
 // Re-export commonly used IAC types at crate root for convenience
 pub use iac::{
     // Schema types (for JSON/API)

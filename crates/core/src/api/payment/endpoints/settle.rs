@@ -240,7 +240,12 @@ pub async fn handler(
                 transaction_signature: signature.clone(),
                 product_id: product_id.clone(),
             });
-            channel_manager.publish(tx_id, settled_event);
+            channel_manager.publish(tx_id, settled_event.clone());
+
+            // Also publish to the recipient's channel so payout dashboards can track balance updates
+            if let Some(recipient_address) = &state.payout_recipient_address {
+                channel_manager.publish(recipient_address, settled_event);
+            }
         } else {
             let channel_event = ChannelEvent::payment_failed(PaymentFailedData {
                 payer: Some(response.payer.to_string()),

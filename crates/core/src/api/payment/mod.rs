@@ -71,6 +71,16 @@ pub struct PaymentApiConfig {
     pub channel_manager: Option<Arc<endpoints::channels::ChannelManager>>,
     /// JWT key pair for signing payment receipts (ES256)
     pub jwt_key_pair: Option<Arc<endpoints::jwt::JwtKeyPair>>,
+    /// Payout recipient address (where payments are sent)
+    pub payout_recipient_address: Option<String>,
+    /// Facilitator address (fee payer for transactions)
+    pub facilitator_address: Option<String>,
+    /// Stack/merchant name for branding
+    pub stack_name: Option<String>,
+    /// Stack/merchant image URL for branding
+    pub stack_image_url: Option<String>,
+    /// Sandbox operator accounts
+    pub accounts: Arc<moneymq_types::AccountsConfig>,
 }
 
 impl PaymentApiConfig {
@@ -100,6 +110,11 @@ impl PaymentApiConfig {
             event_sender: None,
             channel_manager: None,
             jwt_key_pair: None,
+            payout_recipient_address: None,
+            facilitator_address: None,
+            stack_name: None,
+            stack_image_url: None,
+            accounts: Arc::new(indexmap::IndexMap::new()),
         }
     }
 
@@ -123,6 +138,11 @@ impl PaymentApiConfig {
             event_sender: None,
             channel_manager: None,
             jwt_key_pair: None,
+            payout_recipient_address: None,
+            facilitator_address: None,
+            stack_name: None,
+            stack_image_url: None,
+            accounts: Arc::new(indexmap::IndexMap::new()),
         }
     }
 
@@ -145,6 +165,31 @@ impl PaymentApiConfig {
     pub fn with_jwt_secret(mut self, secret: String) -> Self {
         let key_pair = endpoints::jwt::JwtKeyPair::from_secret(&secret);
         self.jwt_key_pair = Some(Arc::new(key_pair));
+        self
+    }
+
+    /// Set the payout recipient address
+    pub fn with_payout_recipient(mut self, address: String) -> Self {
+        self.payout_recipient_address = Some(address);
+        self
+    }
+
+    /// Set the facilitator address (fee payer)
+    pub fn with_facilitator_address(mut self, address: String) -> Self {
+        self.facilitator_address = Some(address);
+        self
+    }
+
+    /// Set the stack/merchant branding
+    pub fn with_stack_branding(mut self, name: Option<String>, image_url: Option<String>) -> Self {
+        self.stack_name = name;
+        self.stack_image_url = image_url;
+        self
+    }
+
+    /// Set the sandbox accounts
+    pub fn with_accounts(mut self, accounts: moneymq_types::AccountsConfig) -> Self {
+        self.accounts = Arc::new(accounts);
         self
     }
 }
