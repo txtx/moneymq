@@ -148,20 +148,31 @@ impl DbManager {
         #[cfg(feature = "postgres")]
         let pool = Pool::builder().build(manager).unwrap();
 
-        let mut pooled_connection = pool
-            .get()
-            .map_err(|e| DbError::ConnectionError(e.to_string()))?;
+        // TODO: Migrate embedded migrations to be Postgres-compatible (currently SQLite syntax)
+        // For now, skip auto-migrations on Postgres - tables must be created manually
+        #[cfg(feature = "sqlite")]
+        {
+            let mut pooled_connection = pool
+                .get()
+                .map_err(|e| DbError::ConnectionError(e.to_string()))?;
 
-        debug!("Running database migrations...");
-        match run_migrations(&mut pooled_connection) {
-            Ok(_) => debug!("Database migrations completed successfully"),
-            Err(e) => {
-                tracing::error!(
-                    "Database migrations failed: {}. Consider deleting payments.sqlite and restarting.",
-                    e
-                );
+            debug!("Running database migrations...");
+            match run_migrations(&mut pooled_connection) {
+                Ok(_) => debug!("Database migrations completed successfully"),
+                Err(e) => {
+                    tracing::error!(
+                        "Database migrations failed: {}. Consider deleting payments.sqlite and restarting.",
+                        e
+                    );
+                }
             }
         }
+
+        #[cfg(feature = "postgres")]
+        {
+            debug!("Skipping auto-migrations for Postgres (tables must be created manually)");
+        }
+
         Ok(Self {
             control_db_conn: pool.clone(),
             payment_db_conn: pool,
